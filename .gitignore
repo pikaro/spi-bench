@@ -1,0 +1,6 @@
+.pio
+.cache
+compiledb/
+sdkconfig.*
+!sdkconfig.defaults
+!sdkconfig.*.defaults

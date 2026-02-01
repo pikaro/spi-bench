@@ -1,0 +1,11 @@
+#!/bin/bash
+
+set -eEuo pipefail
+
+TMP="$(mktemp)"
+# trap 'rm -f "${TMP}"' EXIT
+
+eval "$(bin/select_port.py)"
+
+bin/esptool read-flash 0x8000 0xc00 "${TMP}"
+bin/esp-component "partition_table/gen_esp32part.py" "${TMP}"

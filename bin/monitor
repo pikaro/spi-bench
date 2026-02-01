@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+
+set -eEuo pipefail
+
+# shellcheck source=/dev/null
+. ~/.platformio/penv/bin/activate
+
+eval "$("${BASH_SOURCE%/*}/select_port.py")"
+pio device monitor -b 921600 --raw --port "$UPLOAD_PORT"
+
+# --filter "exclude timestamp" --filter "exclude level" --filter "exclude source" --filter "exclude line"

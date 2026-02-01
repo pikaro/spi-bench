@@ -1,0 +1,7 @@
+#!/bin/bash
+
+PACKAGE="$1"
+TOOL="$2"
+shift 2
+
+pio pkg exec -p "${PACKAGE}" -- "${TOOL}" "$@"

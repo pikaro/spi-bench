@@ -1,5 +1,23 @@
 ---
 If:
+  PathMatch: [^src/master/.*]
+CompileFlags:
+  CompilationDatabase: compiledb/master
+  BuiltinHeaders: QueryDriver
+---
+If:
+  PathMatch: [^src/slave/.*]
+CompileFlags:
+  CompilationDatabase: compiledb/slave1
+  BuiltinHeaders: QueryDriver
+---
+If:
+  PathMatch: [^src/listener/.*]
+CompileFlags:
+  CompilationDatabase: compiledb/listener
+  BuiltinHeaders: QueryDriver
+---
+If:
   PathExclude: [.*\.c$, .*\.h$]
 CompileFlags:
   Add:

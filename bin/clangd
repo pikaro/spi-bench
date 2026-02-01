@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+
+set -- "${HOME}/.local/bin/clangd" \
+    --query-driver="${HOME}/.platformio/packages/toolchain-*/bin/*-gcc,${HOME}/.platformio/packages/toolchain-*/bin/*-g++" \
+    --log=verbose \
+    --background-index \
+    --clang-tidy \
+    --header-insertion=iwyu \
+    --header-insertion-decorators \
+    --pch-storage=memory \
+    "$@"
+
+if [ "${DEBUG:-}" = "1" ]; then
+    env &>/tmp/clangd_env.log
+    echo "$@" >>/tmp/clangd_call.log
+fi
+
+exec "$@"

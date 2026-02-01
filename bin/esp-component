@@ -1,0 +1,8 @@
+#!/bin/bash
+
+COMPONENT="$1"
+shift
+
+# shellcheck disable=SC1090
+. ~/.platformio/penv/bin/activate
+python "${HOME}/.platformio/packages/framework-espidf/components/${COMPONENT}" "$@"

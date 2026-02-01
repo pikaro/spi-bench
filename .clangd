@@ -1,0 +1,81 @@
+---
+If:
+  PathExclude: [.*\.c$, .*\.h$]
+CompileFlags:
+  Add:
+    - -Wall
+    - -Wcast-align
+    - -Wcomma
+    - -Wconversion
+    - -Wfloat-conversion
+    - -Wdouble-promotion
+    - -Wextra
+    - -Wextra-semi
+    - -Wfloat-conversion
+    - -Wmissing-field-initializers
+    - -Wcast-qual
+    - -Woverloaded-virtual
+    - -Wformat=2
+    - -Wpedantic
+    - -Wshadow
+    - -Wshadow-field
+    - -Wshadow-uncaptured-local
+    - -Wswitch-enum
+    - -Wnull-dereference
+    - -std=gnu++23
+    - -DCLANGD_ONLY=1
+  Remove:
+    - -fno-tree-switch-conversion
+    - -mtext-section-literals
+    - -fstrict-volatile-bitfields
+    - -mdisable-hardware-atomics
+    - -fno-shrink-wrap
+Diagnostics:
+  Suppress:
+    - "constructor_redeclared"
+  ClangTidy:
+    Add:
+      - clang-diagnostic-*
+      - clang-analyzer-*
+      - modernize-*
+      - performance-*
+      - readability-*
+      - bugprone-*
+      - misc-definitions-in-headers
+    Remove:
+      - cppcoreguidelines-avoid-do-while
+      - readability-magic-numbers
+      - modernize-use-trailing-return-type
+      - bugprone-pointer-arithmetic-on-polymorphic-object
+      - bugprone-easily-swappable-parameters
+      - readability-use-std-min-max
+    CheckOptions:
+      readability-function-cognitive-complexity.IgnoreMacros: true
+Completion:
+  ArgumentLists: "None"
+---
+If:
+  PathMatch: [.*\.c$, .*\.h$]
+  PathExclude: [.*\.pb\.c$, .*\.pb\.h$]
+CompileFlags:
+  Remove:
+    - -fno-tree-switch-conversion
+    - -mtext-section-literals
+    - -fstrict-volatile-bitfields
+    - -mdisable-hardware-atomics
+    - -fno-shrink-wrap
+---
+If:
+  PathMatch: [.*\.pb\.c$, .*\.pb\.h$]
+CompileFlags:
+  Remove:
+    - -fno-tree-switch-conversion
+    - -mtext-section-literals
+    - -fstrict-volatile-bitfields
+    - -mdisable-hardware-atomics
+    - -fno-shrink-wrap
+Diagnostics:
+  Suppress: [".*"]
+  ClangTidy:
+    Remove:
+      - "*"

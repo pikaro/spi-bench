@@ -2,10 +2,17 @@
 
 set -eEuo pipefail
 
-# shellcheck source=/dev/null
-. ~/.platformio/penv/bin/activate
+if [ -z "${1:-}" ]; then
+    echo "Usage: $0 <env>"
+    exit 1
+fi
 
-eval "$("${BASH_SOURCE%/*}/select_port.py")"
-pio device monitor -b 921600 --raw --port "$UPLOAD_PORT"
+ENV="$1"
+
+GIT_ROOT="$(git rev-parse --show-toplevel)"
+. "${GIT_ROOT}/.venv/bin/activate"
+
+eval "$("${BASH_SOURCE%/*}/select_port.py" "$ENV")"
+pio device monitor -b 115200 --raw --port "$UPLOAD_PORT"
 
 # --filter "exclude timestamp" --filter "exclude level" --filter "exclude source" --filter "exclude line"

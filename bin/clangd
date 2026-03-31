@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
 
+while read -r dirname; do
+    export PATH="${dirname}:$PATH"
+done < <(
+    ls -d "${HOME}/.platformio/packages/toolchain-"*"/bin" \
+        "${HOME}/.platformio/packages/toolchain-"*"/bin"
+)
+
 set -- "${HOME}/.local/bin/clangd" \
     --query-driver="${HOME}/.platformio/packages/toolchain-*/bin/*-gcc,${HOME}/.platformio/packages/toolchain-*/bin/*-g++" \
-    --log=verbose \
+    --log=error \
     --background-index \
     --clang-tidy \
     --header-insertion=iwyu \

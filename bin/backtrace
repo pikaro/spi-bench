@@ -1,0 +1,69 @@
+#!/bin/bash
+
+FULL=0
+if [ "$1" = "-f" ]; then
+    FULL=1
+fi
+
+PIOENV="${1}"
+shift
+
+color() {
+    local num
+    case $1 in
+    black) num=30 ;;
+    red) num=31 ;;
+    green) num=32 ;;
+    yellow) num=33 ;;
+    blue) num=34 ;;
+    magenta) num=35 ;;
+    cyan) num=36 ;;
+    white) num=37 ;;
+    reset) num=0 ;;
+    esac
+    local code="\e[${num}m"
+    shift
+    printf "${code}$*\e[0m"
+}
+
+LINE_COUNT="$(echo "$@" | wc -w)"
+TRACE="$(${HOME}/.platformio/packages/toolchain-xtensa-esp-elf/bin/xtensa-esp32s3-elf-addr2line \
+    -fCe ".pio/build/${PIOENV}/firmware.elf" \
+    "$@")"
+
+if [ $FULL -ne 1 ]; then
+    _DIR_REPR=(
+        "[xten]" "${HOME}/.platformio/packages/toolchain-xtensa-esp-elf/xtensa-esp-elf"
+        "[rtos]" "${HOME}/.platformio/packages/framework-espidf/components/freertos/FreeRTOS-Kernel"
+        "[ldep]" "${HOME}/.platformio/libdeps/arduino_nano_esp32"
+        "." "${PWD}"
+    )
+    _DIR_REPR_ARGS=()
+    for ((i = 0; i < ${#_DIR_REPR[@]}; i += 2)); do
+        _DIR_REPR_ARGS+=(-e "s!${_DIR_REPR[i + 1]}!${_DIR_REPR[i]}!")
+    done
+else
+    _DIR_REPR_ARGS=(
+        -e "s!${PWD}/!!"
+    )
+fi
+
+_repr_loc() {
+    local PATH_ LINE
+    PATH_="$(echo "$1" | cut -d: -f1)"
+    LINE="$(echo "$1" | cut -d: -f2)"
+    echo "$(color cyan "$PATH_"):$(color yellow "$LINE")"
+}
+
+_repr_addr() {
+    local ADDR="$1"
+    echo "${ADDR}" |
+        bat --color=always --language='C++' --plain --paging=never
+}
+
+echo
+for ((i = 1; i <= LINE_COUNT; i++)); do
+    ADDR=$(echo "$TRACE" | sed -n "$((i * 2 - 1))p")
+    LOCATION=$(echo "$TRACE" | sed -n "$((i * 2))p" | sed "${_DIR_REPR_ARGS[@]}" -e 's/(discriminator \([0-9]\+\))/#\1/')
+    echo -e "[$(color white $i)] $(_repr_loc "$LOCATION")\n\n    $(_repr_addr "${ADDR}")\n"
+done

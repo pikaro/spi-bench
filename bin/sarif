@@ -1,0 +1,555 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+
+# -----------------------------
+# Minimal-but-safe SARIF models
+# -----------------------------
+# These models intentionally cover a practical subset of SARIF 2.1.0 while
+# still forbidding accidental type mismatches inside the fields we do model.
+# Unknown fields are preserved to avoid rejecting valid SARIF files that use
+# portions of the schema we do not currently render.
+
+
+class SarifBaseModel(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+
+class Message(SarifBaseModel):
+    text: Optional[str] = None
+    markdown: Optional[str] = None
+    id: Optional[str] = None
+
+    def render(self) -> str:
+        return self.text or self.markdown or self.id or "<no message>"
+
+
+class ArtifactLocation(SarifBaseModel):
+    uri: Optional[str] = None
+    uriBaseId: Optional[str] = None
+    index: Optional[int] = None
+
+
+class Snippet(SarifBaseModel):
+    text: Optional[str] = None
+
+
+class Region(SarifBaseModel):
+    startLine: Optional[int] = None
+    startColumn: Optional[int] = None
+    endLine: Optional[int] = None
+    endColumn: Optional[int] = None
+    snippet: Optional[Snippet] = None
+
+
+class PhysicalLocation(SarifBaseModel):
+    artifactLocation: Optional[ArtifactLocation] = None
+    region: Optional[Region] = None
+    contextRegion: Optional[Region] = None
+
+
+class LogicalLocation(SarifBaseModel):
+    name: Optional[str] = None
+    fullyQualifiedName: Optional[str] = None
+    decoratedName: Optional[str] = None
+    kind: Optional[str] = None
+
+
+class Location(SarifBaseModel):
+    physicalLocation: Optional[PhysicalLocation] = None
+    logicalLocations: Optional[List[LogicalLocation]] = None
+    message: Optional[Message] = None
+
+
+class ReportingDescriptor(SarifBaseModel):
+    id: str
+    name: Optional[str] = None
+    shortDescription: Optional[Message] = None
+    fullDescription: Optional[Message] = None
+    helpUri: Optional[str] = None
+
+
+class ToolComponent(SarifBaseModel):
+    name: str
+    fullName: Optional[str] = None
+    version: Optional[str] = None
+    informationUri: Optional[str] = None
+    rules: Optional[List[ReportingDescriptor]] = None
+
+
+class Tool(SarifBaseModel):
+    driver: ToolComponent
+
+
+class Notification(SarifBaseModel):
+    level: Optional[str] = None
+    message: Optional[Message] = None
+    descriptor: Optional[ReportingDescriptor] = None
+
+
+class Invocation(SarifBaseModel):
+    executionSuccessful: Optional[bool] = None
+    toolExecutionNotifications: Optional[List[Notification]] = None
+
+
+class ArtifactContent(SarifBaseModel):
+    text: Optional[str] = None
+
+
+class Artifact(SarifBaseModel):
+    location: Optional[ArtifactLocation] = None
+    contents: Optional[ArtifactContent] = None
+    sourceLanguage: Optional[str] = None
+
+
+class Result(SarifBaseModel):
+    ruleId: Optional[str] = None
+    level: Optional[str] = None
+    kind: Optional[str] = None
+    message: Message
+    locations: Optional[List[Location]] = None
+    relatedLocations: Optional[List[Location]] = None
+
+
+class Run(SarifBaseModel):
+    tool: Tool
+    results: Optional[List[Result]] = None
+    invocations: Optional[List[Invocation]] = None
+    artifacts: Optional[List[Artifact]] = None
+    originalUriBaseIds: Optional[Dict[str, Dict[str, Any]]] = None
+
+
+class SarifLog(SarifBaseModel):
+    version: str = Field(pattern=r"^2\.1\.0$")
+    runs: List[Run]
+    schema_uri: Optional[str] = Field(default=None, alias="$schema")
+
+
+# -----------------------------
+# Terminal styling
+# -----------------------------
+
+
+class Ansi:
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
+    DIM = "\033[2m"
+
+    BLACK = "\033[30m"
+    RED = "\033[31m"
+    GREEN = "\033[32m"
+    YELLOW = "\033[33m"
+    BLUE = "\033[34m"
+    MAGENTA = "\033[35m"
+    CYAN = "\033[36m"
+    WHITE = "\033[37m"
+
+    BRIGHT_BLACK = "\033[90m"
+    BRIGHT_RED = "\033[91m"
+    BRIGHT_GREEN = "\033[92m"
+    BRIGHT_YELLOW = "\033[93m"
+    BRIGHT_BLUE = "\033[94m"
+    BRIGHT_MAGENTA = "\033[95m"
+    BRIGHT_CYAN = "\033[96m"
+    BRIGHT_WHITE = "\033[97m"
+
+
+class ColorMode(str, Enum):
+    AUTO = "auto"
+    ALWAYS = "always"
+    NEVER = "never"
+
+
+class Theme:
+    def __init__(self, enabled: bool) -> None:
+        self.enabled = enabled
+
+    def wrap(self, text: str, *styles: str) -> str:
+        if not self.enabled or not styles:
+            return text
+        return "".join(styles) + text + Ansi.RESET
+
+    def level(self, level: Optional[str]) -> str:
+        normalized = (level or "note").lower()
+        mapping = {
+            "error": ("error", Ansi.BOLD, Ansi.BRIGHT_RED),
+            "warning": ("warning", Ansi.BOLD, Ansi.BRIGHT_YELLOW),
+            "note": ("note", Ansi.BOLD, Ansi.BRIGHT_CYAN),
+            "none": ("none", Ansi.BOLD, Ansi.WHITE),
+        }
+        label, *styles = mapping.get(normalized, (normalized, Ansi.BOLD, Ansi.BRIGHT_MAGENTA))
+        return self.wrap(label, *styles)
+
+    def header(self, text: str) -> str:
+        return self.wrap(text, Ansi.BOLD, Ansi.BRIGHT_WHITE)
+
+    def subheader(self, text: str) -> str:
+        return self.wrap(text, Ansi.BOLD, Ansi.BRIGHT_BLUE)
+
+    def path(self, text: str) -> str:
+        return self.wrap(text, Ansi.BOLD, Ansi.CYAN)
+
+    def line_no(self, text: str) -> str:
+        return self.wrap(text, Ansi.DIM, Ansi.BRIGHT_BLACK)
+
+    def rule(self, text: str) -> str:
+        return self.wrap(text, Ansi.MAGENTA)
+
+    def dim(self, text: str) -> str:
+        return self.wrap(text, Ansi.DIM, Ansi.BRIGHT_BLACK)
+
+    def accent(self, text: str) -> str:
+        return self.wrap(text, Ansi.BRIGHT_GREEN)
+
+    def emphasis(self, text: str) -> str:
+        return self.wrap(text, Ansi.BOLD)
+
+
+# -----------------------------
+# Rendering config
+# -----------------------------
+
+
+class RenderConfig(BaseModel):
+    color: ColorMode = ColorMode.AUTO
+    show_snippets: bool = True
+    show_related_locations: bool = True
+    show_rule_help: bool = True
+    group_by_file: bool = False
+    context_width: int = 160
+    max_message_lines: int = 8
+
+
+# -----------------------------
+# Renderer
+# -----------------------------
+
+
+class SarifRenderer:
+    def __init__(self, log: SarifLog, config: RenderConfig) -> None:
+        self.log = log
+        self.config = config
+        self.theme = Theme(enabled=self._should_use_color(config.color))
+
+    def render(self) -> str:
+        chunks: List[str] = []
+        chunks.append(self._render_summary())
+
+        for run_index, run in enumerate(self.log.runs, start=1):
+            if len(self.log.runs) > 1:
+                chunks.append(self.theme.header(f"\nRun {run_index}"))
+            chunks.append(self._render_run(run))
+
+        return "\n".join(chunk for chunk in chunks if chunk)
+
+    def _render_summary(self) -> str:
+        total_runs = len(self.log.runs)
+        total_results = sum(len(run.results or []) for run in self.log.runs)
+        by_level: Dict[str, int] = {}
+        for run in self.log.runs:
+            for result in run.results or []:
+                level = (result.level or "note").lower()
+                by_level[level] = by_level.get(level, 0) + 1
+
+        level_parts = []
+        for level in ("error", "warning", "note", "none"):
+            count = by_level.get(level, 0)
+            if count:
+                level_parts.append(f"{self.theme.level(level)} {count}")
+        for level, count in sorted(by_level.items()):
+            if level not in {"error", "warning", "note", "none"}:
+                level_parts.append(f"{self.theme.level(level)} {count}")
+
+        headline = self.theme.header("SARIF report")
+        meta = f"{total_runs} run(s), {total_results} result(s)"
+        if level_parts:
+            meta += "  ·  " + "  ".join(level_parts)
+        return f"{headline}\n{meta}"
+
+    def _render_run(self, run: Run) -> str:
+        sections: List[str] = []
+        driver = run.tool.driver
+        tool_name = driver.fullName or driver.name
+        tool_line = self.theme.subheader(tool_name)
+        if driver.version:
+            tool_line += f" {self.theme.dim(f'(v{driver.version})')}"
+        sections.append(tool_line)
+
+        if run.invocations:
+            sections.append(self._render_invocations(run.invocations))
+
+        results = run.results or []
+        if not results:
+            sections.append(self.theme.accent("No results."))
+            return "\n".join(sections)
+
+        rule_index = {rule.id: rule for rule in (driver.rules or [])}
+
+        if self.config.group_by_file:
+            sections.append(self._render_results_grouped_by_file(results, rule_index))
+        else:
+            sections.append(self._render_results_linear(results, rule_index))
+
+        return "\n".join(section for section in sections if section)
+
+    def _render_invocations(self, invocations: List[Invocation]) -> str:
+        lines: List[str] = []
+        for idx, invocation in enumerate(invocations, start=1):
+            status = invocation.executionSuccessful
+            if status is True:
+                state = self.theme.accent("execution successful")
+            elif status is False:
+                state = self.theme.level("error") + " execution failed"
+            else:
+                state = self.theme.dim("execution status unknown")
+            lines.append(f"invocation {idx}: {state}")
+
+            for notification in invocation.toolExecutionNotifications or []:
+                level = self.theme.level(notification.level)
+                msg = notification.message.render() if notification.message else "<no message>"
+                lines.append(f"  {level} {msg}")
+        return "\n".join(lines)
+
+    def _render_results_linear(
+        self,
+        results: List[Result],
+        rule_index: Dict[str, ReportingDescriptor],
+    ) -> str:
+        rendered = []
+        for i, result in enumerate(results, start=1):
+            rendered.append(self._render_result(result, rule_index, ordinal=i))
+        return "\n\n".join(rendered)
+
+    def _render_results_grouped_by_file(
+        self,
+        results: List[Result],
+        rule_index: Dict[str, ReportingDescriptor],
+    ) -> str:
+        groups: Dict[str, List[Result]] = {}
+        for result in results:
+            key = self._primary_path(result) or "<unknown file>"
+            groups.setdefault(key, []).append(result)
+
+        blocks: List[str] = []
+        for path in sorted(groups):
+            blocks.append(self.theme.subheader(path))
+            for i, result in enumerate(groups[path], start=1):
+                blocks.append(self._render_result(result, rule_index, ordinal=i, grouped=True))
+        return "\n\n".join(blocks)
+
+    def _render_result(
+        self,
+        result: Result,
+        rule_index: Dict[str, ReportingDescriptor],
+        ordinal: int,
+        grouped: bool = False,
+    ) -> str:
+        lines: List[str] = []
+        level = self.theme.level(result.level)
+        rule_id = result.ruleId or "<no-rule-id>"
+        message = self._truncate_lines(result.message.render(), self.config.max_message_lines)
+
+        title_bits = [f"{level}", self.theme.rule(rule_id)]
+        if not grouped:
+            title_bits.insert(0, self.theme.dim(f"[{ordinal}]"))
+        lines.append(" ".join(title_bits))
+        lines.append(f"  {message}")
+
+        primary = (result.locations or [None])[0]
+        if primary is not None:
+            lines.extend(self._render_location(primary, prefix="  --> "))
+
+        rule = rule_index.get(rule_id)
+        if rule and self.config.show_rule_help and rule.helpUri:
+            lines.append(f"  {self.theme.dim('help:')} {rule.helpUri}")
+
+        if self.config.show_related_locations:
+            for rel in result.relatedLocations or []:
+                rendered = self._render_location(rel, prefix="  = note: ")
+                if rel.message and rendered:
+                    rendered[0] += f" {self.theme.dim('(' + rel.message.render() + ')')}"
+                lines.extend(rendered)
+
+        return "\n".join(lines)
+
+    def _render_location(self, location: Location, prefix: str) -> List[str]:
+        lines: List[str] = []
+        phys = location.physicalLocation
+        path = self._location_path(location) or "<unknown file>"
+        region = phys.region if phys else None
+
+        loc = path
+        if region and region.startLine is not None:
+            loc += f":{region.startLine}"
+            if region.startColumn is not None:
+                loc += f":{region.startColumn}"
+        lines.append(prefix + self.theme.path(loc))
+
+        logical = (location.logicalLocations or [])
+        if logical:
+            label = logical[0].fullyQualifiedName or logical[0].name or logical[0].decoratedName
+            if label:
+                lines.append(f"  {self.theme.dim('symbol:')} {label}")
+
+        if self.config.show_snippets:
+            snippet = self._best_snippet(location)
+            if snippet:
+                lines.extend(self._render_snippet(snippet, region.startLine if region else None))
+
+        return lines
+
+    def _render_snippet(self, snippet: str, line_number: Optional[int]) -> List[str]:
+        lines: List[str] = []
+        for idx, raw_line in enumerate(snippet.rstrip("\n").splitlines()):
+            display_line = raw_line[: self.config.context_width]
+            if len(raw_line) > self.config.context_width:
+                display_line += "…"
+            left = "   "
+            if line_number is not None:
+                left = self.theme.line_no(f"{line_number + idx:>4} |") + " "
+            lines.append(f"  {left}{display_line}")
+        return lines
+
+    def _primary_path(self, result: Result) -> Optional[str]:
+        if not result.locations:
+            return None
+        return self._location_path(result.locations[0])
+
+    @staticmethod
+    def _location_path(location: Location) -> Optional[str]:
+        phys = location.physicalLocation
+        if not phys or not phys.artifactLocation:
+            return None
+        return phys.artifactLocation.uri
+
+    @staticmethod
+    def _best_snippet(location: Location) -> Optional[str]:
+        phys = location.physicalLocation
+        if not phys:
+            return None
+
+        if phys.region and phys.region.snippet and phys.region.snippet.text:
+            return phys.region.snippet.text
+        if phys.contextRegion and phys.contextRegion.snippet and phys.contextRegion.snippet.text:
+            return phys.contextRegion.snippet.text
+        return None
+
+    @staticmethod
+    def _truncate_lines(text: str, max_lines: int) -> str:
+        lines = text.splitlines()
+        if len(lines) <= max_lines:
+            return text
+        return "\n".join(lines[:max_lines]) + "\n…"
+
+    @staticmethod
+    def _should_use_color(mode: ColorMode) -> bool:
+        if mode == ColorMode.ALWAYS:
+            return True
+        if mode == ColorMode.NEVER:
+            return False
+        return sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
+
+
+# -----------------------------
+# CLI
+# -----------------------------
+
+
+def load_sarif(path: Path) -> SarifLog:
+    with path.open("r", encoding="utf-8") as f:
+        raw = json.load(f)
+    return SarifLog.model_validate(raw)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Render SARIF into a readable, colorized terminal view.",
+    )
+    parser.add_argument("sarif", type=Path, help="Path to a SARIF .json file")
+    parser.add_argument(
+        "--color",
+        choices=[mode.value for mode in ColorMode],
+        default=ColorMode.AUTO.value,
+        help="Color mode",
+    )
+    parser.add_argument(
+        "--no-snippets",
+        action="store_true",
+        help="Hide code snippets",
+    )
+    parser.add_argument(
+        "--no-related",
+        action="store_true",
+        help="Hide related locations",
+    )
+    parser.add_argument(
+        "--no-rule-help",
+        action="store_true",
+        help="Hide rule help URLs",
+    )
+    parser.add_argument(
+        "--group-by-file",
+        action="store_true",
+        help="Group findings by primary file path",
+    )
+    parser.add_argument(
+        "--context-width",
+        type=int,
+        default=160,
+        help="Maximum rendered snippet line width",
+    )
+    parser.add_argument(
+        "--max-message-lines",
+        type=int,
+        default=8,
+        help="Maximum number of lines to show for a result message",
+    )
+    return parser
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    config = RenderConfig(
+        color=ColorMode(args.color),
+        show_snippets=not args.no_snippets,
+        show_related_locations=not args.no_related,
+        show_rule_help=not args.no_rule_help,
+        group_by_file=args.group_by_file,
+        context_width=args.context_width,
+        max_message_lines=args.max_message_lines,
+    )
+
+    try:
+        sarif = load_sarif(args.sarif)
+    except FileNotFoundError:
+        print(f"error: file not found: {args.sarif}", file=sys.stderr)
+        return 2
+    except json.JSONDecodeError as exc:
+        print(f"error: invalid JSON: {exc}", file=sys.stderr)
+        return 2
+    except ValidationError as exc:
+        print("error: SARIF validation failed", file=sys.stderr)
+        print(exc, file=sys.stderr)
+        return 2
+
+    renderer = SarifRenderer(sarif, config)
+    print(renderer.render())
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+

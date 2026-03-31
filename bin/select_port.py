@@ -8,6 +8,13 @@ import json
 import subprocess
 from typing import TypedDict
 from platformio.project.config import ProjectConfig
+from sys import argv
+
+if len(argv) == 2:
+    pioenv = argv[1]
+else:
+    Import("env")
+    pioenv = env["PIOENV"]
 
 logging.basicConfig(
     level=os.getenv("PIO_LOGLEVEL_CUSTOM", "INFO").upper(),
@@ -15,7 +22,6 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 log = logging.getLogger(__name__)
-
 
 eval_output = False
 
@@ -138,7 +144,8 @@ def main() -> None:
         config = ProjectConfig()
     else:
         config = globals()["env"].GetProjectConfig()
-    custom_usb_serials = config.get("env", "custom_usb_serials")
+
+    custom_usb_serials = config.get(f"env:{pioenv}", "custom_usb_serials")
 
     if not isinstance(custom_usb_serials, str):
         raise RuntimeError("`custom_usb_serial` must be a list of USB serial numbers")

@@ -1,3 +1,6 @@
+CompileFlags:
+  Remove:
+    - -fdiagnostics-format=*
 ---
 If:
   PathMatch: [^src/master/.*]
@@ -42,6 +45,7 @@ CompileFlags:
     - -Wnull-dereference
     - -std=gnu++23
     - -DCLANGD_ONLY=1
+    - -fdiagnostics-show-template-tree
   Remove:
     - -fno-tree-switch-conversion
     - -mtext-section-literals
@@ -64,11 +68,13 @@ Diagnostics:
       - cppcoreguidelines-avoid-do-while
       - readability-magic-numbers
       - modernize-use-trailing-return-type
-      - bugprone-pointer-arithmetic-on-polymorphic-object
-      - bugprone-easily-swappable-parameters
+      # - bugprone-pointer-arithmetic-on-polymorphic-object
+      # - bugprone-easily-swappable-parameters
       - readability-use-std-min-max
     CheckOptions:
       readability-function-cognitive-complexity.IgnoreMacros: true
+      readability-identifier-length.IgnoredVariableNames: ^([abikvxyz_]|it|rc|fn)$
+      readability-identifier-length.IgnoredParameterNames: ^([abikvxyz_]|it|rc|fn)$
 Completion:
   ArgumentLists: "None"
 ---

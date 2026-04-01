@@ -1,8 +1,12 @@
 #include "Common.hh"
 
+#include "Metrics/Facade.hh"
 #include "Output/Facade.hh"
+#include "Support/Metrics.hh"
 #include "TaskControllerRegistry/Facade.hh"
+#include "freertos/idf_additions.h"
 
+Totem::Metrics::Backend metricsBackend;
 Totem::TaskControllerRegistry::Registry taskRegistry;
 Totem::Output::Aggregator aggregator(taskRegistry.hooks());
 Totem::Output::OutputUart uart;

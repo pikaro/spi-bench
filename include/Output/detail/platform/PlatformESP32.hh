@@ -3,6 +3,9 @@
 #include "Common.hh"
 #include "Output/detail/Config.hh"
 #include "driver/uart.h"
+#include "hal/uart_types.h"
+#include "soc/clk_tree_defs.h"
+#include <cstddef>
 
 namespace Totem::Output::detail::platform {
 
@@ -35,7 +38,7 @@ struct Platform {
         return OK();
     }
 
-    static ReturnCode uart_write(const char *data, std::size_t len,
+    static ReturnCode uart_write(const char *data, size_t len,
                                  bool flush = false) {
         auto ret = uart_write_bytes(_uartNumber, data, len);
         FAIL_IF(ret < 0, ERR(OperationFailed), "Failed to write to UART");

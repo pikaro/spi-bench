@@ -1,9 +1,10 @@
 #pragma once
 
-#include "Common.hh"
-
 #include "Concepts/Base.hh"
+#include "Macros/Facade.hh"
+#include "Types/Error.hh"
 #include "Types/Logging.hh"
+#include <concepts>
 
 namespace Totem::Output::detail {
 

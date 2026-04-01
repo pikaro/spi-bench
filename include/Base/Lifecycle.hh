@@ -1,9 +1,9 @@
 #pragma once
 
-#include "Common.hh"
-
+#include "Macros/Facade.hh"
 #include "Mutex/Mutex.hh"
 #include "Mutex/ScopedMutexGuard.hh"
+#include "Types/Error.hh"
 
 namespace Totem::Core {
 

@@ -3,6 +3,7 @@
 #include "Output/detail/Aggregator.hh"
 #include "Output/detail/Config.hh"
 #include "Output/detail/Outputs/Uart.hh"
+#include "Output/detail/Types.hh"
 
 namespace Totem::Output {
 

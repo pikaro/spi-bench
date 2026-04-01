@@ -43,6 +43,7 @@ CompileFlags:
     - -Wshadow-uncaptured-local
     - -Wswitch-enum
     - -Wnull-dereference
+    - -Wmissing-includes
     - -std=gnu++23
     - -DCLANGD_ONLY=1
     - -fdiagnostics-show-template-tree
@@ -53,6 +54,8 @@ CompileFlags:
     - -mdisable-hardware-atomics
     - -fno-shrink-wrap
 Diagnostics:
+  UnusedIncludes: Strict
+  MissingIncludes: Strict
   Suppress:
     - "constructor_redeclared"
   ClangTidy:

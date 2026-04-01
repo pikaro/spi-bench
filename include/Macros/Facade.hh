@@ -5,6 +5,7 @@
 #include "internal/Base.hh"
 
 #include "internal/Binary.hh"
+#include "internal/Class.hh"
 #include "internal/Collection.hh"
 #include "internal/Cpp.hh"
 #include "internal/Error.hh"

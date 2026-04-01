@@ -1,7 +1,9 @@
 #pragma once
 
 #include "freertos/FreeRTOS.h" // IWYU pragma: keep
+#include "freertos/idf_additions.h"
 #include "freertos/ringbuf.h"
+#include <cstdint>
 
 namespace platform {
 

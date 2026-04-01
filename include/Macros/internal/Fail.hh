@@ -180,6 +180,8 @@
     FAIL_IF_ERR_THEN(expr, return, msg, ##__VA_ARGS__)
 #define FAIL_IF_ERR_FWD(expr, msg, ...)                                        \
     FAIL_IF_ERR_THEN(expr, return _rc_, msg, ##__VA_ARGS__)
+#define FAIL_IF_ERR_FWD_UNEXPECTED(expr, msg, ...)                             \
+    FAIL_IF_ERR_THEN(expr, return std::unexpected(_rc_), msg, ##__VA_ARGS__)
 #define ABORT_IF_ERR_BEGIN(expr) ABORT_IF_ERR(expr, "Failed to begin: " #expr)
 
 // Fail if optional has no value
@@ -199,7 +201,7 @@
 #define FAIL_IF_NOT_OPT_VOID(var, expr, msg, ...)                              \
     FAIL_IF_NOT_OPT_THEN(var, expr, return, msg, ##__VA_ARGS__)
 
-// Fail if std::expected has error
+// Fail if std::expected has error and assign value if not
 #define FAIL_IF_UNEXPECTED_THEN(var, expr, action, msg, ...)                   \
     auto CONCAT(_result_, var) = (expr);                                       \
     if (!CONCAT(_result_, var)) {                                              \
@@ -207,7 +209,7 @@
         INTERNAL_FAIL_IF_IMPL_CODE(true, _error_.format(), action, msg,        \
                                    _error_.code, ##__VA_ARGS__);               \
     }                                                                          \
-    auto var = std::move(CONCAT(_result_, var).value());
+    auto var = std::move(*CONCAT(_result_, var));
 #define ABORT_IF_UNEXPECTED(var, expr, msg, ...)                               \
     FAIL_IF_UNEXPECTED_THEN(var, expr, abort(), msg, ##__VA_ARGS__)
 #define FAIL_IF_UNEXPECTED(var, expr, ret, msg, ...)                           \
@@ -215,10 +217,31 @@
 #define FAIL_IF_UNEXPECTED_VOID(var, expr, msg, ...)                           \
     FAIL_IF_UNEXPECTED_THEN(var, expr, return, msg, ##__VA_ARGS__)
 #define FAIL_IF_UNEXPECTED_FWD(var, expr, msg, ...)                            \
-    auto CONCAT(_result_, var) = (expr);                                       \
-    if (!CONCAT(_result_, var)) {                                              \
-        auto _error_ = CONCAT(_result_, var).error();                          \
-        INTERNAL_FAIL_IF_IMPL_CODE(true, _error_.format(), return _error_,     \
-                                   msg, ##__VA_ARGS__);                        \
-    }                                                                          \
-    auto var = std::move(CONCAT(_result_, var).value());
+    FAIL_IF_UNEXPECTED_THEN(var, expr, return _error_, msg, ##__VA_ARGS__)
+#define FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(var, expr, msg, ...)                 \
+    FAIL_IF_UNEXPECTED_THEN(var, expr, return std::unexpected(_error_), msg,   \
+                            ##__VA_ARGS__)
+
+// Fail if std::expected has error and assign value to existing variable if not
+#define FAIL_IF_ASSIGN_UNEXPECTED_THEN(var, expr, action, msg, ...)            \
+    do {                                                                       \
+        auto CONCAT(_result_, var) = (expr);                                   \
+        if (!CONCAT(_result_, var)) {                                          \
+            auto _error_ = CONCAT(_result_, var).error();                      \
+            INTERNAL_FAIL_IF_IMPL_CODE(true, _error_.format(), action, msg,    \
+                                       _error_.code, ##__VA_ARGS__);           \
+        }                                                                      \
+        (var) = std::move(*CONCAT(_result_, var));                             \
+    } while (0)
+#define ABORT_IF_ASSIGN_UNEXPECTED(var, expr, msg, ...)                        \
+    FAIL_IF_ASSIGN_UNEXPECTED_THEN(var, expr, abort(), msg, ##__VA_ARGS__)
+#define FAIL_IF_ASSIGN_UNEXPECTED(var, expr, ret, msg, ...)                    \
+    FAIL_IF_ASSIGN_UNEXPECTED_THEN(var, expr, return (ret), msg, ##__VA_ARGS__)
+#define FAIL_IF_ASSIGN_UNEXPECTED_VOID(var, expr, msg, ...)                    \
+    FAIL_IF_ASSIGN_UNEXPECTED_THEN(var, expr, return, msg, ##__VA_ARGS__)
+#define FAIL_IF_ASSIGN_UNEXPECTED_FWD(var, expr, msg, ...)                     \
+    FAIL_IF_ASSIGN_UNEXPECTED_THEN(var, expr, return _error_, msg,             \
+                                   ##__VA_ARGS__)
+#define FAIL_IF_ASSIGN_UNEXPECTED_FWD_UNEXPECTED(var, expr, msg, ...)          \
+    FAIL_IF_ASSIGN_UNEXPECTED_THEN(var, expr, return std::unexpected(_error_), \
+                                   msg, ##__VA_ARGS__)

@@ -2,12 +2,16 @@
 
 #include "Base/HasLifecycle.hh"
 #include "Base/HasTaskController.hh"
-#include "Common.hh"
-
+#include "Macros/Facade.hh"
 #include "Output/detail/Config.hh"
 #include "Output/detail/PlatformSelect.hh"
 #include "Output/detail/Types.hh"
 #include "RingBuffer/Facade.hh"
+#include "TaskController/Facade.hh"
+#include "Types/Error.hh"
+#include "Types/Logging.hh"
+#include <array>
+#include <cstddef>
 
 namespace Totem::Output::detail {
 

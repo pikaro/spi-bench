@@ -2,8 +2,10 @@
 
 #include "Base/Namespaces.hh" // IWYU pragma: export
 #include "Macros/Facade.hh"
+#include "Support/Basic.hh"
 #include "Types/Error.hh"
 #include <array>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <expected>
@@ -32,6 +34,31 @@ template <size_t N> struct NameKey {
         out.len = len;
         return out;
     }
+};
+
+// FIXME: Switch to variadic template for friends when C++26 in Espidf 6.0
+template <typename Tag, size_t N, class Friend> class StrongHandle {
+    using KeyType = NameKey<N>;
+
+  public:
+    StrongHandle() = delete;
+    bool operator==(const StrongHandle &other) const {
+        return _key == other._key;
+    }
+
+    const KeyType &key() const { return _key; }
+
+  private:
+    friend Friend;
+
+    StrongHandle(const KeyType &key) : _key(key) {}
+
+    static StrongHandle make(const char *str) {
+        return StrongHandle{NameKey<N>::fromCharPtr(str)};
+    }
+    static StrongHandle make(const KeyType &key) { return StrongHandle{key}; }
+
+    KeyType _key;
 };
 
 template <typename Entry, size_t N, size_t IdLen = 32> struct SlottedMap {
@@ -73,7 +100,16 @@ template <typename Entry, size_t N, size_t IdLen = 32> struct SlottedMap {
         if (_size >= N) {
             return ERR(OutOfMemory);
         }
+
+        auto slotIndex = _size;
         _slots[_size++] = Slot{.nameKey = nameKey, .entry = std::move(entry)};
+
+        auto ret = _indexInsert(nameKey, slotIndex);
+        if (!ret.ok()) {
+            _slots[--_size] = Slot{};
+            return ret;
+        }
+
         return OK();
     }
 
@@ -82,11 +118,30 @@ template <typename Entry, size_t N, size_t IdLen = 32> struct SlottedMap {
         if (index < 0) {
             return ERR(NotFound);
         }
+
         auto i = static_cast<size_t>(index);
-        if (i != _size - 1) {
-            _slots[i] = std::move(_slots[_size - 1]);
+        auto last = _size - 1;
+
+        auto ret = _indexErase(nameKey);
+        if (!ret.ok()) {
+            return ret;
         }
-        _slots[_size - 1] = Slot{};
+
+        if (i != last) {
+            _slots[i] = std::move(_slots[last]);
+
+            ret = _indexErase(_slots[i].nameKey);
+            if (!ret.ok()) {
+                ABORT("SlottedMap index corruption during remove");
+            }
+
+            ret = _indexInsert(_slots[i].nameKey, i);
+            if (!ret.ok()) {
+                ABORT("SlottedMap index reinsertion failed during remove");
+            }
+        }
+
+        _slots[last] = Slot{};
         --_size;
         return OK();
     }
@@ -94,6 +149,9 @@ template <typename Entry, size_t N, size_t IdLen = 32> struct SlottedMap {
     ReturnCode clear() {
         for (size_t i = 0; i < _size; ++i) {
             _slots[i] = Slot{};
+        }
+        for (size_t i = 0; i < IndexSize; ++i) {
+            _index[i] = IndexSlot{};
         }
         _size = 0;
         return OK();
@@ -104,14 +162,33 @@ template <typename Entry, size_t N, size_t IdLen = 32> struct SlottedMap {
         if (index < 0) {
             return std::unexpected(ERR(NotFound));
         }
+
         auto i = static_cast<size_t>(index);
+        auto last = _size - 1;
         auto ret = std::move(_slots[i].entry);
-        if (i != _size - 1) {
-            _slots[i] = std::move(_slots[_size - 1]);
+
+        auto rc = _indexErase(nameKey);
+        if (!rc.ok()) {
+            ABORT("SlottedMap index corruption during extract");
         }
-        _slots[_size - 1] = Slot{};
+
+        if (i != last) {
+            _slots[i] = std::move(_slots[last]);
+
+            rc = _indexErase(_slots[i].nameKey);
+            if (!rc.ok()) {
+                ABORT("SlottedMap index corruption during extract move");
+            }
+
+            rc = _indexInsert(_slots[i].nameKey, i);
+            if (!rc.ok()) {
+                ABORT("SlottedMap index reinsertion failed during extract");
+            }
+        }
+
+        _slots[last] = Slot{};
         --_size;
-        return std::move(ret);
+        return ret;
     }
 
     template <typename Fn>
@@ -141,16 +218,103 @@ template <typename Entry, size_t N, size_t IdLen = 32> struct SlottedMap {
     }
 
   private:
+    enum class IndexState : uint8_t {
+        Empty,
+        Occupied,
+        Tombstone,
+    };
+
+    struct IndexSlot {
+        IndexState state = IndexState::Empty;
+        NameKey<IdLen> nameKey{};
+        size_t slotIndex = 0;
+    };
+
+    static constexpr size_t IndexSize =
+        N == 0 ? 1 : ((N * 2) + 1); // simple fixed load factor < 0.5
+
     [[nodiscard]] ssize_t _findIndex(const NameKey<IdLen> &nameKey) const {
-        for (size_t i = 0; i < _size; ++i) {
-            if (_slots[i].nameKey == nameKey) {
-                return static_cast<ssize_t>(i);
+        auto start = hash(nameKey.name.data(), nameKey.len) % IndexSize;
+        for (size_t probe = 0; probe < IndexSize; ++probe) {
+            auto pos = (start + probe) % IndexSize;
+            auto &indexSlot = _index[pos];
+
+            if (indexSlot.state == IndexState::Empty) {
+                return -1;
+            }
+            if (indexSlot.state == IndexState::Occupied &&
+                indexSlot.nameKey == nameKey) {
+                return static_cast<ssize_t>(indexSlot.slotIndex);
             }
         }
         return -1;
     }
 
+    ReturnCode _indexInsert(const NameKey<IdLen> &nameKey, size_t slotIndex) {
+        auto start = hash(nameKey.name.data(), nameKey.len) % IndexSize;
+        ssize_t firstTombstone = -1;
+
+        for (size_t probe = 0; probe < IndexSize; ++probe) {
+            auto pos = (start + probe) % IndexSize;
+            auto &indexSlot = _index[pos];
+
+            if (indexSlot.state == IndexState::Occupied) {
+                if (indexSlot.nameKey == nameKey) {
+                    return ERR(AlreadyExists);
+                }
+                continue;
+            }
+
+            if (indexSlot.state == IndexState::Tombstone) {
+                if (firstTombstone < 0) {
+                    firstTombstone = static_cast<ssize_t>(pos);
+                }
+                continue;
+            }
+
+            auto insertPos =
+                firstTombstone >= 0 ? static_cast<size_t>(firstTombstone) : pos;
+            _index[insertPos] = IndexSlot{
+                .state = IndexState::Occupied,
+                .nameKey = nameKey,
+                .slotIndex = slotIndex,
+            };
+            return OK();
+        }
+
+        if (firstTombstone >= 0) {
+            auto insertPos = static_cast<size_t>(firstTombstone);
+            _index[insertPos] = IndexSlot{
+                .state = IndexState::Occupied,
+                .nameKey = nameKey,
+                .slotIndex = slotIndex,
+            };
+            return OK();
+        }
+
+        return ERR(OutOfMemory);
+    }
+
+    ReturnCode _indexErase(const NameKey<IdLen> &nameKey) {
+        auto start = hash(nameKey.name.data(), nameKey.len) % IndexSize;
+        for (size_t probe = 0; probe < IndexSize; ++probe) {
+            auto pos = (start + probe) % IndexSize;
+            auto &indexSlot = _index[pos];
+
+            if (indexSlot.state == IndexState::Empty) {
+                return ERR(NotFound);
+            }
+            if (indexSlot.state == IndexState::Occupied &&
+                indexSlot.nameKey == nameKey) {
+                indexSlot = IndexSlot{.state = IndexState::Tombstone};
+                return OK();
+            }
+        }
+        return ERR(NotFound);
+    }
+
     std::array<Slot, N> _slots{};
+    std::array<IndexSlot, IndexSize> _index{};
     size_t _size = 0;
 
     using DefaultError = CoreError;

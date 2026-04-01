@@ -5,6 +5,8 @@
 #include "Concepts/Base.hh"
 #include "Mutex/Mutex.hh"
 #include "freertos/idf_additions.h"
+#include <cstdint>
+#include <type_traits>
 
 namespace Totem::Core {
 

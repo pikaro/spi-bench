@@ -1,11 +1,13 @@
 #pragma once
 
-#include "Common.hh"
-
+#include "Macros/Facade.hh"
+#include "Platform/PlatformSelect.hh"
 #include "TaskController/detail/Config.hh"
 #include "Types/Logging.hh"
 #include <algorithm>
 #include <array>
+#include <cstddef>
+#include <cstdint>
 
 namespace Totem::Output::detail {
 

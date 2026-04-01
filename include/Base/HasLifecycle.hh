@@ -2,6 +2,9 @@
 
 #include "Base/Lifecycle.hh"
 #include "Concepts/Base.hh"
+#include "Macros/Facade.hh"
+#include "Types/Error.hh"
+#include <concepts>
 
 namespace Totem::Core {
 
@@ -53,7 +56,7 @@ template <class Derived, typename ConfT = NoConfig> class HasLifecycle {
     using DefaultError = LifecycleError;
 };
 
-template <class T, typename ConfT> struct LifecycleContract {
+template <class T, typename ConfT = NoConfig> struct LifecycleContract {
     static_assert(IsBeginnable<T>, "Type must be beginnable");
     static_assert(IsEndable<T>, "Type must be endable");
     static_assert(IsNamedEntity<T>, "Type must have a name");

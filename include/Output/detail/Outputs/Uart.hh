@@ -1,12 +1,14 @@
 #pragma once
 
-#include "Common.hh"
-
 #include "Base/HasLifecycle.hh"
+#include "Macros/Facade.hh"
 #include "Output/detail/Config.hh"
 #include "Output/detail/PlatformSelect.hh"
 #include "Output/detail/Types.hh"
+#include "Types/Error.hh"
+#include "Types/Logging.hh"
 #include <array>
+#include <cinttypes>
 #include <cstdio>
 #include <expected>
 

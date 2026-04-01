@@ -5,7 +5,10 @@
 #include "Base/HasMutex.hh"
 #include "Types/Collection.hh"
 #include "Types/Error.hh"
+#include <array>
 #include <atomic>
+#include <concepts>
+#include <cstdint>
 #include <cstring>
 #include <expected>
 #include <functional>

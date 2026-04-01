@@ -1,10 +1,12 @@
 #pragma once
 
-#include "Common.hh"
-
 #include "Base/HasLifecycle.hh"
+#include "Macros/Facade.hh"
+#include "TaskController/Facade.hh"
 #include "TaskControllerRegistry/detail/Config.hh"
 #include "TaskControllerRegistry/detail/Directory.hh"
+#include "TaskControllerRegistry/detail/Metrics.hh"
+#include "Types/Error.hh"
 
 namespace Totem::TaskControllerRegistry::detail {
 
@@ -15,9 +17,12 @@ class Registry : public HasLifecycle<Registry, Config> {
     using ControllerNameKey = Directory::EntryNameKey;
 
   public:
+    DELETE_COPY(Registry)
+    DELETE_MOVE(Registry)
+
     // NOTE: Must enable here because TaskController wants to register
     //       itself in its constructor
-    Registry() { _enableRegistration(); }
+    Registry() : _metrics{Metrics::create()} { _enableRegistration(); }
 
     static constexpr const char *name = "TaskControllerRegistry::Registry";
 
@@ -36,6 +41,10 @@ class Registry : public HasLifecycle<Registry, Config> {
         auto ret = _directory.add(ownerNameKey, controller);
         FAIL_IF(!ret, ret.error(), "Failed to register controller %s",
                 ownerNameKey.name.data());
+        FAIL_IF_ERR_FWD(
+            _metrics.addTask(),
+            "Failed to update metrics for registering controller %s",
+            ownerNameKey.name.data());
         return OK();
     }
 
@@ -50,6 +59,10 @@ class Registry : public HasLifecycle<Registry, Config> {
         auto ret = _directory.remove(ownerNameKey);
         FAIL_IF_ERR(ret, ret, "Failed to deregister controller %s",
                     ownerNameKey.name.data());
+        FAIL_IF_ERR_FWD(
+            _metrics.removeTask(),
+            "Failed to update metrics for deregistering controller %s",
+            ownerNameKey.name.data());
         return OK();
     }
 
@@ -62,12 +75,14 @@ class Registry : public HasLifecycle<Registry, Config> {
     void _enableRegistration() { _directory.enableRegistration(); }
 
     static ReturnCode _onBegin() { return OK(); }
+
     ReturnCode _onEnd() {
         _disableRegistration();
         return OK();
     }
 
     Directory _directory;
+    Metrics _metrics;
 
     using DefaultError = CoreError;
 };

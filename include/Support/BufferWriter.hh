@@ -3,7 +3,9 @@
 #include <array>
 #include <charconv>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
+#include <system_error>
 
 inline size_t cstr_len(const char *str) {
     size_t num = 0;

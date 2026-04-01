@@ -4,6 +4,9 @@
 #include "Macros/internal/Error.hh"
 #include "Types/Error.hh"
 #include "Types/Logging.hh"
+#include "esp_log.h"
+#include "esp_log_args.h"
+#include "esp_log_config.h"
 #include <concepts>
 
 namespace Totem::LoggerSupport::detail {
@@ -48,7 +51,9 @@ struct LoggerBackend {
             .setLogLevelHook = [](void *, LogLevel) -> ReturnCode {
                 return OK(CoreError);
             },
-            .sendHook = [](void *, const LogRecord &) -> ReturnCode {
+            .sendHook = [](void *, const LogRecord &record) -> ReturnCode {
+                // FIXME: Abstract
+                ESP_EARLY_LOGE(record.tag.data(), "%s", record.msg.data());
                 return OK(CoreError);
             },
         };

@@ -15,5 +15,8 @@ inline Tick ms_to_ticks(uint32_t millis) { return pdMS_TO_TICKS(millis); }
 inline uint32_t ticks_to_ms(Tick ticks) { return ticks * portTICK_PERIOD_MS; }
 
 using RingBufferHandle = RingbufHandle_t;
+using MutexHandle = SemaphoreHandle_t;
+
+inline bool in_isr() { return xPortInIsrContext() != pdFALSE; }
 
 } // namespace platform

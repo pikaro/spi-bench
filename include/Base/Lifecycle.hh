@@ -1,8 +1,7 @@
 #pragma once
 
 #include "Macros/Facade.hh"
-#include "Mutex/Mutex.hh"
-#include "Mutex/ScopedMutexGuard.hh"
+#include "Mutex/Facade.hh"
 #include "Types/Error.hh"
 
 namespace Totem::Core {
@@ -10,7 +9,7 @@ namespace Totem::Core {
 template <class Owner, class ConfT> class Lifecycle {
   public:
     ReturnCode begin(Owner &owner, const ConfT &cfg) {
-        ScopedMutexGuard<Owner> guard{_mtx.get()};
+        Mutex::ScopedMutexGuard<Owner> guard{_mtx.get()};
         if (_active) {
             return ERR(Active);
         }
@@ -23,7 +22,7 @@ template <class Owner, class ConfT> class Lifecycle {
     }
 
     ReturnCode end(Owner &owner) {
-        ScopedMutexGuard<Owner> guard{_mtx.get()};
+        Mutex::ScopedMutexGuard<Owner> guard{_mtx.get()};
         if (!_active) {
             return ERR(NotActive);
         }
@@ -38,7 +37,7 @@ template <class Owner, class ConfT> class Lifecycle {
     const ConfT &config() const { return _config; }
 
   private:
-    Mutex _mtx;
+    Mutex::Mutex _mtx;
     bool _active{false};
     ConfT _config{};
     using DefaultError = LifecycleError;

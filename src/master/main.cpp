@@ -37,11 +37,13 @@ extern "C" {
 void app_main(void);
 }
 
+// FIXME: Abstract
 TickType_t lastWakeTime;
 
 void app_main() {
     setup();
     for (;;) {
+        // FIXME: Abstract
         xTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(100));
     }
 }

@@ -2,6 +2,8 @@
 
 #include "Common.hh"
 #include "RingBuffer/detail/Config.hh"
+#include "freertos/ringbuf.h"
+#include <cstddef>
 #include <expected>
 #include <utility>
 

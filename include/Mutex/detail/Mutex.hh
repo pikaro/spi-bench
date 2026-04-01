@@ -3,24 +3,28 @@
 #include "Common.hh"
 
 #include "Concepts/Performance.hh"
-#include "Mutex/MutexGuard.hh"
+#include "Macros/Facade.hh"
+#include "Mutex/detail/MutexGuard.hh"
+#include "PlatformSelect.hh"
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <tuple>
 #include <type_traits>
 #include <utility>
 
-namespace Totem::Core {
+namespace Totem::Mutex::detail {
 
 class Mutex {
   public:
-    Mutex() : _handle{xSemaphoreCreateMutex()} {
+    Mutex() : _handle{Platform::create_mutex().value_or(nullptr)} {
         ABORT_IF_NULL(_handle, "Failed to create mutex");
     }
 
     ~Mutex() {
         if (_handle != nullptr) {
-            vSemaphoreDelete(_handle);
+            FAIL_IF_ERR_VOID(Platform::destroy_mutex(_handle),
+                             "Failed to destroy mutex");
         }
     }
 
@@ -30,26 +34,26 @@ class Mutex {
     Mutex(Mutex &&) = delete;
     Mutex &operator=(Mutex &&) = delete;
 
-    [[nodiscard]] SemaphoreHandle_t get() const { return _handle; }
+    [[nodiscard]] MutexHandle get() const { return _handle; }
 
   private:
-    SemaphoreHandle_t _handle{};
+    MutexHandle _handle{};
 };
 
-template <class T, std::size_t MaxBytes = 8>
+template <class T, size_t MaxBytes = 8>
 concept IsMutexArg = IsRefWrap<T> || IsTinyTrivialValue<T, MaxBytes>;
 
-template <std::size_t MaxBytes = 8, class... Ts>
+template <size_t MaxBytes = 8, class... Ts>
 concept AreMutexArgs = (IsMutexArg<Ts, MaxBytes> && ...);
 
-template <class R, std::size_t MaxBytes = 8>
+template <class R, size_t MaxBytes = 8>
 concept IsMutexReturn =
     IsTinyTrivialValue<R, MaxBytes> && IsDefaultConstructibleValue<R>;
 
 template <class T>
 concept IsConstRefWrap = IsRefWrap<T> && std::is_const_v<typename T::type>;
 
-template <class T, std::size_t MaxBytes = 8>
+template <class T, size_t MaxBytes = 8>
 concept IsMutexArgConst =
     IsConstRefWrap<T> || (!IsRefWrap<T> && IsTinyTrivialValue<T, MaxBytes>);
 
@@ -74,7 +78,7 @@ template <class F, class... Args> struct MutexExecSpec {
     R failValue;
     Fn fun;
     std::tuple<std::decay_t<Args>...> args;
-    SemaphoreHandle_t mutex;
+    MutexHandle mutex;
 };
 
 template <class F, class... Args>
@@ -100,7 +104,7 @@ struct MutexExecSpecConst {
     R failValue;
     Fn fun;
     std::tuple<std::decay_t<Args>...> args;
-    SemaphoreHandle_t mutex;
+    MutexHandle mutex;
 };
 
 // Pass a std::ref(big) to avoid copying large objects
@@ -137,8 +141,8 @@ template <class F, class... Args>
 typename MutexExecSpec<F, Args...>::R
 execute_mutex_exec_spec(MutexExecSpec<F, Args...> &&req) {
     FAIL_IF_NULL(req.mutex, req.failValue, "MutexRequest %s", req.name);
-    MutexGuard guard(req.mutex,
-                     pdMS_TO_TICKS(req.timeoutMs.value_or(MS_MAX_DELAY)));
+    MutexGuard guard(req.mutex, ::platform::ms_to_ticks(
+                                    req.timeoutMs.value_or(MS_MAX_DELAY)));
     if (!guard.locked()) {
         _log_e("Failed to acquire mutex %s", req.name);
         return std::move(req.failValue);
@@ -150,8 +154,8 @@ template <class F, class... Args>
 typename MutexExecSpec<F, Args...>::R
 execute_mutex_exec_spec_const(MutexExecSpecConst<F, Args...> &&req) {
     FAIL_IF_NULL(req.mutex, req.failValue, "MutexRequest %s", req.name);
-    MutexGuard guard(req.mutex,
-                     pdMS_TO_TICKS(req.timeoutMs.value_or(MS_MAX_DELAY)));
+    MutexGuard guard(req.mutex, ::platform::ms_to_ticks(
+                                    req.timeoutMs.value_or(MS_MAX_DELAY)));
     if (!guard.locked()) {
         _log_e("Failed to acquire mutex %s", req.name);
         return std::move(req.failValue);
@@ -159,9 +163,4 @@ execute_mutex_exec_spec_const(MutexExecSpecConst<F, Args...> &&req) {
     return std::apply(std::move(req.fun), std::move(req.args));
 }
 
-} // namespace Totem::Core
-
-using Totem::Core::execute_mutex_exec_spec;
-using Totem::Core::make_mutex_exec_spec;
-using Totem::Core::make_mutex_exec_spec_const;
-using Totem::Core::MutexExecSpec;
+} // namespace Totem::Mutex::detail

@@ -73,10 +73,7 @@ class Directory : HasMutex<Directory<Entry, N, IdLen>> {
 
     using SlottedMapType = SlottedMap<Entry, N, IdLen>;
 
-    explicit Directory(const char *ownerName) : _ownerName(ownerName) {
-        ABORT_IF_NOT(this->_beginMutex(), "Failed to initialize mutex for %s",
-                     _ownerName);
-    }
+    explicit Directory(const char *ownerName) : _ownerName(ownerName) {}
 
     [[nodiscard]] const char *ownerName() const { return _ownerName; }
 

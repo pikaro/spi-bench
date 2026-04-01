@@ -3,16 +3,18 @@
 #include "Common.hh"
 
 #include "Concepts/Base.hh"
+#include "PlatformSelect.hh"
 #include "freertos/FreeRTOS.h" // IWYU pragma: keep
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
-namespace Totem::Core {
+namespace Totem::Mutex::detail {
 
 template <class Derived> class ScopedMutexGuard final {
   public:
-    ScopedMutexGuard(SemaphoreHandle_t handle,
-                     TickType_t ticksToWait = portMAX_DELAY) noexcept
+    // FIXME: Abstract
+    ScopedMutexGuard(MutexHandle handle,
+                     ::platform::Tick ticksToWait = TICK_MAX_DELAY) noexcept
         : _handle{handle}, _name{Derived::name} {
         static_assert(IsNamedEntity<Derived>,
                       "HasMutex requires Derived to be a named entity");
@@ -27,19 +29,15 @@ template <class Derived> class ScopedMutexGuard final {
             return;
         }
 
-        if (xPortInIsrContext() != pdFALSE) {
+        if (::platform::in_isr()) {
             _log_w("%s: In ISR context, cannot take mutex", _name);
             return;
         }
 
         _log_d("%s: Mutex take by %s", _name, pcTaskGetName(nullptr));
 
-        if (xSemaphoreTake(_handle, ticksToWait) == pdTRUE) {
-            _acquired = true;
-        } else {
-            _log_w("%s: Failed to take mutex by %s within %u ticks", _name,
-                   pcTaskGetName(nullptr), static_cast<unsigned>(ticksToWait));
-        }
+        FAIL_IF_ERR_VOID(Platform::take_mutex(_handle, ticksToWait),
+                         "Failed to take mutex %s", _name);
     }
 
     ScopedMutexGuard(ScopedMutexGuard const &) = delete;
@@ -69,18 +67,16 @@ template <class Derived> class ScopedMutexGuard final {
   private:
     void release() noexcept {
         if ((_handle != nullptr) && _acquired) {
-            (void)xSemaphoreGive(_handle);
+            (void)Platform::give_mutex(_handle);
             _acquired = false;
             const char *name = Derived::name;
             _log_d("%s: Mutex released by %s", name, pcTaskGetName(nullptr));
         }
     }
 
-    SemaphoreHandle_t _handle{nullptr};
+    MutexHandle _handle{nullptr};
     bool _acquired{false};
     const char *_name;
 };
 
-} // namespace Totem::Core
-
-using Totem::Core::ScopedMutexGuard;
+} // namespace Totem::Mutex::detail

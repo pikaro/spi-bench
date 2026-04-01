@@ -2,10 +2,11 @@
 
 #include "freertos/idf_additions.h"
 
-namespace Totem::Core {
+namespace Totem::Mutex::detail {
 
 class MutexGuard {
   public:
+    // FIXME: Abstract
     MutexGuard(SemaphoreHandle_t mtx, TickType_t timeout = portMAX_DELAY)
         : _mtx(mtx), _locked(xSemaphoreTake(mtx, timeout) == pdTRUE) {}
     ~MutexGuard() {
@@ -20,4 +21,4 @@ class MutexGuard {
     bool _locked{};
 };
 
-} // namespace Totem::Core
+} // namespace Totem::Mutex::detail

@@ -4,7 +4,6 @@
 #include "Base/HasTaskController.hh"
 #include "Macros/Facade.hh"
 #include "Output/detail/Config.hh"
-#include "Output/detail/PlatformSelect.hh"
 #include "Output/detail/Types.hh"
 #include "RingBuffer/Facade.hh"
 #include "StaticConfig/Logging.hh"
@@ -132,7 +131,7 @@ class Aggregator : public HasLifecycle<Aggregator, AggregatorConfig>,
         return writeResult;
     }
 
-    RingBufferHandle _ringBuffer;
+    ::platform::RingBufferHandle _ringBuffer;
     LogLevel _logLevel = LogLevel::Info;
     std::array<Sink, LoggingConfig::maxSinks> _sinks{};
 

@@ -19,6 +19,8 @@ Totem::CommandBackend::Controller commandController(taskRegistry.hooks());
 Totem::CommandBackend::UartTransport uartSource;
 
 void setup() {
+    ABORT_IF_ERR_BEGIN(::platform::Uart::init());
+
     ABORT_IF_ERR_BEGIN(taskRegistry.begin());
 
     ABORT_IF_ERR_BEGIN(uart.begin());

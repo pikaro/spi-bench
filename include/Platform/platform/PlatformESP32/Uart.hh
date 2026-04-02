@@ -1,16 +1,21 @@
 #pragma once
 
-#include "Common.hh"
+#include "Macros/Facade.hh"
 #include "StaticConfig/Uart.hh"
+#include "Types/Error.hh"
 #include "driver/uart.h"
 #include "hal/uart_types.h"
 #include "soc/clk_tree_defs.h"
+#include <algorithm>
 #include <cstddef>
+#include <cstdint>
+#include <expected>
+#include <span>
 
-namespace Totem::Output::detail::platform {
+namespace platform {
 
-struct Platform {
-    static ReturnCode uart_init() {
+struct Uart {
+    static ReturnCode init() {
         const uart_config_t uart_config = {
             .baud_rate = ::UartConfig::baudRate,
             .data_bits = UART_DATA_8_BITS,
@@ -38,8 +43,7 @@ struct Platform {
         return OK();
     }
 
-    static ReturnCode uart_write(const char *data, size_t len,
-                                 bool flush = false) {
+    static ReturnCode write(const char *data, size_t len, bool flush = false) {
         auto ret = uart_write_bytes(_uartNumber, data, len);
         FAIL_IF(ret < 0, ERR(OperationFailed), "Failed to write to UART");
         if (flush) {
@@ -49,7 +53,33 @@ struct Platform {
         return OK();
     }
 
-    static ReturnCode uart_deinit() {
+    static std::expected<size_t, ReturnCode> read(std::span<uint8_t> buffer) {
+        if (buffer.empty()) {
+            return std::unexpected(ERR(InvalidArgument));
+        }
+
+        size_t available = 0;
+        uart_get_buffered_data_len(_uartNumber, &available);
+        if (available == 0) {
+            return std::unexpected(ERR(NotFound));
+        }
+
+        auto requested = std::min(available, buffer.size());
+
+        auto ret = uart_read_bytes(_uartNumber, buffer.data(), requested,
+                                   pdMS_TO_TICKS(100));
+
+        FAIL_IF(ret < 0, std::unexpected(ERR(OperationFailed)),
+                "Failed to read from UART");
+
+        if (ret == 0) {
+            return std::unexpected(ERR(NotFound));
+        }
+
+        return static_cast<size_t>(ret);
+    }
+
+    static ReturnCode deinit() {
         FAIL_IF_ESP(uart_driver_delete(_uartNumber), ERR(OperationFailed),
                     "Failed to delete UART driver");
         return OK();
@@ -64,4 +94,4 @@ struct Platform {
         static_cast<uart_port_t>(::UartConfig::uartNumber);
 };
 
-} // namespace Totem::Output::detail::platform
+} // namespace platform

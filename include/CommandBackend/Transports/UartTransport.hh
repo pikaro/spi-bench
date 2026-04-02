@@ -1,8 +1,8 @@
 #pragma once
 
-#include "CommandBackend/detail/PlatformSelect.hh"
 #include "CommandBackend/detail/Types.hh"
 #include "Macros/Facade.hh"
+#include "Platform/Uart.hh"
 #include "StaticConfig/Command.hh"
 #include "StaticConfig/Uart.hh"
 #include "Types/Command.hh"
@@ -13,7 +13,6 @@
 #include <cstdint>
 #include <cstring>
 #include <expected>
-#include <span>
 
 namespace Totem::CommandBackend::detail::Transports {
 
@@ -28,7 +27,7 @@ class UartTransport {
     std::expected<CommandDesc::Tokens, ReturnCode> poll() {
         _tokenCount = 0;
 
-        auto readResult = platform::Platform::uart_read(_rxChunk);
+        auto readResult = platform::Uart::read(_rxChunk);
         if (!readResult) {
             return std::unexpected(readResult.error());
         }

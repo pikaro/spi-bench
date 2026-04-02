@@ -3,8 +3,8 @@
 #include "Base/HasLifecycle.hh"
 #include "Macros/Facade.hh"
 #include "Output/detail/Config.hh"
-#include "Output/detail/PlatformSelect.hh"
 #include "Output/detail/Types.hh"
+#include "Platform/Uart.hh"
 #include "Types/Error.hh"
 #include "Types/Logging.hh"
 #include <array>
@@ -46,13 +46,13 @@ class UartOutput : public HasLifecycle<UartOutput, UartConfig> {
             num = static_cast<int>(buf.size() - 1);
         }
 
-        return Platform::uart_write(buf.data(), static_cast<size_t>(num),
-                                    config().flush);
+        return ::platform::Uart::write(buf.data(), static_cast<size_t>(num),
+                                       config().flush);
     }
 
   private:
-    static ReturnCode _onBegin() { return Platform::uart_init(); }
-    static ReturnCode _onEnd() { return Platform::uart_deinit(); }
+    static ReturnCode _onBegin() { return OK(); }
+    static ReturnCode _onEnd() { return OK(); }
 
     static constexpr size_t maxFormattedSize =
         10 + // Timestamp max length in characters (assuming 32-bit unsigned

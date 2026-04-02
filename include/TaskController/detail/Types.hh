@@ -5,6 +5,7 @@
 #include "Concepts/Base.hh"
 #include "Types/Error.hh"
 #include "Types/Signal.hh"
+#include <concepts>
 
 namespace Totem::TaskController::detail {
 

@@ -29,9 +29,6 @@ struct Config {
     uint32_t endTimeoutMs = 5000;
     bool autoRestart = true;
 
-    static constexpr uint8_t maxTaskNameLen = 16;
-    static constexpr uint8_t maxTasksPerClass = 3;
-
     [[nodiscard]] bool validate() const {
         return name != nullptr && priority > 0 && stackSize > 0 &&
                intervalMs > 0 && notifyTimeoutMs > 0 && endTimeoutMs > 0;

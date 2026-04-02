@@ -1,12 +1,12 @@
 #pragma once
 
 #include "Macros/Facade.hh"
-#include "Metrics/detail/Types.hh"
+#include "MetricsBackend/detail/Types.hh"
 #include "Store.hh"
 #include "Types/Error.hh"
 #include <cstdint>
 
-namespace Totem::Metrics::detail {
+namespace Totem::MetricsBackend::detail {
 
 class Recorder {
   public:
@@ -42,4 +42,4 @@ class Recorder {
     using DefaultError = CoreError;
 };
 
-} // namespace Totem::Metrics::detail
+} // namespace Totem::MetricsBackend::detail

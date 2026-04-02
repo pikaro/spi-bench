@@ -3,12 +3,16 @@
 #include "Common.hh"
 
 #include "Generic/Directory.hh"
+#include "StaticConfig/TaskController.hh"
+#include "TaskController/detail/Config.hh"
 #include "TaskController/detail/Runner.hh"
+#include "TaskController/detail/Types.hh"
 #include "Types/Error.hh"
 #include <cstring>
 #include <expected>
 #include <memory>
 #include <optional>
+#include <utility>
 
 namespace Totem::TaskController::detail {
 
@@ -18,8 +22,9 @@ struct RunnerEntry {
     std::optional<Config> config = std::nullopt;
 };
 
-using DirectoryImpl = Generic::Directory<RunnerEntry, Config::maxTasksPerClass,
-                                         Config::maxTaskNameLen>;
+using DirectoryImpl =
+    Generic::Directory<RunnerEntry, TaskControllerConfig::maxTasksPerClass,
+                       TaskControllerConfig::maxTaskNameLen>;
 
 class Directory : public DirectoryImpl {
   public:

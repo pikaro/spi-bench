@@ -41,8 +41,8 @@ struct Metrics {
         return ::Metrics::recorder().decrement(taskCount);
     }
 
-    Totem::Metrics::GroupHandle group;
-    Totem::Metrics::CounterHandle taskCount;
+    Totem::MetricsBackend::GroupHandle group;
+    Totem::MetricsBackend::CounterHandle taskCount;
 
     using DefaultError = CoreError;
 };

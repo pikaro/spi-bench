@@ -3,16 +3,15 @@
 #include "Base/HasLifecycle.hh"
 #include "Macros/Facade.hh"
 #include "TaskController/Facade.hh"
-#include "TaskControllerRegistry/detail/Config.hh"
 #include "TaskControllerRegistry/detail/Directory.hh"
 #include "TaskControllerRegistry/detail/Metrics.hh"
 #include "Types/Error.hh"
 
 namespace Totem::TaskControllerRegistry::detail {
 
-class Registry : public HasLifecycle<Registry, Config> {
-    friend class HasLifecycle<Registry, Config>;
-    friend struct LifecycleContract<Registry, Config>;
+class Registry : public HasLifecycle<Registry> {
+    friend class HasLifecycle<Registry>;
+    friend struct LifecycleContract<Registry>;
 
     using ControllerNameKey = Directory::EntryNameKey;
 
@@ -87,7 +86,7 @@ class Registry : public HasLifecycle<Registry, Config> {
     using DefaultError = CoreError;
 };
 
-inline constexpr LifecycleContract<Registry, Config> _registry_lifecycle;
+inline constexpr LifecycleContract<Registry> _registry_lifecycle;
 inline constexpr TaskController::RegistryHooks::Contract<Registry>
     _registry_hooks_contract;
 

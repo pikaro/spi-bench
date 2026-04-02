@@ -1,14 +1,14 @@
 #pragma once
 
 #include "Generic/Directory.hh"
-#include "Metrics/detail/Types.hh"
+#include "MetricsBackend/detail/Types.hh"
 #include "StaticConfig/Metrics.hh"
 #include "Types/Error.hh"
 #include "Types/Metrics.hh"
 #include <cstring>
 #include <expected>
 
-namespace Totem::Metrics::detail {
+namespace Totem::MetricsBackend::detail {
 
 using MetricDirectoryImpl =
     Generic::Directory<Metric, MetricConfig::maxMetrics,
@@ -28,4 +28,4 @@ class MetricDirectory : public MetricDirectoryImpl {
     }
 };
 
-} // namespace Totem::Metrics::detail
+} // namespace Totem::MetricsBackend::detail

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Common.hh"
-#include "Output/detail/Config.hh"
+#include "StaticConfig/Uart.hh"
 #include "driver/uart.h"
 #include "hal/uart_types.h"
 #include "soc/clk_tree_defs.h"
@@ -10,9 +10,9 @@
 namespace Totem::Output::detail::platform {
 
 struct Platform {
-    static ReturnCode uart_init(const UartConfig &config) {
+    static ReturnCode uart_init() {
         const uart_config_t uart_config = {
-            .baud_rate = config.baudRate,
+            .baud_rate = ::UartConfig::baudRate,
             .data_bits = UART_DATA_8_BITS,
             .parity = UART_PARITY_DISABLE,
             .stop_bits = UART_STOP_BITS_1,
@@ -58,10 +58,10 @@ struct Platform {
   private:
     using DefaultError = CoreError;
 
-    static_assert(UartConfig::uartNumber < UART_NUM_MAX,
+    static_assert(::UartConfig::uartNumber < UART_NUM_MAX,
                   "UART number must be less than UART_NUM_MAX");
     static constexpr uart_port_t _uartNumber =
-        static_cast<uart_port_t>(UartConfig::uartNumber);
+        static_cast<uart_port_t>(::UartConfig::uartNumber);
 };
 
 } // namespace Totem::Output::detail::platform

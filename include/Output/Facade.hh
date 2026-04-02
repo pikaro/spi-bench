@@ -2,15 +2,15 @@
 
 #include "Output/detail/Aggregator.hh"
 #include "Output/detail/Config.hh"
-#include "Output/detail/Outputs/Uart.hh"
+#include "Output/detail/Outputs/UartOutput.hh"
 #include "Output/detail/Types.hh"
 
 namespace Totem::Output {
 
-using Aggregator = detail::Aggregator;
-using Config = detail::AggregatorConfig;
-using Sink = detail::Sink;
+using detail::Aggregator;
+using detail::AggregatorConfig;
+using detail::Sink;
 
-using OutputUart = detail::Outputs::OutputUart;
+using detail::Outputs::UartOutput;
 
 } // namespace Totem::Output

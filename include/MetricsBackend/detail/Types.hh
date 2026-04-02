@@ -6,7 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace Totem::Metrics::detail {
+namespace Totem::MetricsBackend::detail {
 
 struct MetricGroup {
     MetricGroupDesc desc{};
@@ -31,4 +31,4 @@ using CounterHandle =
 using GaugeHandle =
     StrongHandle<GaugeTag, MetricConfig::maxMetricNameLength, Registrar>;
 
-} // namespace Totem::Metrics::detail
+} // namespace Totem::MetricsBackend::detail

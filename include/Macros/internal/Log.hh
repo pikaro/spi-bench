@@ -1,6 +1,9 @@
 #pragma once
 
-#include "Base/Namespaces.hh" // IWYU pragma: export
+#include "Base/Namespaces.hh"         // IWYU pragma: export
+#include "Platform/PlatformSelect.hh" // IWYU pragma: export
+#include "Support/Logger.hh"          // IWYU pragma: export
+#include "Types/Logging.hh"           // IWYU pragma: export
 #include "esp_log.h"
 #include <array>           // IWYU pragma: export
 #include <source_location> // IWYU pragma: export

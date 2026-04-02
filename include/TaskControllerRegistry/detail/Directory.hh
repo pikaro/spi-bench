@@ -2,8 +2,8 @@
 
 #include "Common.hh"
 
-#include "Config.hh"
 #include "Generic/Directory.hh"
+#include "StaticConfig/TaskRegistry.hh"
 #include "TaskController/Facade.hh"
 #include "Types/Error.hh"
 #include <cstring>
@@ -16,8 +16,8 @@ struct ControllerEntry {
 };
 
 using DirectoryImpl =
-    Generic::Directory<ControllerEntry, Config::controllerCountMax,
-                       Config::controllerNameMaxLen>;
+    Generic::Directory<ControllerEntry, TaskRegistryConfig::controllerCountMax,
+                       TaskRegistryConfig::controllerNameMaxLen>;
 
 class Directory : public DirectoryImpl {
   public:

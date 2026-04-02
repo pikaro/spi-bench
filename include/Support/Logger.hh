@@ -5,8 +5,6 @@
 #include "Types/Error.hh"
 #include "Types/Logging.hh"
 #include "esp_log.h"
-#include "esp_log_args.h"
-#include "esp_log_config.h"
 #include <concepts>
 
 namespace Totem::LoggerSupport::detail {
@@ -72,8 +70,9 @@ class Logger {
         requires IsLoggerBackend<T>
     {
         auto loggerBackend = LoggerBackend::bind(backend);
-        FAIL_IF(!loggerBackend.validate(), ERR(InvalidArgument),
-                "Invalid logger backend provided: %s", backend.name);
+        // FIXME: Include cycle - logger macros use Logger, FAIL uses logger
+        // macros FAIL_IF(!loggerBackend.validate(), ERR(InvalidArgument),
+        //         "Invalid logger backend provided: %s", backend.name);
         _backend = loggerBackend;
         return OK();
     }

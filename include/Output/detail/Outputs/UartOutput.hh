@@ -14,9 +14,9 @@
 
 namespace Totem::Output::detail::Outputs {
 
-class OutputUart : public HasLifecycle<OutputUart, UartConfig> {
-    friend class HasLifecycle<OutputUart, UartConfig>;
-    friend struct LifecycleContract<OutputUart, UartConfig>;
+class UartOutput : public HasLifecycle<UartOutput, UartConfig> {
+    friend class HasLifecycle<UartOutput, UartConfig>;
+    friend struct LifecycleContract<UartOutput, UartConfig>;
 
   public:
     static constexpr const char *name = "Output::Uart";
@@ -51,8 +51,7 @@ class OutputUart : public HasLifecycle<OutputUart, UartConfig> {
     }
 
   private:
-    ReturnCode _onBegin() { return Platform::uart_init(config()); }
-
+    static ReturnCode _onBegin() { return Platform::uart_init(); }
     static ReturnCode _onEnd() { return Platform::uart_deinit(); }
 
     static constexpr size_t maxFormattedSize =
@@ -68,8 +67,8 @@ class OutputUart : public HasLifecycle<OutputUart, UartConfig> {
     using DefaultError = CoreError;
 };
 
-inline constexpr LifecycleContract<OutputUart, UartConfig>
+inline constexpr LifecycleContract<UartOutput, UartConfig>
     _output_uart_lifecycle;
-inline constexpr Sink::Contract<OutputUart> _output_uart_sink;
+inline constexpr Sink::Contract<UartOutput> _output_uart_sink;
 
 } // namespace Totem::Output::detail::Outputs

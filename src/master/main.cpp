@@ -1,20 +1,38 @@
 #include "Common.hh"
 
-#include "Metrics/Facade.hh"
+#include "CommandBackend/Facade.hh"
+#include "MetricsBackend/Facade.hh"
 #include "Output/Facade.hh"
+#include "Platform/platform/PlatformESP32/Base.hh"
+#include "Support/Commands.hh"
+#include "Support/CoreCommands.hh"
 #include "Support/Metrics.hh"
 #include "TaskControllerRegistry/Facade.hh"
-#include "freertos/idf_additions.h"
 
-Totem::Metrics::Backend metricsBackend;
+Totem::MetricsBackend::Backend metricsBackend;
 Totem::TaskControllerRegistry::Registry taskRegistry;
+
 Totem::Output::Aggregator aggregator(taskRegistry.hooks());
-Totem::Output::OutputUart uart;
+Totem::Output::UartOutput uart;
+
+Totem::CommandBackend::Controller commandController(taskRegistry.hooks());
+Totem::CommandBackend::UartTransport uartSource;
 
 void setup() {
     ABORT_IF_ERR_BEGIN(taskRegistry.begin());
 
     ABORT_IF_ERR_BEGIN(uart.begin());
+
+    ABORT_IF_ERR_BEGIN(commandController.begin());
+    ABORT_IF_UNEXPECTED(uartTransport, uartSource.transport(),
+                        "Failed to get transport from UART transport");
+    ABORT_IF_ERR(commandController.addTransport(uartTransport),
+                 "Failed to add UART transport to command controller");
+    Commands::setBackend(commandController);
+
+    ABORT_IF_ERR(register_core_commands(),
+                 "Failed to register core commands to command controller");
+
     ABORT_IF_UNEXPECTED(uartSink, uart.sink(),
                         "Failed to get sink from UART output");
 
@@ -37,13 +55,11 @@ extern "C" {
 void app_main(void);
 }
 
-// FIXME: Abstract
-TickType_t lastWakeTime;
+::platform::Tick lastWakeTime;
 
 void app_main() {
     setup();
     for (;;) {
-        // FIXME: Abstract
-        xTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(100));
+        ::platform::delay_until(&lastWakeTime, 1000);
     }
 }

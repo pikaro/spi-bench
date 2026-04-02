@@ -24,6 +24,7 @@ enum class CoreError : uint8_t {
     Unexpected,
     InvalidState,
     InvalidData,
+    Overflow,
 };
 
 static constexpr auto coreErrorNames = std::to_array<const char *>({
@@ -39,6 +40,7 @@ static constexpr auto coreErrorNames = std::to_array<const char *>({
     "[9] Core::Unexpected",
     "[10] Core::InvalidState",
     "[11] Core::InvalidData",
+    "[12] Core::Overflow",
 });
 
 enum class PubSubError : uint8_t {

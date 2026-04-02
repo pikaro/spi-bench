@@ -7,6 +7,7 @@
 #include "Output/detail/PlatformSelect.hh"
 #include "Output/detail/Types.hh"
 #include "RingBuffer/Facade.hh"
+#include "StaticConfig/Logging.hh"
 #include "TaskController/Facade.hh"
 #include "Types/Error.hh"
 #include "Types/Logging.hh"
@@ -44,20 +45,22 @@ class Aggregator : public HasLifecycle<Aggregator, AggregatorConfig>,
     }
 
     ReturnCode addSink(const Sink &sink) {
-        for (size_t i = 0; i < AggregatorConfig::maxSinks; ++i) {
+        FAIL_IF(!sink.validate(), ERR(InvalidArgument),
+                "Invalid sink provided to %s", name);
+        for (size_t i = 0; i < LoggingConfig::maxSinks; ++i) {
             if (!_sinks[i].validate()) {
                 _sinks[i] = sink;
                 return OK();
             }
         }
-        return ERR(CoreError, OutOfMemory);
+        FAIL(ERR(OutOfMemory), "No available slots for sink in %s", name);
     }
 
   private:
     ReturnCode _onBegin() {
         auto taskHooks = TaskController::TaskHooks::bind(*this);
 
-        FAIL_IF_ERR_FWD(_beginTaskController(),
+        FAIL_IF_ERR_FWD(_beginTaskController(LoggingConfig::task),
                         "Failed to begin task controller for %s", name);
 
         auto taskAddResult =
@@ -72,7 +75,7 @@ class Aggregator : public HasLifecycle<Aggregator, AggregatorConfig>,
                            "Failed to create ring buffer for %s", name);
         _ringBuffer = ringBuffer;
 
-        FAIL_IF_ERR_FWD(_taskController.startTask(task, config().task),
+        FAIL_IF_ERR_FWD(_taskController.startTask(task, LoggingConfig::task),
                         "Failed to start task for %s", name);
 
         return OK();
@@ -131,7 +134,7 @@ class Aggregator : public HasLifecycle<Aggregator, AggregatorConfig>,
 
     RingBufferHandle _ringBuffer;
     LogLevel _logLevel = LogLevel::Info;
-    std::array<Sink, AggregatorConfig::maxSinks> _sinks{};
+    std::array<Sink, LoggingConfig::maxSinks> _sinks{};
 
     using DefaultError = CoreError;
 };

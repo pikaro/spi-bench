@@ -1,11 +1,11 @@
 #pragma once
 
-#include "Metrics/detail/Types.hh"
+#include "MetricsBackend/detail/Types.hh"
 #include "detail/Backend.hh"
 #include "detail/Recorder.hh"
 #include "detail/Registrar.hh"
 
-namespace Totem::Metrics {
+namespace Totem::MetricsBackend {
 
 using Backend = detail::Backend;
 using Registrar = detail::Registrar;
@@ -14,4 +14,4 @@ using GroupHandle = detail::GroupHandle;
 using CounterHandle = detail::CounterHandle;
 using GaugeHandle = detail::GaugeHandle;
 
-} // namespace Totem::Metrics
+} // namespace Totem::MetricsBackend

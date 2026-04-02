@@ -4,15 +4,10 @@
 #include "Concepts/Base.hh"
 #include "Macros/Facade.hh"
 #include "Types/Error.hh"
+#include "Types/NoConfig.hh"
 #include <concepts>
 
 namespace Totem::Core {
-
-struct NoConfig {
-    // Empty base config
-
-    [[nodiscard]] static bool validate() { return true; }
-};
 
 template <class Derived, typename ConfT = NoConfig> class HasLifecycle {
   public:

@@ -1,9 +1,9 @@
 #pragma once
 
 #include "Macros/Facade.hh"
-#include "Metrics/detail/MetricDirectory.hh"
-#include "Metrics/detail/MetricGroupDirectory.hh"
-#include "Metrics/detail/Types.hh"
+#include "MetricsBackend/detail/MetricDirectory.hh"
+#include "MetricsBackend/detail/MetricGroupDirectory.hh"
+#include "MetricsBackend/detail/Types.hh"
 #include "StaticConfig/Metrics.hh"
 #include "Types/Error.hh"
 #include "Types/Metrics.hh"
@@ -11,7 +11,7 @@
 #include <expected>
 #include <optional>
 
-namespace Totem::Metrics::detail {
+namespace Totem::MetricsBackend::detail {
 
 class Store {
   public:
@@ -99,4 +99,4 @@ class Store {
     using DefaultError = CoreError;
 };
 
-} // namespace Totem::Metrics::detail
+} // namespace Totem::MetricsBackend::detail

@@ -2,20 +2,22 @@
 
 #include "Common.hh"
 
-#include "Metrics/Facade.hh" // IWYU pragma: export
+#include "MetricsBackend/Facade.hh" // IWYU pragma: export
 
 class Metrics {
   public:
-    static Totem::Metrics::Backend &backend() {
-        static Totem::Metrics::Backend instance;
+    static Totem::MetricsBackend::Backend &backend() {
+        static Totem::MetricsBackend::Backend instance;
         return instance;
     }
 
-    static Totem::Metrics::Registrar &registrar() {
+    static Totem::MetricsBackend::Registrar &registrar() {
         return backend().registrar();
     }
 
-    static Totem::Metrics::Recorder &recorder() { return backend().recorder(); }
+    static Totem::MetricsBackend::Recorder &recorder() {
+        return backend().recorder();
+    }
 
   private:
     using DefaultError = CoreError;

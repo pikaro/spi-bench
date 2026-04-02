@@ -1,11 +1,11 @@
 #pragma once
 
-#include "Metrics/detail/Recorder.hh"
-#include "Metrics/detail/Registrar.hh"
-#include "Metrics/detail/Store.hh"
+#include "MetricsBackend/detail/Recorder.hh"
+#include "MetricsBackend/detail/Registrar.hh"
+#include "MetricsBackend/detail/Store.hh"
 #include "Types/Error.hh"
 
-namespace Totem::Metrics::detail {
+namespace Totem::MetricsBackend::detail {
 
 class Backend {
   public:
@@ -24,4 +24,4 @@ class Backend {
     using DefaultError = CoreError;
 };
 
-} // namespace Totem::Metrics::detail
+} // namespace Totem::MetricsBackend::detail

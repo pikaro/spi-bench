@@ -442,6 +442,38 @@ class Directory : HasMutex<Directory<Entry, N, IdLen>> {
     using DefaultError = CoreError;
 };
 
+template <typename Entry, size_t N, size_t IdLen = 32>
+class GettableDirectory : public Directory<Entry, N, IdLen> {
+  public:
+    using Base = Directory<Entry, N, IdLen>;
+    using typename Base::EntryNameKey;
+
+    using Base::Base;
+
+    std::expected<Entry, ReturnCode> getCopy(const EntryNameKey &key) const
+        requires(std::copy_constructible<Entry>)
+    {
+        std::optional<Entry> out;
+
+        auto rc =
+            this->withEntryConst(key, [&out](const Entry &entry) -> ReturnCode {
+                out = entry;
+                return OK();
+            });
+
+        if (!rc.ok()) {
+            return std::unexpected(rc);
+        }
+        if (!out.has_value()) {
+            return std::unexpected(ERR(NotFound));
+        }
+        return std::move(*out);
+    }
+
+  private:
+    using DefaultError = CoreError;
+};
+
 inline constexpr MutexContract<Directory<void *, 1>> _directory_mutex_contract;
 
 } // namespace Totem::Generic

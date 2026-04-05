@@ -54,6 +54,15 @@ class Directory : public DirectoryImpl {
         }
         return OK();
     }
+
+    template <typename Fn>
+        requires TaskController::IsSnapshotHandler<Fn>
+    ReturnCode forEachTaskSnapshot(Fn &&fun) {
+        return withAllConst([&](const EntryNameKey &,
+                                const ControllerEntry &entry) -> ReturnCode {
+            return entry.controller->forEachTaskSnapshot(fun);
+        });
+    }
 };
 
 } // namespace Totem::TaskControllerRegistry::detail

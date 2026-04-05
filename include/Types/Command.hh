@@ -9,8 +9,10 @@
 struct CommandDesc {
     using Token = std::string_view;
     using Tokens = std::span<const Token>;
-    using Handler = ReturnCode (*)(Tokens);
+    using Handler = ReturnCode (*)(Tokens, void *);
 
+    bool needsContext = false;
+    void *ctx = nullptr;
     const char *name;
     const char *description;
     Tokens args;
@@ -20,19 +22,17 @@ struct CommandDesc {
     std::span<const CommandDesc> subcommands;
 
     [[nodiscard]] ReturnCode validate() const {
-        if (name == nullptr) {
-            _log_e("Command name cannot be null");
-            return ERR(InvalidArgument);
-        }
-        if (description == nullptr) {
-            _log_e("Command description cannot be null");
-            return ERR(InvalidArgument);
-        }
+        FAIL_IF(needsContext && ctx == nullptr, ERR(InvalidArgument),
+                "Command with context must have non-null context pointer");
+        FAIL_IF_NULL(handler, ERR(InvalidArgument),
+                     "Command handler cannot be null");
+        FAIL_IF_NULL(name, ERR(InvalidArgument), "Command name cannot be null");
+        FAIL_IF_NULL(description, ERR(InvalidArgument),
+                     "Command description cannot be null");
         for (const auto &subcommand : subcommands) {
-            if (!subcommand.validate()) {
-                _log_e("Subcommand of command %s failed validation", name);
-                return ERR(InvalidArgument);
-            }
+            FAIL_IF_ERR_FWD(subcommand.validate(),
+                            "Invalid subcommand for command %s: %s", name,
+                            subcommand.name);
         }
         return OK();
     }

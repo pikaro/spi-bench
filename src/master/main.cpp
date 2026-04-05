@@ -2,7 +2,9 @@
 
 #include "CommandBackend/Facade.hh"
 #include "MetricsBackend/Facade.hh"
+#include "Monitoring/Facade.hh"
 #include "Output/Facade.hh"
+#include "Platform/Uart.hh"
 #include "Platform/platform/PlatformESP32/Base.hh"
 #include "Support/Commands.hh"
 #include "Support/CoreCommands.hh"
@@ -17,6 +19,8 @@ Totem::Output::UartOutput uart;
 
 Totem::CommandBackend::Controller commandController(taskRegistry.hooks());
 Totem::CommandBackend::UartTransport uartSource;
+
+Totem::Monitoring::Monitoring monitoring;
 
 void setup() {
     ABORT_IF_ERR_BEGIN(::platform::Uart::init());
@@ -44,6 +48,8 @@ void setup() {
 
     ABORT_IF_ERR(Logger::setBackend(aggregator),
                  "Failed to set logger backend to aggregator");
+
+    ABORT_IF_ERR_BEGIN(monitoring.begin());
 
     _log_i("Setup complete");
 

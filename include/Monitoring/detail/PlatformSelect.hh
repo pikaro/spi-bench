@@ -3,12 +3,7 @@
 // IWYU pragma: begin_exports
 
 #if defined(PLATFORM_ESP32)
-#include "platform/PlatformESP32/Facade.hh"
-
-#if defined(PLATFORM_ESP32_ORIG)
-#include "platform/PlatformESP32Orig.hh"
-#endif
-
+#include "platform/PlatformESP32.hh"
 #elif defined(PLATFORM_TEST)
 #include "platform/PlatformTest/Facade.hh"
 #else
@@ -16,3 +11,7 @@
 #endif
 
 // IWYU pragma: end_exports
+
+namespace Totem::Monitoring::detail {
+using Platform = platform::Platform;
+} // namespace Totem::Monitoring::detail

@@ -4,7 +4,7 @@
 #include <cstdint>
 
 struct CommandConfig {
-    static constexpr uint8_t maxEntries = 255;
+    static constexpr uint8_t maxEntries = 64;
     static constexpr uint8_t maxNameLength = 16;
     static constexpr uint8_t maxTransports = 4;
     static constexpr uint8_t maxTokens = 10;
@@ -12,7 +12,7 @@ struct CommandConfig {
 
     static constexpr Totem::TaskController::Config task{
         .name = "Command",
-        .stackSize = 4096,
+        .stackSize = 8192,
         .intervalMs = 10,
     };
 };

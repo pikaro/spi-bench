@@ -4,6 +4,7 @@
 
 #include "Generic/Directory.hh"
 #include "StaticConfig/TaskController.hh"
+#include "TaskController/detail/Concepts.hh"
 #include "TaskController/detail/Config.hh"
 #include "TaskController/detail/Runner.hh"
 #include "TaskController/detail/Types.hh"
@@ -59,6 +60,23 @@ class Directory : public DirectoryImpl {
             return ERR(InvalidState);
         }
         return OK();
+    }
+
+    template <typename Fn>
+        requires IsSnapshotHandler<Fn>
+    ReturnCode forEachTaskSnapshot(Fn &&fun) {
+        return withAll(
+            [&](const EntryNameKey &, const RunnerEntry &entry) -> ReturnCode {
+                auto takeSnapshotResult = entry.runner->takeSnapshot();
+                FAIL_IF_ERR_FWD(takeSnapshotResult,
+                                "Failed to take snapshot for runner %s",
+                                entry.config->name);
+                auto snapshotResult = entry.runner->snapshot();
+                if (!snapshotResult) {
+                    return snapshotResult.error();
+                }
+                return fun(*snapshotResult);
+            });
     }
 };
 

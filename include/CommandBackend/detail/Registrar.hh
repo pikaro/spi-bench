@@ -11,7 +11,8 @@ class Registrar {
   public:
     explicit Registrar(Store &store) : _store(store) {}
 
-    ReturnCode registerCommand(const CommandDesc &cmd) {
+    ReturnCode registerCommand(CommandDesc &cmd, void *ctx = nullptr) {
+        cmd.ctx = ctx;
         FAIL_IF_ERR_FWD(
             cmd.validate(),
             "Invalid command description for command %s:", cmd.name);

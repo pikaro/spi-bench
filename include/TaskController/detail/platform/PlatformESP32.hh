@@ -3,10 +3,13 @@
 #include "Common.hh"
 
 #include "TaskController/detail/Config.hh"
+#include "TaskController/detail/Types.hh"
 #include "TaskController/detail/platform/PlatformCommon.hh"
 #include "Types/Signal.hh"
 #include "esp_task_wdt.h"
 #include "freertos/idf_additions.h"
+#include <cstdint>
+#include <expected>
 
 namespace Totem::TaskController::detail::platform {
 
@@ -17,6 +20,8 @@ using PlatformResultCreateTask = PlatformResultCreateTaskT<TaskHandle_t>;
 
 struct Platform {
     using TaskHandle = ::platform::TaskHandle;
+    using TaskStatus = ::platform::TaskStatus;
+    using StackDepth = ::platform::StackDepth;
 
     static PlatformResultCreateTask create_task(Config config,
                                                 TaskFunction_t taskFunction,
@@ -108,20 +113,56 @@ struct Platform {
     static void wdt_reset() { esp_task_wdt_reset(); }
     static ReturnCode wdt_add() {
         auto result = esp_task_wdt_add(nullptr);
-        FAIL_IF(result != ESP_OK, ERR(CoreError, OperationFailed),
-                "Failed to add task to watchdog");
+        FAIL_IF_ESP(result, ERR(CoreError, OperationFailed),
+                    "Failed to add task to watchdog");
         return OK(CoreError);
     }
     static ReturnCode wdt_remove() {
         auto result = esp_task_wdt_delete(nullptr);
-        FAIL_IF(result != ESP_OK, ERR(CoreError, OperationFailed),
-                "Failed to remove task from watchdog");
+        FAIL_IF_ESP(result, ERR(CoreError, OperationFailed),
+                    "Failed to remove task from watchdog");
         return OK(CoreError);
     }
 
     static void delay_task_until(::platform::Tick *lastWakeTime,
                                  ::platform::Tick intervalTicks) {
         xTaskDelayUntil(lastWakeTime, intervalTicks);
+    }
+
+    static std::expected<TaskPlatformSnapshot, ReturnCode>
+    get_snapshot(TaskHandle taskHandle) {
+        TaskStatus_t taskStatus;
+        vTaskGetInfo(taskHandle, &taskStatus, pdTRUE, eInvalid);
+
+        TaskPlatformSnapshot snapshot;
+
+        switch (taskStatus.eCurrentState) {
+        case eRunning:
+            snapshot.state = PlatformState::Running;
+            break;
+        case eReady:
+            snapshot.state = PlatformState::Ready;
+            break;
+        case eBlocked:
+            snapshot.state = PlatformState::Blocked;
+            break;
+        case eSuspended:
+            snapshot.state = PlatformState::Suspended;
+            break;
+        case eDeleted:
+            return std::unexpected(ERR(CoreError, NotFound));
+        case eInvalid:
+            return std::unexpected(ERR(CoreError, InvalidState));
+        }
+
+        snapshot.priority = static_cast<uint8_t>(taskStatus.uxCurrentPriority);
+        snapshot.runTimeMs =
+            ::platform::ticks_to_ms(taskStatus.ulRunTimeCounter);
+        snapshot.stackLowestFree = taskStatus.usStackHighWaterMark;
+        // FIXME: xTaskGetInfo doesn't return the core ID?
+        snapshot.coreId = 0; // taskStatus.xCoreID;
+
+        return snapshot;
     }
 };
 

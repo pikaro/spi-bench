@@ -1,10 +1,16 @@
 #pragma once
 
+#include "Macros/Facade.hh"
 #include "TaskController/detail/Config.hh"
 #include "TaskController/detail/Loop.hh"
 #include "TaskController/detail/PlatformSelect.hh"
 #include "TaskController/detail/StateManager.hh"
 #include "TaskController/detail/Types.hh"
+#include "Types/Error.hh"
+#include "Types/Signal.hh"
+#include <atomic>
+#include <cstdint>
+#include <expected>
 #include <optional>
 
 namespace Totem::TaskController::detail {
@@ -14,6 +20,8 @@ class Runner {
     static constexpr const char *name = "TaskController::Runner";
 
     explicit Runner(TaskHooks hooks) : _hooks(hooks) {}
+
+    [[nodiscard]] const Config &config() const { return _config; }
 
     ReturnCode start(Config cfg) {
         _config = cfg;
@@ -33,8 +41,6 @@ class Runner {
     ReturnCode requestStop() {
         FAIL_IF_NULL(_handle, ERR(OperationFailed),
                      "Cannot request stop on unstarted runner");
-        FAIL_IF_NOT_NULL(_handle, ERR(OperationFailed),
-                         "Cannot request stop on unstarted runner");
         auto result = Platform::signal_task(_handle, Signal::Stop);
         FAIL_IF_ERR(result, ERR(OperationFailed),
                     "Failed to signal task to stop");
@@ -44,8 +50,8 @@ class Runner {
     void kill() {
         FAIL_IF_NULL_VOID(_handle, "Cannot kill unstarted runner");
         _stateManager.enterStopping();
-        _stopResult = Loop::Result{.reason = Loop::ExitReason::Killed,
-                                   .error = ERR(Unexpected)};
+        _stopResult =
+            Result{.reason = ExitReason::Killed, .error = ERR(Unexpected)};
         _hasStopResult.store(true, std::memory_order_release);
         _stateManager.enterStopped();
         auto *handle = _handle;
@@ -61,7 +67,7 @@ class Runner {
     [[nodiscard]] bool hasStopped() const {
         return _hasStopResult.load(std::memory_order_acquire);
     }
-    [[nodiscard]] std::optional<Loop::Result> stopResult() const {
+    [[nodiscard]] std::optional<Result> stopResult() const {
         if (!hasStopped()) {
             _log_w(
                 "Stop result requested for runner %s which has not stopped yet",
@@ -69,6 +75,59 @@ class Runner {
             return std::nullopt;
         }
         return _stopResult;
+    }
+
+    [[nodiscard]] std::expected<TaskRuntimeSnapshot, ReturnCode>
+    snapshot() const {
+        if (!_hasSnapshot.load(std::memory_order_acquire)) {
+            return std::unexpected(ERR(NotFound));
+        }
+        return _runtimeSnapshot;
+    }
+
+    ReturnCode takeSnapshot() {
+        auto platformResult = Platform::get_snapshot(_handle);
+        if (!platformResult) {
+            FAIL(platformResult.error(),
+                 "Failed to load platform state for Runner %s", _config.name);
+        };
+        auto timestamp = ::platform::get_time();
+
+        float runTimeTotalPct = 0.0F;
+        float runTimeDeltaPct = 0.0F;
+        auto timestampDelta = timestamp - _runtimeSnapshot.timestamp;
+
+        if (timestamp > 0) {
+            runTimeTotalPct = static_cast<float>(platformResult->runTimeMs) /
+                              static_cast<float>(timestamp);
+        }
+
+        if (timestamp > 0 && timestampDelta > 0) {
+            runTimeDeltaPct = static_cast<float>(platformResult->runTimeMs -
+                                                 _platformSnapshot.runTimeMs) /
+                              static_cast<float>(timestampDelta);
+        }
+
+        _runtimeSnapshot = TaskRuntimeSnapshot{
+            .timestamp = timestamp,
+            .timestampDelta = timestampDelta,
+            .name = _config.name,
+            .hasEverStarted = _hasEverStarted.load(std::memory_order_acquire),
+            .lastStopResult = hasStopped() ? _stopResult : std::nullopt,
+            .state = _stateManager.state(),
+            .platformState = platformResult->state,
+            .currentPriority = platformResult->priority,
+            .runTimeTotalPct = runTimeTotalPct,
+            .runTimeDeltaPct = runTimeDeltaPct,
+            .stackUsedPct =
+                static_cast<float>(_config.stackSize -
+                                   platformResult->stackLowestFree) /
+                static_cast<float>(_config.stackSize),
+        };
+
+        _platformSnapshot = *platformResult;
+        _hasSnapshot.store(true, std::memory_order_release);
+        return OK();
     }
 
   private:
@@ -79,7 +138,7 @@ class Runner {
                           .hooks = self->_hooks,
                           .stateManager = self->_stateManager});
         auto result = loop.run();
-        if (result.reason == Loop::ExitReason::StopRequested) {
+        if (result.reason == ExitReason::StopRequested) {
             _log_i("Runner %s exited successfully", self->_config.name);
         } else {
             _log_e("Runner %s exited with error: %s (reason code %d)",
@@ -117,10 +176,13 @@ class Runner {
     TaskHandle _handle;
     StateManager _stateManager;
     Config _config;
+    TaskRuntimeSnapshot _runtimeSnapshot{};
+    TaskPlatformSnapshot _platformSnapshot{};
     TaskHooks _hooks;
-    std::optional<Loop::Result> _stopResult = std::nullopt;
+    std::optional<Result> _stopResult = std::nullopt;
     std::atomic<bool> _hasEverStarted = false;
     std::atomic<bool> _hasStopResult = false;
+    std::atomic<bool> _hasSnapshot = false;
 
     using DefaultError = CoreError;
 };

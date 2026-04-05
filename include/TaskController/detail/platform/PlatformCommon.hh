@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Platform/PlatformSelect.hh"
+
 namespace Totem::TaskController::detail::platform {
 
 template <typename T> struct PlatformResultCreateTaskT {

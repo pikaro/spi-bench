@@ -1,11 +1,13 @@
 #pragma once
 
+#include "Macros/Facade.hh"
 #include "TaskController/detail/Config.hh"
 #include "TaskController/detail/ScopedWatchdog.hh"
 #include "TaskController/detail/SignalHandler.hh"
 #include "TaskController/detail/StateManager.hh"
 #include "TaskController/detail/StepScheduler.hh"
 #include "TaskController/detail/Types.hh"
+#include "Types/Error.hh"
 
 namespace Totem::TaskController::detail {
 
@@ -15,24 +17,6 @@ class Loop {
         Config config;
         TaskHooks &hooks;
         StateManager &stateManager;
-    };
-
-    enum class ExitReason : uint8_t {
-        Killed,
-        StopRequested,
-        InvalidStateTransition,
-        StartHookFailed,
-        StepFailed,
-        SignalFailed,
-        StopHookFailed,
-    };
-
-    struct Result {
-        ExitReason reason;
-        ReturnCode error{OK()};
-        [[nodiscard]] bool isClean() const {
-            return error.ok() && reason == ExitReason::StopRequested;
-        }
     };
 
     explicit Loop(const Context &context)

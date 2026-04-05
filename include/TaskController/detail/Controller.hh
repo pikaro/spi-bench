@@ -6,7 +6,13 @@
 #include "Config.hh"
 #include "Directory.hh"
 #include "Runner.hh"
+#include "TaskController/detail/Concepts.hh"
+#include "TaskController/detail/PlatformSelect.hh"
+#include "TaskController/detail/Types.hh"
 #include <array>
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <memory>
 #include <optional>
@@ -19,10 +25,11 @@ class Controller : public HasLifecycle<Controller, Config> {
     friend class HasLifecycle<Controller, Config>;
     friend struct LifecycleContract<Controller, Config>;
 
-    using RunnerNameKey = Directory::EntryNameKey;
     using RunnerKeySnapshot = Directory::EntryKeySnapshot;
 
   public:
+    using RunnerNameKey = Directory::EntryNameKey;
+
     static constexpr const char *name = "TaskController::Controller";
 
     Controller(const char *ownerName, RegistryHooks registryHooks)
@@ -177,6 +184,16 @@ class Controller : public HasLifecycle<Controller, Config> {
     [[nodiscard]] std::expected<bool, ReturnCode> empty() const {
         FAIL_IF_INACTIVE_UNEXPECTED("%s of %s", name, _ownerName);
         return _directory.empty();
+    }
+
+    template <typename Fn>
+        requires IsSnapshotHandler<Fn>
+    ReturnCode forEachTaskSnapshot(Fn &&fun) {
+        return _directory.forEachTaskSnapshot(fun);
+    }
+
+    [[nodiscard]] std::expected<uint8_t, ReturnCode> taskCount() const {
+        return _directory.size();
     }
 
   private:

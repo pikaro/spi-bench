@@ -1,19 +1,12 @@
 #pragma once
 
+#include "TaskController/detail/Types.hh"
 #include <atomic>
-#include <cstdint>
 
 namespace Totem::TaskController::detail {
 
 class StateManager {
   public:
-    enum class State : uint8_t {
-        Stopped,
-        Starting,
-        Running,
-        Stopping,
-    };
-
     [[nodiscard]] State state() const {
         return _state.load(std::memory_order_acquire);
     }

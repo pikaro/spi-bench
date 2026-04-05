@@ -6,6 +6,9 @@
 #include "TaskControllerRegistry/detail/Directory.hh"
 #include "TaskControllerRegistry/detail/Metrics.hh"
 #include "Types/Error.hh"
+#include <cstdint>
+#include <expected>
+#include <span>
 
 namespace Totem::TaskControllerRegistry::detail {
 
@@ -13,9 +16,9 @@ class Registry : public HasLifecycle<Registry> {
     friend class HasLifecycle<Registry>;
     friend struct LifecycleContract<Registry>;
 
+  public:
     using ControllerNameKey = Directory::EntryNameKey;
 
-  public:
     DELETE_COPY(Registry)
     DELETE_MOVE(Registry)
 
@@ -65,8 +68,50 @@ class Registry : public HasLifecycle<Registry> {
         return OK();
     }
 
+    template <typename Fn>
+        requires TaskController::IsSnapshotHandler<Fn>
+    ReturnCode forEachTaskSnapshot(Fn &&fun) {
+        return _directory.forEachTaskSnapshot(fun);
+    }
+
+    ReturnCode collectTaskSnapshotsInto(
+        std::span<TaskController::TaskRuntimeSnapshot> out) {
+        return forEachTaskSnapshot(
+            [&out](const TaskController::TaskRuntimeSnapshot &snap) {
+                FAIL_IF(out.empty(), ERR(OutOfMemory),
+                        "Not enough space in output span to collect all task "
+                        "snapshots");
+                out.front() = snap;
+                out = out.subspan(1);
+                return OK();
+            });
+    }
+
     [[nodiscard]] TaskController::RegistryHooks hooks() {
         return TaskController::RegistryHooks::bind(*this);
+    }
+
+    [[nodiscard]] std::expected<uint8_t, ReturnCode> controllerCount() const {
+        return _directory.size();
+    }
+
+    [[nodiscard]] std::expected<bool, ReturnCode> taskCount() const {
+        uint8_t count = 0;
+        auto ret = _directory.withAllConst(
+            [&count](const ControllerNameKey &, const ControllerEntry &entry) {
+                auto taskCountResult = entry.controller->taskCount();
+                if (!taskCountResult) {
+                    FAIL(taskCountResult.error(),
+                         "Failed to get task count for controller "
+                         "%s during registry task count",
+                         entry.controller->name);
+                }
+                count += taskCountResult.value();
+                return OK();
+            });
+        FAIL_IF_ERR_FWD_UNEXPECTED(ret,
+                                   "Failed to get task count for registry");
+        return count;
     }
 
   private:

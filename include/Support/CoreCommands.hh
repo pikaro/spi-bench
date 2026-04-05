@@ -10,7 +10,7 @@ inline static CommandDesc helloCmd = {
     .description = "Prints Hello, World!",
     .args = {},
     .minArgs = 0,
-    .handler = [](CommandDesc::Tokens) -> ReturnCode {
+    .handler = [](CommandDesc::Tokens, void *) -> ReturnCode {
         _log_i("Hello, World!");
         return OK(CoreError);
     },

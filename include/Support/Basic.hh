@@ -1,9 +1,13 @@
 #pragma once
 
+#include <cmath>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <type_traits>
 
-[[nodiscard]] inline static size_t hash(const char *str, size_t len) {
+[[nodiscard]] inline size_t hash(const char *str, size_t len) {
     // 64-bit FNV-1a
     uint64_t hash = 14695981039346656037ULL;
     for (size_t i = 0; i < len; ++i) {
@@ -11,4 +15,25 @@
         hash *= 1099511628211ULL;
     }
     return static_cast<size_t>(hash);
+}
+
+template <std::floating_point T = float, typename Dividend, typename Divisor>
+    requires(std::is_arithmetic_v<Dividend> && std::is_arithmetic_v<Divisor>)
+inline T safe_pct(Dividend dividend, Divisor divisor) {
+    if (divisor == 0) {
+        return static_cast<T>(std::numeric_limits<T>::infinity());
+    }
+    return static_cast<T>(dividend) / static_cast<T>(divisor) *
+           static_cast<T>(100);
+}
+
+template <typename EnumT, typename R = std::underlying_type_t<EnumT>>
+    requires std::is_enum_v<EnumT>
+constexpr R to_bits(EnumT value) {
+    return static_cast<R>(value);
+}
+
+template <typename Enum> constexpr bool has_flag(Enum value, Enum flag) {
+    using U = std::underlying_type_t<Enum>;
+    return (static_cast<U>(value) & static_cast<U>(flag)) != 0;
 }

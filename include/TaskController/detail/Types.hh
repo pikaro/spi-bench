@@ -3,9 +3,13 @@
 #include "Common.hh"
 
 #include "Concepts/Base.hh"
+#include "Macros/Facade.hh"
 #include "Types/Error.hh"
 #include "Types/Signal.hh"
 #include <concepts>
+#include <cstdint>
+#include <optional>
+#include <string_view>
 
 namespace Totem::TaskController::detail {
 
@@ -157,6 +161,112 @@ struct RegistryHooks {
         return self != nullptr && registerHook != nullptr &&
                deregisterHook != nullptr;
     }
+};
+
+enum class ExitReason : uint8_t {
+    Killed,
+    StopRequested,
+    InvalidStateTransition,
+    StartHookFailed,
+    StepFailed,
+    SignalFailed,
+    StopHookFailed,
+};
+
+static constexpr std::string_view exit_reason_to_string(ExitReason reason) {
+    switch (reason) {
+    case ExitReason::Killed:
+        return "Killed";
+    case ExitReason::StopRequested:
+        return "StopRequested";
+    case ExitReason::InvalidStateTransition:
+        return "InvalidStateTransition";
+    case ExitReason::StartHookFailed:
+        return "StartHookFailed";
+    case ExitReason::StepFailed:
+        return "StepFailed";
+    case ExitReason::SignalFailed:
+        return "SignalFailed";
+    case ExitReason::StopHookFailed:
+        return "StopHookFailed";
+    default:
+        return "Unknown";
+    }
+}
+
+struct Result {
+    ExitReason reason;
+    ReturnCode error{OK(CoreError)};
+    [[nodiscard]] bool isClean() const {
+        return error.ok() && reason == ExitReason::StopRequested;
+    }
+};
+
+enum class State : uint8_t {
+    Stopped,
+    Starting,
+    Running,
+    Stopping,
+};
+
+static constexpr std::string_view state_to_string(State state) {
+    switch (state) {
+    case State::Stopped:
+        return "Stopped";
+    case State::Starting:
+        return "Starting";
+    case State::Running:
+        return "Running";
+    case State::Stopping:
+        return "Stopping";
+    default:
+        return "Unknown";
+    }
+}
+
+enum class PlatformState : uint8_t {
+    Running = 0,
+    Ready,
+    Blocked,
+    Suspended,
+};
+
+static constexpr std::string_view
+platform_state_to_string(PlatformState state) {
+    switch (state) {
+    case PlatformState::Running:
+        return "Running";
+    case PlatformState::Ready:
+        return "Ready";
+    case PlatformState::Blocked:
+        return "Blocked";
+    case PlatformState::Suspended:
+        return "Suspended";
+    default:
+        return "Unknown";
+    }
+}
+
+struct TaskPlatformSnapshot {
+    PlatformState state;
+    uint8_t priority;
+    uint32_t runTimeMs = 0;
+    uint32_t stackLowestFree = 0;
+    uint8_t coreId;
+};
+
+struct TaskRuntimeSnapshot {
+    uint32_t timestamp = 0;
+    uint32_t timestampDelta;
+    std::string_view name;
+    bool hasEverStarted;
+    std::optional<Result> lastStopResult;
+    State state;
+    PlatformState platformState;
+    uint8_t currentPriority;
+    float runTimeTotalPct;
+    float runTimeDeltaPct;
+    float stackUsedPct;
 };
 
 } // namespace Totem::TaskController::detail

@@ -23,7 +23,7 @@ class Dispatcher {
             }
         }
 
-        return command.handler(args);
+        return command.handler(args, command.ctx);
     }
 
   private:

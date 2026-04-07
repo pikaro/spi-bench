@@ -22,6 +22,10 @@ class Store {
                               commandDesc);
     }
 
+    ReturnCode remove(const CommandNameKey &commandNameKey) {
+        return _directory.remove(commandNameKey);
+    }
+
     [[nodiscard]] std::expected<CommandDesc, ReturnCode>
     get(const CommandNameKey &commandNameKey) const {
         return _directory.getCopy(commandNameKey);

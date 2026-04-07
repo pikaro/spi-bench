@@ -4,7 +4,7 @@
 #include "Macros/Facade.hh"
 #include "Types/Error.hh"
 
-class Commands {
+class CommandService {
     inline static Totem::CommandBackend::Controller *controller;
 
   public:

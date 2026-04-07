@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Macros/Facade.hh"
-#include "Support/Metrics.hh"
+#include "Services/Metrics.hh"
 #include "Types/Error.hh"
 #include "Types/Logging.hh"
 #include "Types/Metrics.hh"

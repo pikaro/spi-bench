@@ -16,7 +16,7 @@
 namespace Totem::CommandBackend::detail {
 
 class Controller : public HasLifecycle<Controller>,
-                   Core::HasTaskController<Controller> {
+                   HasTaskController<Controller> {
     friend class HasLifecycle<Controller>;
     friend struct LifecycleContract<Controller>;
 
@@ -90,8 +90,8 @@ class Controller : public HasLifecycle<Controller>,
                 if (pollResult.error() == ERR(NotFound)) {
                     continue;
                 }
-                FAIL(pollResult.error(),
-                     "Failed to poll command transport in %s", name);
+                FAIL(pollResult.error(), "Error from command transport in %s",
+                     name);
             }
             FAIL_IF_ERR_FWD(_dispatch(*pollResult),
                             "Failed to poll command transport in %s", name);

@@ -2,14 +2,16 @@
 
 #include "Concepts/Base.hh"
 #include "Macros/internal/Error.hh"
+#include "Platform/PlatformSelect.hh"
 #include "Types/Error.hh"
 #include "Types/Logging.hh"
 #include "esp_log.h"
 #include <atomic>
+#include <concepts>
 #include <cstdarg>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <concepts>
 
 namespace Totem::LoggerSupport::detail {
 
@@ -67,7 +69,7 @@ struct LoggerBackend {
     }
 };
 
-class Logger {
+class LoggingService {
   public:
     template <class T>
     static ReturnCode setBackend(T &backend)
@@ -89,8 +91,8 @@ class Logger {
         return _backend.send(record);
     }
 
-    static ReturnCode logf(LogLevel level, const char *tag, const char *format,
-                           ...) {
+    __attribute__((__format__(__printf__, 3, 0))) static ReturnCode
+    logf(LogLevel level, const char *tag, const char *format, ...) {
         va_list args;
         va_start(args, format);
         auto result = vlogf(level, tag, format, args);
@@ -98,24 +100,37 @@ class Logger {
         return result;
     }
 
-    static ReturnCode vlogf(LogLevel level, const char *tag, const char *format,
-                            va_list args) {
+    __attribute__((__format__(__printf__, 3, 0))) static ReturnCode
+    vlogf(LogLevel level, const char *tag, const char *format, va_list args) {
         if (!_recordBusy.test_and_set(std::memory_order_acquire)) {
             auto &record = _scratchRecord;
-            _formatRecord(record, level, tag, format, args);
+            if (auto ret = _formatRecord(record, level, tag, format, args);
+                !ret.ok()) {
+                _recordBusy.clear(std::memory_order_release);
+                return ret;
+            }
             auto result = send(record);
             _recordBusy.clear(std::memory_order_release);
             return result;
         }
 
         LogRecord record{};
-        _formatRecord(record, level, tag, format, args);
+        if (auto ret = _formatRecord(record, level, tag, format, args);
+            !ret.ok()) {
+            return ret;
+        }
         return send(record);
     }
 
   private:
-    static void _formatRecord(LogRecord &record, LogLevel level, const char *tag,
-                              const char *format, va_list args) {
+    __attribute__((__format__(__printf__, 4, 0))) static ReturnCode
+    _formatRecord(LogRecord &record, LogLevel level,
+                  // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+                  const char *tag, const char *format, va_list args) {
+        if (format == nullptr) {
+            return ERR(InvalidArgument);
+        }
+
         record = LogRecord{};
         record.ts = static_cast<uint32_t>(::platform::get_tick());
 
@@ -124,8 +139,8 @@ class Logger {
         record.tag[record.tag.size() - 1] = '\0';
         record.level = level;
 
-        const char *safeFormat = format != nullptr ? format : "";
-        std::vsnprintf(record.msg.data(), record.msg.size(), safeFormat, args);
+        std::vsnprintf(record.msg.data(), record.msg.size(), format, args);
+        return OK();
     }
 
     static inline LoggerBackend _backend = LoggerBackend::null();
@@ -137,4 +152,4 @@ class Logger {
 
 } // namespace Totem::LoggerSupport::detail
 
-using Logger = Totem::LoggerSupport::detail::Logger;
+using Totem::LoggerSupport::detail::LoggingService;

@@ -29,10 +29,15 @@ class UartTransport {
 
         auto readResult = platform::Uart::read(_rxChunk);
         if (!readResult) {
-            return std::unexpected(readResult.error());
-        }
+            if (readResult.error() == ERR(NotFound)) {
+                return std::unexpected(ERR(NotFound));
+            }
 
-        const size_t readBytes = *readResult;
+            FAIL(std::unexpected(readResult.error()),
+                 "Failed to read from UART in %s", name);
+        }
+        const auto readBytes = *readResult;
+
         for (size_t i = 0; i < readBytes; ++i) {
             const char chr = static_cast<char>(_rxChunk[i]);
 
@@ -46,7 +51,8 @@ class UartTransport {
 
             if (_lineLen >= CommandConfig::maxLineLen) {
                 _resetLine();
-                return std::unexpected(ERR(Overflow));
+                FAIL(std::unexpected(ERR(Overflow)),
+                     "Received line exceeds maximum length in %s", name);
             }
 
             _line[_lineLen++] = chr;
@@ -94,13 +100,10 @@ class UartTransport {
     }
 
     std::expected<CommandDesc::Tokens, ReturnCode> _tokenizeCurrentLine() {
-        if (_lineLen == 0) {
-            return std::unexpected(ERR(NotFound));
-        }
-
-        if (_line[0] != '/') {
-            return std::unexpected(ERR(InvalidArgument));
-        }
+        FAIL_IF(_lineLen == 0, std::unexpected(ERR(InvalidArgument)),
+                "Cannot tokenize empty line");
+        FAIL_IF(_line[0] != '/', std::unexpected(ERR(InvalidArgument)),
+                "Command line must start with '/'");
 
         _tokenCount = 0;
 
@@ -131,9 +134,8 @@ class UartTransport {
                 CommandDesc::Token{&_line[start], i - start};
         }
 
-        if (_tokenCount == 0) {
-            return std::unexpected(ERR(InvalidArgument));
-        }
+        FAIL_IF(_tokenCount == 0, std::unexpected(ERR(InvalidArgument)),
+                "No command found in line");
 
         return CommandDesc::Tokens{_tokens.data(), _tokenCount};
     }

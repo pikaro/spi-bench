@@ -4,6 +4,7 @@
 #include "Macros/Facade.hh"
 #include "Types/Command.hh"
 #include "Types/Error.hh"
+#include <expected>
 
 namespace Totem::CommandBackend::detail {
 
@@ -11,15 +12,27 @@ class Registrar {
   public:
     explicit Registrar(Store &store) : _store(store) {}
 
-    ReturnCode registerCommand(CommandDesc &cmd, void *ctx = nullptr) {
+    std::expected<Store::CommandNameKey, ReturnCode>
+    registerCommand(CommandDesc &cmd, void *ctx = nullptr) {
         cmd.ctx = ctx;
-        FAIL_IF_ERR_FWD(
+        FAIL_IF_ERR_FWD_UNEXPECTED(
             cmd.validate(),
             "Invalid command description for command %s:", cmd.name);
-        FAIL_IF_UNEXPECTED_FWD(nameKey, _store.add(cmd.name, cmd),
-                               "Failed to add command %s to store:", cmd.name);
-        (void)nameKey;
-        return OK();
+        FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
+            nameKey, _store.add(cmd.name, cmd),
+            "Failed to add command %s to store:", cmd.name);
+        return nameKey;
+    }
+
+    ReturnCode deregisterCommand(const char *name) {
+        FAIL_IF_NULL(name, ERR(InvalidArgument),
+                     "Cannot deregister command with null name");
+        auto nameKey = Store::CommandNameKey::fromCharPtr(name);
+        return deregisterCommand(nameKey);
+    }
+
+    ReturnCode deregisterCommand(const Store::CommandNameKey &nameKey) {
+        return _store.remove(nameKey);
     }
 
   private:

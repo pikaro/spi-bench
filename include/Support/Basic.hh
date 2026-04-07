@@ -35,5 +35,5 @@ constexpr R to_bits(EnumT value) {
 
 template <typename Enum, typename T = std::underlying_type_t<Enum>>
 constexpr bool has_flag(T value, Enum flag) {
-    return (static_cast<T>(value) & static_cast<T>(flag)) != 0;
+    return (T(value) & static_cast<T>(flag)) != 0;
 }

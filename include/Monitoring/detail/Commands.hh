@@ -4,11 +4,12 @@
 #include "Monitoring/detail/Types.hh"
 #include "StaticConfig/TaskController.hh"
 #include "Support/Basic.hh"
-#include "Support/Commands.hh"
 #include "TaskController/Facade.hh"
 #include "Types/Command.hh"
 #include "Types/Error.hh"
+#include <array>
 #include <cstddef>
+#include <span>
 
 namespace Totem::Monitoring::detail {
 
@@ -72,26 +73,35 @@ inline static ReturnCode dump_monitoring_snaphot(const MonitoringFrame &frame) {
     return OK(CoreError);
 }
 
-inline static ReturnCode cmd_handle_monitoring(CommandDesc::Tokens /*unused*/,
-                                               void *ctx);
+template <typename Owner> struct Commands {
+    static ReturnCode handle_monitoring(CommandDesc::Tokens /*unused*/,
+                                        void *ctx) {
+        auto *monitoring = static_cast<Owner *>(ctx);
+        return monitoring->snapshot(MonitoringSink{
+            .self = monitoring,
+            .consumeHook =
+                [](void *, const MonitoringFrame &frame) {
+                    return dump_monitoring_snaphot(frame);
+                },
+        });
+    }
 
-inline static CommandDesc monitorCmd = {
-    .needsContext = true,
-    .name = "monitor",
-    .description = "Output monitoring data and stats",
-    .args = {},
-    .minArgs = 0,
-    .handler = cmd_handle_monitoring,
-    .subcommands = {},
+    CommandDesc monitorCmd = {
+        .needsContext = true,
+        .name = "monitor",
+        .description = "Output monitoring data and stats",
+        .args = {},
+        .minArgs = 0,
+        .handler = handle_monitoring,
+        .subcommands = {},
+    };
+
+    std::span<CommandDesc *> commands() {
+        static auto commands = std::to_array<CommandDesc *>({
+            &monitorCmd,
+        });
+        return commands;
+    }
 };
-
-inline static ReturnCode register_commands(void *ctx) {
-    auto &reg = Commands::registrar();
-
-    FAIL_IF_ERR_FWD(reg.registerCommand(monitorCmd, ctx),
-                    "Failed to register monitor command");
-
-    return OK(CoreError);
-}
 
 } // namespace Totem::Monitoring::detail

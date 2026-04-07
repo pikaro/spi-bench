@@ -12,13 +12,15 @@
 #include <functional>
 
 template <size_t N> struct NameKey {
-    size_t len{};
+    size_t len = 0;
     std::array<char, N> name{};
 
     bool operator==(const NameKey &other) const {
         return len == other.len &&
                std::memcmp(name.data(), other.name.data(), len) == 0;
     }
+
+    operator bool() const { return len > 0; }
 
     static NameKey fromCharPtr(const char *str) {
         if (str == nullptr) [[unlikely]] {
@@ -31,6 +33,7 @@ template <size_t N> struct NameKey {
         }
         NameKey out{};
         std::memcpy(out.name.data(), str, len);
+        ABORT_IF(len == 0, "NameKey cannot be created from empty string");
         out.len = len;
         return out;
     }

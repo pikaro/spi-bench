@@ -4,12 +4,10 @@
 #include "Mutex/Facade.hh"
 #include "Types/Error.hh"
 
-namespace Totem::Core {
-
 template <class Owner, class ConfT> class Lifecycle {
   public:
     ReturnCode begin(Owner &owner, const ConfT &cfg) {
-        Mutex::ScopedMutexGuard<Owner> guard{_mtx.get()};
+        Totem::Mutex::ScopedMutexGuard<Owner> guard{_mtx.get()};
         if (_active) {
             return ERR(Active);
         }
@@ -22,7 +20,7 @@ template <class Owner, class ConfT> class Lifecycle {
     }
 
     ReturnCode end(Owner &owner) {
-        Mutex::ScopedMutexGuard<Owner> guard{_mtx.get()};
+        Totem::Mutex::ScopedMutexGuard<Owner> guard{_mtx.get()};
         if (!_active) {
             return ERR(NotActive);
         }
@@ -37,10 +35,8 @@ template <class Owner, class ConfT> class Lifecycle {
     const ConfT &config() const { return _config; }
 
   private:
-    Mutex::Mutex _mtx;
+    Totem::Mutex::Mutex _mtx;
     bool _active{false};
     ConfT _config{};
     using DefaultError = LifecycleError;
 };
-
-} // namespace Totem::Core

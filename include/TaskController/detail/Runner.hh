@@ -86,6 +86,9 @@ class Runner {
     }
 
     ReturnCode takeSnapshot() {
+        FAIL_IF_NULL(_handle, ERR(NotFound),
+                     "Cannot take snapshot of unstarted runner %s",
+                     _config.name);
         auto platformResult = Platform::get_snapshot(_handle);
         if (!platformResult) {
             FAIL(platformResult.error(),

@@ -2,7 +2,7 @@
 
 #include "Base/Namespaces.hh"         // IWYU pragma: export
 #include "Platform/PlatformSelect.hh" // IWYU pragma: export
-#include "Support/Logger.hh"          // IWYU pragma: export
+#include "Services/Logging.hh"        // IWYU pragma: export
 #include "Types/Logging.hh"           // IWYU pragma: export
 #include "esp_log.h"
 #include <array>           // IWYU pragma: export
@@ -17,7 +17,8 @@
 
 #define INTERNAL_LOG_IMPL(logLevel, logTag, logFormat, ...)                    \
     do {                                                                       \
-        (void)Logger::logf(logLevel, logTag, logFormat, ##__VA_ARGS__);        \
+        (void)LoggingService::logf(logLevel, logTag, logFormat,                \
+                                   ##__VA_ARGS__);                             \
     } while (0)
 
 #define _log_v(format, ...)                                                    \

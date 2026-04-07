@@ -67,10 +67,12 @@ class Directory : public DirectoryImpl {
     ReturnCode forEachTaskSnapshot(Fn &&fun) {
         return withAll(
             [&](const EntryNameKey &, const RunnerEntry &entry) -> ReturnCode {
+                FAIL_IF_NULL(entry.runner, ERR(InvalidState),
+                             "Runner for owner %s is null", ownerName());
                 auto takeSnapshotResult = entry.runner->takeSnapshot();
                 FAIL_IF_ERR_FWD(takeSnapshotResult,
                                 "Failed to take snapshot for runner %s",
-                                entry.config->name);
+                                entry.runner->config().name);
                 auto snapshotResult = entry.runner->snapshot();
                 if (!snapshotResult) {
                     return snapshotResult.error();

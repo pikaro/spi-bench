@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Base/HasCommands.hh"
 #include "Base/HasLifecycle.hh"
 #include "Macros/Facade.hh"
 #include "Monitoring/detail/Commands.hh"
@@ -9,7 +10,6 @@
 #include "StaticConfig/TaskRegistry.hh"
 #include "TaskController/Facade.hh"
 #include "TaskControllerRegistry/Facade.hh"
-#include "Types/Command.hh"
 #include "Types/Error.hh"
 #include <array>
 #include <cstddef>
@@ -18,9 +18,10 @@
 
 namespace Totem::Monitoring::detail {
 
-class Monitoring : public Core::HasLifecycle<Monitoring> {
-    friend class Core::HasLifecycle<Monitoring>;
-    friend struct Core::LifecycleContract<Monitoring>;
+class Monitoring : public HasLifecycle<Monitoring>,
+                   public HasCommands<Monitoring, Commands<Monitoring>> {
+    friend class HasLifecycle<Monitoring>;
+    friend struct LifecycleContract<Monitoring>;
 
   public:
     explicit Monitoring(TaskControllerRegistry::Registry &taskRegistry)
@@ -71,8 +72,8 @@ class Monitoring : public Core::HasLifecycle<Monitoring> {
     }
 
   private:
-    ReturnCode _onBegin() { return register_commands(this); }
-    static ReturnCode _onEnd() { return OK(); }
+    ReturnCode _onBegin() { return _registerCommands(); }
+    ReturnCode _onEnd() { return _deregisterCommands(); }
 
     ReturnCode _populateMemoryStats() {
         return Platform::collect_memory_stats_into(_memoryStats);
@@ -144,17 +145,7 @@ class Monitoring : public Core::HasLifecycle<Monitoring> {
 };
 
 inline constexpr LifecycleContract<Monitoring> _monitoring_lifecycle;
-
-inline static ReturnCode cmd_handle_monitoring(CommandDesc::Tokens /*unused*/,
-                                               void *ctx) {
-    auto *monitoring = static_cast<Monitoring *>(ctx);
-    return monitoring->snapshot(MonitoringSink{
-        .self = monitoring,
-        .consumeHook =
-            [](void *, const MonitoringFrame &frame) {
-                return dump_monitoring_snaphot(frame);
-            },
-    });
-}
+inline constexpr CommandsContract<Monitoring, Commands<Monitoring>>
+    _monitoring_commands_contract;
 
 } // namespace Totem::Monitoring::detail

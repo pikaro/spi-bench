@@ -1,14 +1,13 @@
-#include "Common.hh"
-
 #include "CommandBackend/Facade.hh"
+#include "Macros/Facade.hh"
 #include "MetricsBackend/Facade.hh"
 #include "Monitoring/Facade.hh"
 #include "Output/Facade.hh"
 #include "Platform/Uart.hh"
 #include "Platform/platform/PlatformESP32/Base.hh"
-#include "Support/Commands.hh"
+#include "Services/Commands.hh"
+#include "Services/Metrics.hh"
 #include "Support/CoreCommands.hh"
-#include "Support/Metrics.hh"
 #include "TaskControllerRegistry/Facade.hh"
 
 Totem::MetricsBackend::Backend metricsBackend;
@@ -34,7 +33,7 @@ void setup() {
                         "Failed to get transport from UART transport");
     ABORT_IF_ERR(commandController.addTransport(uartTransport),
                  "Failed to add UART transport to command controller");
-    Commands::setBackend(commandController);
+    CommandService::setBackend(commandController);
 
     ABORT_IF_ERR(register_core_commands(),
                  "Failed to register core commands to command controller");
@@ -46,7 +45,7 @@ void setup() {
     ABORT_IF_ERR(aggregator.addSink(uartSink),
                  "Failed to add UART sink to aggregator");
 
-    ABORT_IF_ERR(Logger::setBackend(aggregator),
+    ABORT_IF_ERR(LoggingService::setBackend(aggregator),
                  "Failed to set logger backend to aggregator");
 
     ABORT_IF_ERR_BEGIN(monitoring.begin());

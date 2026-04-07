@@ -12,7 +12,6 @@ namespace Totem::Mutex::detail {
 
 template <class Derived> class ScopedMutexGuard final {
   public:
-    // FIXME: Abstract
     ScopedMutexGuard(MutexHandle handle,
                      ::platform::Tick ticksToWait = TICK_MAX_DELAY) noexcept
         : _handle{handle}, _name{Derived::name} {

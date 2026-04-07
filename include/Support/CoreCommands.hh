@@ -1,11 +1,11 @@
 #pragma once
 
 #include "Macros/Facade.hh"
-#include "Support/Commands.hh"
+#include "Services/Commands.hh"
 #include "Types/Command.hh"
 #include "Types/Error.hh"
 
-inline static CommandDesc helloCmd = {
+inline CommandDesc helloCmd = {
     .name = "hello",
     .description = "Prints Hello, World!",
     .args = {},
@@ -17,11 +17,11 @@ inline static CommandDesc helloCmd = {
     .subcommands = {},
 };
 
-inline static ReturnCode register_core_commands() {
-    auto &reg = Commands::registrar();
+inline ReturnCode register_core_commands() {
+    auto &reg = CommandService::registrar();
 
-    FAIL_IF_ERR_FWD(reg.registerCommand(helloCmd),
-                    "Failed to register hello command");
+    FAIL_IF_UNEXPECTED_FWD(_, reg.registerCommand(helloCmd),
+                           "Failed to register hello command");
 
     return OK(CoreError);
 }

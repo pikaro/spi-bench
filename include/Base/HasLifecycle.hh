@@ -7,8 +7,6 @@
 #include "Types/NoConfig.hh"
 #include <concepts>
 
-namespace Totem::Core {
-
 template <class Derived, typename ConfT = NoConfig> class HasLifecycle {
   public:
     ReturnCode begin(const ConfT &cfg = {}) {
@@ -60,8 +58,3 @@ template <class T, typename ConfT = NoConfig> struct LifecycleContract {
             { cfg.validate() } -> std::same_as<bool>;
         }, "Config type must have a validate() method that returns bool");
 };
-
-} // namespace Totem::Core
-
-using Totem::Core::HasLifecycle;
-using Totem::Core::LifecycleContract;

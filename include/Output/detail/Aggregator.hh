@@ -36,11 +36,8 @@ class Aggregator : public HasLifecycle<Aggregator, AggregatorConfig>,
 
     ReturnCode send(const LogRecord &record) {
         auto size = sizeof(record);
-        auto result = RingBuffer::Buffer::send(_ringBuffer, &record, size,
-                                               config().sendTimeoutMs);
-        FAIL_IF_ERR_FWD(result, "Failed to send message to ring buffer in %s",
-                        name);
-        return OK();
+        return RingBuffer::Buffer::send(_ringBuffer, &record, size,
+                                        config().sendTimeoutMs);
     }
 
     ReturnCode addSink(const Sink &sink) {

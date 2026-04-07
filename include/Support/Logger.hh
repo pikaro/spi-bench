@@ -5,6 +5,10 @@
 #include "Types/Error.hh"
 #include "Types/Logging.hh"
 #include "esp_log.h"
+#include <atomic>
+#include <cstdarg>
+#include <cstdio>
+#include <cstring>
 #include <concepts>
 
 namespace Totem::LoggerSupport::detail {
@@ -85,8 +89,48 @@ class Logger {
         return _backend.send(record);
     }
 
+    static ReturnCode logf(LogLevel level, const char *tag, const char *format,
+                           ...) {
+        va_list args;
+        va_start(args, format);
+        auto result = vlogf(level, tag, format, args);
+        va_end(args);
+        return result;
+    }
+
+    static ReturnCode vlogf(LogLevel level, const char *tag, const char *format,
+                            va_list args) {
+        if (!_recordBusy.test_and_set(std::memory_order_acquire)) {
+            auto &record = _scratchRecord;
+            _formatRecord(record, level, tag, format, args);
+            auto result = send(record);
+            _recordBusy.clear(std::memory_order_release);
+            return result;
+        }
+
+        LogRecord record{};
+        _formatRecord(record, level, tag, format, args);
+        return send(record);
+    }
+
   private:
+    static void _formatRecord(LogRecord &record, LogLevel level, const char *tag,
+                              const char *format, va_list args) {
+        record = LogRecord{};
+        record.ts = static_cast<uint32_t>(::platform::get_tick());
+
+        const char *safeTag = tag != nullptr ? tag : "???";
+        std::strncpy(record.tag.data(), safeTag, record.tag.size() - 1);
+        record.tag[record.tag.size() - 1] = '\0';
+        record.level = level;
+
+        const char *safeFormat = format != nullptr ? format : "";
+        std::vsnprintf(record.msg.data(), record.msg.size(), safeFormat, args);
+    }
+
     static inline LoggerBackend _backend = LoggerBackend::null();
+    static inline std::atomic_flag _recordBusy = ATOMIC_FLAG_INIT;
+    static inline LogRecord _scratchRecord{};
 
     using DefaultError = CoreError;
 };

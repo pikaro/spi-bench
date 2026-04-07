@@ -38,6 +38,7 @@ template <class Derived> class ScopedMutexGuard final {
 
         FAIL_IF_ERR_VOID(Platform::take_mutex(_handle, ticksToWait),
                          "Failed to take mutex %s", _name);
+        _acquired = true;
     }
 
     ScopedMutexGuard(ScopedMutexGuard const &) = delete;

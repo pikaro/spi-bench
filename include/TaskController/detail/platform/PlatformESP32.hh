@@ -157,12 +157,20 @@ struct Platform {
 
         snapshot.priority = static_cast<uint8_t>(taskStatus.uxCurrentPriority);
         snapshot.runTimeMs =
-            ::platform::ticks_to_ms(taskStatus.ulRunTimeCounter);
+            _runtime_counter_to_ms(taskStatus.ulRunTimeCounter);
         snapshot.stackLowestFree = taskStatus.usStackHighWaterMark;
-        // FIXME: xTaskGetInfo doesn't return the core ID?
-        snapshot.coreId = 0; // taskStatus.xCoreID;
+        snapshot.coreId = static_cast<int8_t>(taskStatus.xCoreID);
 
         return snapshot;
+    }
+
+  private:
+    static uint32_t _runtime_counter_to_ms(configRUN_TIME_COUNTER_TYPE value) {
+#if CONFIG_FREERTOS_RUN_TIME_STATS_USING_ESP_TIMER
+        return static_cast<uint32_t>(value / 1000ULL);
+#else
+        return ::platform::ticks_to_ms(static_cast<::platform::Tick>(value));
+#endif
     }
 };
 

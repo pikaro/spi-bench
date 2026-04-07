@@ -2,6 +2,7 @@
 
 #include "Macros/Facade.hh"
 #include "Monitoring/detail/Types.hh"
+#include "StaticConfig/TaskController.hh"
 #include "Support/Basic.hh"
 #include "Support/Commands.hh"
 #include "TaskController/Facade.hh"
@@ -17,55 +18,55 @@ inline static ReturnCode dump_monitoring_snaphot(const MonitoringFrame &frame) {
     _log_i("  Core utilization:");
     for (size_t core = 0; core < frame.global.coreUtilizationPctTotal.size();
          ++core) {
-        _log_i("    Core %zu: Total %.2f%%, Delta %.2f%%", core,
-               frame.global.coreUtilizationPctTotal[core],
-               frame.global.coreUtilizationPctDelta[core]);
+        _log_i("    Core %zu: Total %5.2f%%, Delta %5.2f%%", core,
+               (double)frame.global.coreUtilizationPctTotal[core],
+               (double)frame.global.coreUtilizationPctDelta[core]);
     }
 
+    _log_i("  Memory stats (%zu pools):", frame.global.memoryStats.size());
     for (size_t i = 0; i < frame.global.memoryStats.size(); ++i) {
         const auto &stat = frame.global.memoryStats[i];
-        _log_i("  Memory pool %zu: " SV_FMT, i, SV_ARG(stat.name));
-        _log_i("    Total bytes: %zu", stat.totalBytes);
-        _log_i("    Free bytes: %zu", stat.freeBytes);
-        _log_i("    Min free bytes: %zu", stat.minFreeBytes);
-        _log_i("    Free %%: %.2f%%", stat.freePct);
-        _log_i("    Min free %%: %.2f%%", stat.minFreePct);
-        _log_i("    Attrs: %s%s%s%s%s%s%s",
-               (stat.attrs & to_bits(MemoryAttr::Internal)) ? "I" : "",
-               (stat.attrs & to_bits(MemoryAttr::External)) ? "E" : "",
-               (stat.attrs & to_bits(MemoryAttr::GeneralPurpose)) ? "G" : "",
-               (stat.attrs & to_bits(MemoryAttr::DefaultAlloc)) ? "A" : "",
-               (stat.attrs & to_bits(MemoryAttr::DmaCapable)) ? "D" : "",
-               (stat.attrs & to_bits(MemoryAttr::Retained)) ? "R" : "",
-               (stat.attrs & to_bits(MemoryAttr::FastRtc)) ? "F" : "");
-        _log_i("    Flags: %s%s%s",
-               (stat.flags & to_bits(MemoryStatFlags::Overlapping)) ? "O" : "",
-               (stat.flags & to_bits(MemoryStatFlags::Conditional)) ? "C" : "",
-               (stat.flags & to_bits(MemoryStatFlags::Specialized)) ? "S" : "");
+        _log_i("    %2zu: " SV_FMT " (%8zu | %8zu) / %8zu "
+               "= (%6.2f%% | %6.2f%%) "
+               "[%1s%1s%1s%1s%1s%1s%1s] "
+               "[%1s%1s%1s]",
+               i, SV_ARG(stat.name, 16), stat.freeBytes, stat.minFreeBytes,
+               stat.totalBytes, (double)stat.freePct, (double)stat.minFreePct,
+               (has_flag(stat.attrs, MemoryAttr::Internal)) ? "I" : "",
+               (has_flag(stat.attrs, MemoryAttr::External)) ? "E" : "",
+               (has_flag(stat.attrs, MemoryAttr::GeneralPurpose)) ? "G" : "",
+               (has_flag(stat.attrs, MemoryAttr::DefaultAlloc)) ? "A" : "",
+               (has_flag(stat.attrs, MemoryAttr::DmaCapable)) ? "D" : "",
+               (has_flag(stat.attrs, MemoryAttr::Retained)) ? "R" : "",
+               (has_flag(stat.attrs, MemoryAttr::FastRtc)) ? "F" : "",
+               (has_flag(stat.flags, MemoryStatFlags::Overlapping)) ? "O" : "",
+               (has_flag(stat.flags, MemoryStatFlags::Conditional)) ? "C" : "",
+               (has_flag(stat.flags, MemoryStatFlags::Specialized)) ? "S" : ""
 
-        _log_i("Tasks:");
+        );
+    }
+
+    _log_i("  Tasks (%u):", frame.global.taskCount);
+    if (frame.tasks.empty()) {
+        _log_i("    None");
+        return OK(CoreError);
     }
 
     for (size_t i = 0; i < frame.tasks.size(); ++i) {
         const auto &task = frame.tasks[i];
-        _log_i("  Task %zu: " SV_FMT, i, SV_ARG(task.name));
-        _log_i("    Started: %s", task.hasEverStarted ? "Yes" : "No");
-        _log_i("    State: " SV_FMT,
-               SV_ARG(TaskController::state_to_string(task.state)));
-        _log_i("    Platform state: " SV_FMT,
+        const size_t stackSize =
+            task.config != nullptr ? task.config->stackSize : 0;
+        _log_i("    %2zu: " SV_FMT " <%s" SV_FMT SV_FMT "> p%3u @ c%2d "
+               "(%5zuB / %5zuB = %6.2f%%) %6.2f%% in %8zums | %6.2f%% total",
+               i, SV_ARG(task.name, TaskControllerConfig::maxTaskNameLen),
+               task.hasEverStarted ? "S" : "X",
+               SV_ARG(TaskController::state_to_string(task.state)),
                SV_ARG(TaskController::platform_state_to_string(
-                   task.platformState)));
-        _log_i("    Current priority: %u", task.currentPriority);
-        _log_i("    Total run time %%: %.2f%%", task.runTimeTotalPct);
-        _log_i("    Delta run time %%: %.2f%%", task.runTimeDeltaPct);
-        _log_i("    Stack used %%: %.2f%%", task.stackUsedPct);
-        if (task.lastStopResult.has_value()) {
-            _log_i("    Last stop result: " SV_FMT,
-                   SV_ARG(TaskController::exit_reason_to_string(
-                       task.lastStopResult->reason)));
-        }
-
-        return OK(CoreError);
+                   task.platformState)),
+               task.currentPriority, task.coreId,
+               stackSize - task.stackLowestFree, stackSize,
+               (double)task.stackUsedPct, (double)task.runTimeDeltaPct,
+               task.timestampDelta, (double)task.runTimeTotalPct);
     }
 
     return OK(CoreError);

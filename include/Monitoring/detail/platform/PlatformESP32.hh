@@ -5,6 +5,7 @@
 #include "Support/Basic.hh"
 #include "Types/Error.hh"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 #include "freertos/idf_additions.h"
 #include "freertos/portable.h"
 #include "portmacro.h"
@@ -82,13 +83,22 @@ struct Platform {
             auto *taskHandle = xTaskGetIdleTaskHandleForCore(i);
             TaskStatus_t taskStatus;
             vTaskGetInfo(taskHandle, &taskStatus, pdTRUE, eInvalid);
-            out[static_cast<size_t>(i)] = taskStatus.ulRunTimeCounter;
+            out[static_cast<size_t>(i)] =
+                _runtime_counter_to_ms(taskStatus.ulRunTimeCounter);
         }
 
         return OK(CoreError);
     }
 
   private:
+    static uint32_t _runtime_counter_to_ms(configRUN_TIME_COUNTER_TYPE value) {
+#if CONFIG_FREERTOS_RUN_TIME_STATS_USING_ESP_TIMER
+        return static_cast<uint32_t>(value / 1000ULL);
+#else
+        return static_cast<uint32_t>(value);
+#endif
+    }
+
     static MemoryStats _get_memory_stats(size_t kind, const char *regionName,
                                          uint8_t attrs, uint8_t flags) {
         size_t max = heap_caps_get_total_size(kind);

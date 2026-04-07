@@ -4,6 +4,7 @@
 
 #include "Concepts/Base.hh"
 #include "Macros/Facade.hh"
+#include "TaskController/detail/Config.hh"
 #include "Types/Error.hh"
 #include "Types/Signal.hh"
 #include <concepts>
@@ -212,15 +213,15 @@ enum class State : uint8_t {
 static constexpr std::string_view state_to_string(State state) {
     switch (state) {
     case State::Stopped:
-        return "Stopped";
+        return "H";
     case State::Starting:
-        return "Starting";
+        return "S";
     case State::Running:
-        return "Running";
+        return "R";
     case State::Stopping:
-        return "Stopping";
+        return "T";
     default:
-        return "Unknown";
+        return "?";
     }
 }
 
@@ -235,15 +236,15 @@ static constexpr std::string_view
 platform_state_to_string(PlatformState state) {
     switch (state) {
     case PlatformState::Running:
-        return "Running";
+        return "R";
     case PlatformState::Ready:
-        return "Ready";
+        return "A";
     case PlatformState::Blocked:
-        return "Blocked";
+        return "B";
     case PlatformState::Suspended:
-        return "Suspended";
+        return "S";
     default:
-        return "Unknown";
+        return "?";
     }
 }
 
@@ -252,7 +253,7 @@ struct TaskPlatformSnapshot {
     uint8_t priority;
     uint32_t runTimeMs = 0;
     uint32_t stackLowestFree = 0;
-    uint8_t coreId;
+    int8_t coreId;
 };
 
 struct TaskRuntimeSnapshot {
@@ -263,10 +264,13 @@ struct TaskRuntimeSnapshot {
     std::optional<Result> lastStopResult;
     State state;
     PlatformState platformState;
+    int8_t coreId;
     uint8_t currentPriority;
     float runTimeTotalPct;
     float runTimeDeltaPct;
+    uint32_t stackLowestFree;
     float stackUsedPct;
+    const Config *config = nullptr;
 };
 
 } // namespace Totem::TaskController::detail

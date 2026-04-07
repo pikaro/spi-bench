@@ -98,12 +98,14 @@ class Runner {
         auto timestampDelta = timestamp - _runtimeSnapshot.timestamp;
 
         if (timestamp > 0) {
-            runTimeTotalPct = static_cast<float>(platformResult->runTimeMs) /
+            runTimeTotalPct = 100.0F *
+                              static_cast<float>(platformResult->runTimeMs) /
                               static_cast<float>(timestamp);
         }
 
         if (timestamp > 0 && timestampDelta > 0) {
-            runTimeDeltaPct = static_cast<float>(platformResult->runTimeMs -
+            runTimeDeltaPct = 100.0F *
+                              static_cast<float>(platformResult->runTimeMs -
                                                  _platformSnapshot.runTimeMs) /
                               static_cast<float>(timestampDelta);
         }
@@ -116,13 +118,17 @@ class Runner {
             .lastStopResult = hasStopped() ? _stopResult : std::nullopt,
             .state = _stateManager.state(),
             .platformState = platformResult->state,
+            .coreId = platformResult->coreId,
             .currentPriority = platformResult->priority,
             .runTimeTotalPct = runTimeTotalPct,
             .runTimeDeltaPct = runTimeDeltaPct,
+            .stackLowestFree = platformResult->stackLowestFree,
             .stackUsedPct =
+                100.0F *
                 static_cast<float>(_config.stackSize -
                                    platformResult->stackLowestFree) /
                 static_cast<float>(_config.stackSize),
+            .config = &_config,
         };
 
         _platformSnapshot = *platformResult;

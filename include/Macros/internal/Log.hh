@@ -17,13 +17,7 @@
 
 #define INTERNAL_LOG_IMPL(logLevel, logTag, logFormat, ...)                    \
     do {                                                                       \
-        LogRecord rec{};                                                       \
-        rec.ts = static_cast<uint32_t>(::platform::get_tick());                \
-        strncpy(rec.tag.data(), logTag, rec.tag.size() - 1);                   \
-        rec.tag[rec.tag.size() - 1] = '\0';                                    \
-        rec.level = logLevel;                                                  \
-        snprintf(rec.msg.data(), rec.msg.size(), logFormat, ##__VA_ARGS__);    \
-        (void)Logger::send(rec);                                               \
+        (void)Logger::logf(logLevel, logTag, logFormat, ##__VA_ARGS__);        \
     } while (0)
 
 #define _log_v(format, ...)                                                    \

@@ -20,7 +20,7 @@ Totem::Output::UartOutput uart;
 Totem::CommandBackend::Controller commandController(taskRegistry.hooks());
 Totem::CommandBackend::UartTransport uartSource;
 
-Totem::Monitoring::Monitoring monitoring;
+Totem::Monitoring::Monitoring monitoring(taskRegistry);
 
 void setup() {
     ABORT_IF_ERR_BEGIN(::platform::Uart::init());

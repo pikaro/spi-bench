@@ -51,7 +51,7 @@ class UartTransport {
 
             if (_lineLen >= CommandConfig::maxLineLen) {
                 _resetLine();
-                FAIL(std::unexpected(ERR(Overflow)),
+                FAIL(std::unexpected(ERR(CommandError, TooLong)),
                      "Received line exceeds maximum length in %s", name);
             }
 
@@ -100,9 +100,10 @@ class UartTransport {
     }
 
     std::expected<CommandDesc::Tokens, ReturnCode> _tokenizeCurrentLine() {
-        FAIL_IF(_lineLen == 0, std::unexpected(ERR(InvalidArgument)),
+        FAIL_IF(_lineLen == 0, std::unexpected(ERR(CommandError, SyntaxError)),
                 "Cannot tokenize empty line");
-        FAIL_IF(_line[0] != '/', std::unexpected(ERR(InvalidArgument)),
+        FAIL_IF(_line[0] != '/',
+                std::unexpected(ERR(CommandError, SyntaxError)),
                 "Command line must start with '/'");
 
         _tokenCount = 0;
@@ -126,15 +127,17 @@ class UartTransport {
                 ++i;
             }
 
-            if (_tokenCount >= CommandConfig::maxTokens) {
-                return std::unexpected(ERR(Overflow));
-            }
+            FAIL_IF(_tokenCount >= CommandConfig::maxTokens,
+                    std::unexpected(ERR(CommandError, TooLong)),
+                    "Number of tokens in command line exceeds maximum in %s",
+                    name);
 
             _tokens[_tokenCount++] =
                 CommandDesc::Token{&_line[start], i - start};
         }
 
-        FAIL_IF(_tokenCount == 0, std::unexpected(ERR(InvalidArgument)),
+        FAIL_IF(_tokenCount == 0,
+                std::unexpected(ERR(CommandError, SyntaxError)),
                 "No command found in line");
 
         return CommandDesc::Tokens{_tokens.data(), _tokenCount};

@@ -19,6 +19,7 @@ struct Transport {
     };
 
     void *self = nullptr;
+    const char *name = nullptr;
 
     PollReturn (*pollHook)(void *) = nullptr;
 
@@ -31,6 +32,7 @@ struct Transport {
     static Transport bind(T &obj) {
         return Transport{
             .self = std::addressof(obj),
+            .name = T::name,
             .pollHook = [](void *ptr) -> PollReturn {
                 return static_cast<T *>(ptr)->poll();
             },
@@ -38,7 +40,7 @@ struct Transport {
     }
 
     [[nodiscard]] bool validate() const {
-        return self != nullptr && pollHook != nullptr;
+        return self != nullptr && pollHook != nullptr && name != nullptr;
     }
 };
 

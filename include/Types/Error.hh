@@ -9,6 +9,7 @@ enum class ErrorDomain : uint8_t {
     Lifecycle,
     PubSub,
     Spi,
+    Command,
 };
 
 enum class CoreError : uint8_t {
@@ -83,6 +84,20 @@ static constexpr auto lifecycleErrorNames = std::to_array<const char *>({
     "[4] Lifecycle::InvalidState",
 });
 
+enum class CommandError : uint8_t {
+    Unknown = 0,
+    Ok,
+    SyntaxError,
+    TooLong,
+};
+
+static constexpr auto commandErrorNames = std::to_array<const char *>({
+    "[0] Command::Unknown",
+    "[1] Command::Ok",
+    "[2] Command::SyntaxError",
+    "[3] Command::TooLong",
+});
+
 struct NameTable {
     const char *const *data;
     uint8_t size;
@@ -97,6 +112,8 @@ static constexpr auto domain_tables = std::to_array<NameTable>({
               .size = static_cast<uint8_t>(pubSubErrorNames.size())},
     NameTable{.data = spiErrorNames.data(),
               .size = static_cast<uint8_t>(spiErrorNames.size())},
+    NameTable{.data = commandErrorNames.data(),
+              .size = static_cast<uint8_t>(commandErrorNames.size())},
 });
 
 static constexpr const char *get_error_name(ErrorDomain domain, uint8_t code) {
@@ -135,6 +152,10 @@ struct [[nodiscard]] ReturnCode {
         return {.domain = ErrorDomain::Lifecycle,
                 .code = static_cast<uint8_t>(err)};
     }
+    static constexpr ReturnCode from(CommandError err) {
+        return {.domain = ErrorDomain::Command,
+                .code = static_cast<uint8_t>(err)};
+    }
 
     [[nodiscard]] constexpr bool ok() const { return code == 1; }
 
@@ -148,7 +169,9 @@ struct [[nodiscard]] ReturnCode {
 
 } // namespace Totem::Core
 
+using Totem::Core::CommandError;
 using Totem::Core::CoreError;
+using Totem::Core::ErrorDomain;
 using Totem::Core::LifecycleError;
 using Totem::Core::PubSubError;
 using Totem::Core::ReturnCode;

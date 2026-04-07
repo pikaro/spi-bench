@@ -68,6 +68,21 @@ class Registry : public HasLifecycle<Registry> {
         return OK();
     }
 
+    ReturnCode reap() {
+        return _directory.withAll(
+            [](const ControllerNameKey &,
+               const ControllerEntry &entry) -> ReturnCode {
+                FAIL_IF_UNEXPECTED_FWD(count, entry.controller->reap(),
+                                       "Failed to reap tasks for controller %s",
+                                       entry.controller->ownerName());
+                if (count > 0) {
+                    _log_i("Reaped %u tasks for controller %s", count,
+                           entry.controller->ownerName());
+                }
+                return OK();
+            });
+    }
+
     template <typename Fn>
         requires TaskController::IsSnapshotHandler<Fn>
     ReturnCode forEachTaskSnapshot(Fn &&fun) {

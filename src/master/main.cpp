@@ -67,6 +67,7 @@ void app_main(void);
 void app_main() {
     setup();
     for (;;) {
+        taskRegistry.reap();
         ::platform::delay_until(&lastWakeTime, 1000);
     }
 }

@@ -3,6 +3,7 @@
 #include "Common.hh"
 
 #include "TaskController/detail/PlatformSelect.hh"
+#include <cstdint>
 
 namespace Totem::TaskController::detail {
 

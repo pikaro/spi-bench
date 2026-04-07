@@ -253,12 +253,11 @@ class Controller : public HasLifecycle<Controller, Config> {
                 "Stopped runner missing stop result");
         FAIL_IF(!entry.config.has_value(), ERR(InvalidState),
                 "Stopped runner missing config");
+        _log_i("Handling stopped runner for %s->%s", self._ownerName,
+               entry.config->name);
         auto config = *entry.config;
         auto hooks = entry.hooks;
         auto ref = RunnerNameKey::fromCharPtr(config.name);
-        auto ret = self._directory.remove(ref);
-        FAIL_IF_ERR(ret, ret, "Failed to remove %s->%s from directory",
-                    self._ownerName, ref.name.data());
         if (!result->isClean()) {
             _log_e("Task runner %s->%s stopped with error: "
                    "%s (reason code %d)",

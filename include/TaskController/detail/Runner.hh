@@ -154,9 +154,12 @@ class Runner {
                    self->_config.name, result.error.format(),
                    static_cast<uint8_t>(result.reason));
         }
+        // Publish the stopped state only after the task has finished touching
+        // Runner storage. Reap may destroy the Runner as soon as hasStopped()
+        // becomes visible.
+        self->_handle = nullptr;
         self->_stopResult = result;
         self->_hasStopResult.store(true, std::memory_order_release);
-        self->_handle = nullptr;
         Platform::delete_current_task();
     }
 

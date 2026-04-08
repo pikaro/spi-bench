@@ -1,0 +1,16 @@
+#!/bin/bash
+
+if [ "$#" -lt 1 ]; then
+    echo "Usage: $0 <env>"
+    exit 1
+fi
+
+ENV="${1}"
+
+shift
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+"${REPO_ROOT}/bin/gdb" "${ENV}" --batch \
+    -ex "set style enabled on" \
+    -ex "ptype /o ${1}"

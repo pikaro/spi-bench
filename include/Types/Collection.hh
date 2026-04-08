@@ -3,6 +3,7 @@
 #include "Base/Namespaces.hh" // IWYU pragma: export
 #include "Macros/Facade.hh"
 #include "Support/Basic.hh"
+#include "Types/Basic.hh"
 #include "Types/Error.hh"
 #include <array>
 #include <cstdint>
@@ -10,10 +11,11 @@
 #include <cstring>
 #include <expected>
 #include <functional>
+#include <strings.h>
 
 template <size_t N> struct NameKey {
-    size_t len = 0;
     std::array<char, N> name{};
+    SmallestUintType<N> len = 0;
 
     bool operator==(const NameKey &other) const {
         return len == other.len &&
@@ -65,6 +67,10 @@ template <typename Tag, size_t N, class Friend> class StrongHandle {
 };
 
 template <typename Entry, size_t N, size_t IdLen = 32> struct SlottedMap {
+    static_assert(N > 0, "SlottedMap size N must be greater than 0");
+
+    using SlotIndex = SmallestUintType<N>;
+
     struct Slot {
         NameKey<IdLen> nameKey{};
         Entry entry{};
@@ -122,7 +128,7 @@ template <typename Entry, size_t N, size_t IdLen = 32> struct SlottedMap {
             return ERR(NotFound);
         }
 
-        auto i = static_cast<size_t>(index);
+        auto i = static_cast<SlotIndex>(index);
         auto last = _size - 1;
 
         auto ret = _indexErase(nameKey);
@@ -166,7 +172,7 @@ template <typename Entry, size_t N, size_t IdLen = 32> struct SlottedMap {
             return std::unexpected(ERR(NotFound));
         }
 
-        auto i = static_cast<size_t>(index);
+        auto i = static_cast<SlotIndex>(index);
         auto last = _size - 1;
         auto ret = std::move(_slots[i].entry);
 
@@ -229,12 +235,11 @@ template <typename Entry, size_t N, size_t IdLen = 32> struct SlottedMap {
 
     struct IndexSlot {
         IndexState state = IndexState::Empty;
-        NameKey<IdLen> nameKey{};
-        size_t slotIndex = 0;
+        SlotIndex slotIndex = 0;
     };
 
-    static constexpr size_t IndexSize =
-        N == 0 ? 1 : ((N * 2) + 1); // simple fixed load factor < 0.5
+    // TODO: Benchmark load factor
+    static constexpr size_t IndexSize = (N * 2) + 1;
 
     [[nodiscard]] ssize_t _findIndex(const NameKey<IdLen> &nameKey) const {
         auto start = hash(nameKey.name.data(), nameKey.len) % IndexSize;
@@ -245,15 +250,19 @@ template <typename Entry, size_t N, size_t IdLen = 32> struct SlottedMap {
             if (indexSlot.state == IndexState::Empty) {
                 return -1;
             }
-            if (indexSlot.state == IndexState::Occupied &&
-                indexSlot.nameKey == nameKey) {
-                return static_cast<ssize_t>(indexSlot.slotIndex);
+
+            if (indexSlot.state == IndexState::Occupied) {
+                auto slotIndex = static_cast<size_t>(indexSlot.slotIndex);
+                if (_slots[slotIndex].nameKey == nameKey) {
+                    return static_cast<ssize_t>(slotIndex);
+                }
             }
         }
         return -1;
     }
 
-    ReturnCode _indexInsert(const NameKey<IdLen> &nameKey, size_t slotIndex) {
+    ReturnCode _indexInsert(const NameKey<IdLen> &nameKey,
+                            SlotIndex slotIndex) {
         auto start = hash(nameKey.name.data(), nameKey.len) % IndexSize;
         ssize_t firstTombstone = -1;
 
@@ -262,7 +271,9 @@ template <typename Entry, size_t N, size_t IdLen = 32> struct SlottedMap {
             auto &indexSlot = _index[pos];
 
             if (indexSlot.state == IndexState::Occupied) {
-                if (indexSlot.nameKey == nameKey) {
+                auto existingSlotIndex =
+                    static_cast<size_t>(indexSlot.slotIndex);
+                if (_slots[existingSlotIndex].nameKey == nameKey) {
                     return ERR(AlreadyExists);
                 }
                 continue;
@@ -279,7 +290,6 @@ template <typename Entry, size_t N, size_t IdLen = 32> struct SlottedMap {
                 firstTombstone >= 0 ? static_cast<size_t>(firstTombstone) : pos;
             _index[insertPos] = IndexSlot{
                 .state = IndexState::Occupied,
-                .nameKey = nameKey,
                 .slotIndex = slotIndex,
             };
             return OK();
@@ -289,7 +299,6 @@ template <typename Entry, size_t N, size_t IdLen = 32> struct SlottedMap {
             auto insertPos = static_cast<size_t>(firstTombstone);
             _index[insertPos] = IndexSlot{
                 .state = IndexState::Occupied,
-                .nameKey = nameKey,
                 .slotIndex = slotIndex,
             };
             return OK();
@@ -307,10 +316,13 @@ template <typename Entry, size_t N, size_t IdLen = 32> struct SlottedMap {
             if (indexSlot.state == IndexState::Empty) {
                 return ERR(NotFound);
             }
-            if (indexSlot.state == IndexState::Occupied &&
-                indexSlot.nameKey == nameKey) {
-                indexSlot = IndexSlot{.state = IndexState::Tombstone};
-                return OK();
+            if (indexSlot.state == IndexState::Occupied) {
+                auto existingSlotIndex =
+                    static_cast<size_t>(indexSlot.slotIndex);
+                if (_slots[existingSlotIndex].nameKey == nameKey) {
+                    indexSlot = IndexSlot{.state = IndexState::Tombstone};
+                    return OK();
+                }
             }
         }
         return ERR(NotFound);
@@ -318,7 +330,7 @@ template <typename Entry, size_t N, size_t IdLen = 32> struct SlottedMap {
 
     std::array<Slot, N> _slots{};
     std::array<IndexSlot, IndexSize> _index{};
-    size_t _size = 0;
+    SlotIndex _size = 0;
 
     using DefaultError = CoreError;
 };

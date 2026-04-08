@@ -4,15 +4,58 @@
 #include "Platform/PlatformSelect.hh" // IWYU pragma: export
 #include "Services/Logging.hh"        // IWYU pragma: export
 #include "Types/Logging.hh"           // IWYU pragma: export
-#include "esp_log.h"
-#include <array>           // IWYU pragma: export
-#include <source_location> // IWYU pragma: export
+#include <array>                      // IWYU pragma: export
+#include <source_location>            // IWYU pragma: export
+#include <string_view>                // IWYU pragma: export
+
+namespace Totem::LoggerSupport::detail {
+
+constexpr std::string_view logFileName(std::string_view path) {
+    auto pos = path.find_last_of("/\\");
+    return pos == std::string_view::npos ? path : path.substr(pos + 1);
+}
+
+constexpr std::string_view logFunctionName(std::string_view function) {
+    auto end = function.find('(');
+    auto head = function.substr(0, end);
+
+    auto operatorPos = head.rfind("operator ");
+    auto start = head.rfind(' ');
+    if (operatorPos != std::string_view::npos &&
+        (start == std::string_view::npos || operatorPos > start)) {
+        start = head.rfind(' ', operatorPos);
+    }
+
+    auto qualified =
+        start == std::string_view::npos ? head : head.substr(start + 1);
+
+    auto lastSep = qualified.rfind("::");
+    if (lastSep == std::string_view::npos) {
+        return qualified;
+    }
+
+    auto prevSep = qualified.rfind("::", lastSep - 1);
+    if (prevSep == std::string_view::npos) {
+        return qualified;
+    }
+
+    return qualified.substr(prevSep + 2);
+}
+
+} // namespace Totem::LoggerSupport::detail
 
 #define LOG_LOC(msg, ...)                                                      \
     do {                                                                       \
         auto loc = std::source_location::current();                            \
-        ESP_LOGE(TAG, "[%s:%d:%s] " msg, loc.file_name(), loc.line(),          \
-                 loc.function_name(), ##__VA_ARGS__);                          \
+        auto _logFile =                                                        \
+            Totem::LoggerSupport::detail::logFileName(loc.file_name());        \
+        auto _logFunction =                                                    \
+            Totem::LoggerSupport::detail::logFunctionName(loc.function_name());\
+        (void)LoggingService::logf(                                            \
+            LogLevel::Error, TAG, "[%.*s:%d:%.*s] " msg,                       \
+            static_cast<int>(_logFile.size()), _logFile.data(), loc.line(),    \
+            static_cast<int>(_logFunction.size()), _logFunction.data(),         \
+            ##__VA_ARGS__);                                                    \
     } while (0)
 
 #define INTERNAL_LOG_IMPL(logLevel, logTag, logFormat, ...)                    \

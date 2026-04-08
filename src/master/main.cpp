@@ -1,16 +1,13 @@
 #include "CommandBackend/Facade.hh"
 #include "Macros/Facade.hh"
-#include "MetricsBackend/Facade.hh"
 #include "Monitoring/Facade.hh"
 #include "Output/Facade.hh"
 #include "Platform/Uart.hh"
 #include "Platform/platform/PlatformESP32/Base.hh"
 #include "Services/Commands.hh"
-#include "Services/Metrics.hh"
 #include "Support/CoreCommands.hh"
 #include "TaskControllerRegistry/Facade.hh"
 
-Totem::MetricsBackend::Backend metricsBackend;
 Totem::TaskControllerRegistry::Registry taskRegistry;
 
 Totem::Output::Aggregator aggregator(taskRegistry.hooks());
@@ -67,7 +64,9 @@ void app_main(void);
 void app_main() {
     setup();
     for (;;) {
-        taskRegistry.reap();
+        if (auto reapResult = taskRegistry.reap(); !reapResult.ok()) {
+            _log_e("Error during task registry reap: %s", reapResult.format());
+        }
         ::platform::delay_until(&lastWakeTime, 1000);
     }
 }

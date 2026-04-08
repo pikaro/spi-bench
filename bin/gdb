@@ -1,0 +1,10 @@
+#!/bin/bash
+
+if [ -z "$1" ]; then
+    echo "Usage: $0 <env>"
+    exit 1
+fi
+
+ENV="${1}"
+
+~/.platformio/packages/tool-xtensa-esp-elf-gdb/bin/xtensa-esp-elf-gdb-no-python ".pio/build/${ENV}/firmware.elf" "$@"

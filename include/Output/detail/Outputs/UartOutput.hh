@@ -5,6 +5,7 @@
 #include "Output/detail/Config.hh"
 #include "Output/detail/Types.hh"
 #include "Platform/Uart.hh"
+#include "StaticConfig/Logging.hh"
 #include "Types/Error.hh"
 #include "Types/Logging.hh"
 #include <array>
@@ -13,6 +14,58 @@
 #include <expected>
 
 namespace Totem::Output::detail::Outputs {
+
+struct Colors {
+    static constexpr const char *reset = "\x1b[0m";
+    static constexpr const char *black = "\x1b[30m";
+    static constexpr const char *red = "\x1b[31m";
+    static constexpr const char *green = "\x1b[32m";
+    static constexpr const char *yellow = "\x1b[33m";
+    static constexpr const char *blue = "\x1b[34m";
+    static constexpr const char *magenta = "\x1b[35m";
+    static constexpr const char *cyan = "\x1b[36m";
+    static constexpr const char *white = "\x1b[37m";
+    static constexpr const char *brightBlack = "\x1b[90m";
+    static constexpr const char *brightRed = "\x1b[91m";
+    static constexpr const char *brightGreen = "\x1b[92m";
+    static constexpr const char *brightYellow = "\x1b[93m";
+    static constexpr const char *brightBlue = "\x1b[94m";
+    static constexpr const char *brightMagenta = "\x1b[95m";
+    static constexpr const char *brightCyan = "\x1b[96m";
+    static constexpr const char *brightWhite = "\x1b[97m";
+};
+
+constexpr const char *logLevelColor(LogLevel level) {
+    switch (level) {
+    case LogLevel::Verbose:
+        return Colors::brightBlack;
+    case LogLevel::Debug:
+        return Colors::blue;
+    case LogLevel::Info:
+        return Colors::green;
+    case LogLevel::Warning:
+        return Colors::yellow;
+    case LogLevel::Error:
+        return Colors::red;
+    default:
+        return Colors::brightMagenta;
+    }
+}
+
+constexpr const char *logMessageColor(LogLevel level) {
+    switch (level) {
+    case LogLevel::Verbose:
+    case LogLevel::Debug:
+        return Colors::black;
+    case LogLevel::Info:
+    case LogLevel::Warning:
+        return Colors::brightWhite;
+    case LogLevel::Error:
+        return Colors::red;
+    default:
+        return Colors::brightMagenta;
+    }
+}
 
 class UartOutput : public HasLifecycle<UartOutput, UartConfig> {
     friend class HasLifecycle<UartOutput, UartConfig>;
@@ -29,10 +82,27 @@ class UartOutput : public HasLifecycle<UartOutput, UartConfig> {
     ReturnCode write(const LogRecord &record) {
         std::array<char, maxFormattedSize> buf{};
 
-        int num =
-            std::snprintf(buf.data(), buf.size(), "%" PRIu32 " [%s] <%s>: %s\n",
-                          record.ts, logLevelToString(record.level),
-                          record.tag.data(), record.msg.data());
+        static constexpr char logFmt[] =
+            "%s%s%s (%s%" PRIu32 "%s) <%s%s%s>: %s%s%s\n";
+
+        const char *rst = "";
+        const char *tsColor = "";
+        const char *tagColor = "";
+        const char *lvColor = "";
+        const char *msgColor = "";
+
+        if (LoggingConfig::useColor) {
+            rst = Colors::reset;
+            tsColor = Colors::brightBlack;
+            tagColor = Colors::brightBlue;
+            lvColor = logLevelColor(record.level);
+            msgColor = logMessageColor(record.level);
+        }
+
+        int num = std::snprintf(buf.data(), buf.size(), logFmt, lvColor,
+                                logLevelToString(record.level), rst, tsColor,
+                                record.ts, rst, tagColor, record.tag.data(),
+                                rst, msgColor, record.msg.data(), rst);
 
         if (num < 0) {
             return ERR(CoreError, OperationFailed);
@@ -62,7 +132,8 @@ class UartOutput : public HasLifecycle<UartOutput, UartConfig> {
         3 +              // Bracket close, space, and angle bracket open
         logTagLength +   // Tag max size
         3 +              // Angle bracket close, colon, and space
-        logMaxLength;    // Message max size
+        logMaxLength +
+        (LoggingConfig::useColor ? (4 * 2 * 5) : 0); // Message max size
 
     using DefaultError = CoreError;
 };

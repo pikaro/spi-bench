@@ -1,0 +1,27 @@
+#!/bin/bash
+
+if [ "$#" -ne 1 ]; then
+    echo "Usage: $0 <env>"
+    exit 1
+fi
+
+ENV="${1}"
+
+XTENSA="${HOME}/.platformio/packages/toolchain-xtensa-esp-elf/bin/xtensa-esp32-elf"
+OBJ=".pio/build/${ENV}/src/${ENV}/main.cpp.o"
+
+_section() {
+    echo
+    echo "${1}"
+    echo
+    echo "================================================================"
+    echo
+}
+
+_section "Top 20 largest symbols in ${OBJ}"
+
+"${XTENSA}-nm" -C -S --size-sort --defined-only "${OBJ}" | awk '$3 ~ /^[BbDdVv]$/' | tail -n 20 | cut -d ' ' -f 2- | while read -r line; do
+    size=$(echo "${line}" | awk '{print $1}')
+    symbol=$(echo "${line}" | cut -d ' ' -f 2-)
+    printf "%10d %s\n" "0x${size}" "${symbol}"
+done

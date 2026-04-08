@@ -1,0 +1,11 @@
+#!/bin/bash
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+(
+    cd "${REPO_ROOT}/.docker/pahole" || exit
+    docker build -t pahole .
+)
+
+docker run --rm -v "${REPO_ROOT}:/repo" pahole "$@"
+

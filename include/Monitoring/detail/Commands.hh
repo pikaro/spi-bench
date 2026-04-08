@@ -1,10 +1,12 @@
 #pragma once
 
 #include "Macros/Facade.hh"
+#include "Monitoring/Interfaces/Sink.hh"
 #include "Monitoring/detail/Types.hh"
 #include "StaticConfig/TaskController.hh"
+#include "StaticConfig/TaskRegistry.hh"
 #include "Support/Basic.hh"
-#include "TaskController/Facade.hh"
+#include "TaskController/Interfaces/TaskRuntimeSnapshot.hh"
 #include "Types/Command.hh"
 #include "Types/Error.hh"
 #include <array>
@@ -57,9 +59,11 @@ inline static ReturnCode dump_monitoring_snaphot(const MonitoringFrame &frame) {
         const auto &task = frame.tasks[i];
         const size_t stackSize =
             task.config != nullptr ? task.config->stackSize : 0;
-        _log_i("    %2zu: " SV_FMT " <%s" SV_FMT SV_FMT "> p%3u @ c%2d "
+        _log_i("    %2zu: " SV_FMT " -> " SV_FMT " <%s" SV_FMT SV_FMT
+               "> p%3u @ c%2d "
                "(%5zuB / %5zuB = %6.2f%%) %6.2f%% in %8zums | %6.2f%% total",
-               i, SV_ARG(task.name, TaskControllerConfig::maxTaskNameLen),
+               i, SV_ARG(task.sourceName, TaskRegistryConfig::sourceNameMaxLen),
+               SV_ARG(task.name, -TaskControllerConfig::maxTaskNameLen),
                task.hasEverStarted ? "S" : "X",
                SV_ARG(TaskController::state_to_string(task.state)),
                SV_ARG(TaskController::platform_state_to_string(
@@ -77,7 +81,7 @@ template <typename Owner> struct Commands {
     static ReturnCode handle_monitoring(CommandDesc::Tokens /*unused*/,
                                         void *ctx) {
         auto *monitoring = static_cast<Owner *>(ctx);
-        return monitoring->snapshot(MonitoringSink{
+        return monitoring->snapshot(Sink{
             .self = monitoring,
             .consumeHook =
                 [](void *, const MonitoringFrame &frame) {

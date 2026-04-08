@@ -4,10 +4,10 @@
 
 #include "Generic/Directory.hh"
 #include "StaticConfig/TaskController.hh"
+#include "TaskController/Interfaces/Config.hh"
+#include "TaskController/Interfaces/TaskHooks.hh"
 #include "TaskController/detail/Concepts.hh"
-#include "TaskController/detail/Config.hh"
 #include "TaskController/detail/Runner.hh"
-#include "TaskController/detail/Types.hh"
 #include "Types/Error.hh"
 #include <cstring>
 #include <expected>

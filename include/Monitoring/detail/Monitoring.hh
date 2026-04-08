@@ -3,12 +3,11 @@
 #include "Base/HasCommands.hh"
 #include "Base/HasLifecycle.hh"
 #include "Macros/Facade.hh"
+#include "Monitoring/Interfaces/Sink.hh"
 #include "Monitoring/detail/Commands.hh"
 #include "Monitoring/detail/PlatformSelect.hh"
-#include "Monitoring/detail/Types.hh"
-#include "StaticConfig/TaskController.hh"
 #include "StaticConfig/TaskRegistry.hh"
-#include "TaskController/Facade.hh"
+#include "TaskController/Interfaces/TaskRuntimeSnapshot.hh"
 #include "TaskControllerRegistry/Facade.hh"
 #include "Types/Error.hh"
 #include <array>
@@ -31,7 +30,7 @@ class Monitoring : public HasLifecycle<Monitoring>,
 
     static constexpr const char *name = "Monitoring";
 
-    ReturnCode snapshot(const MonitoringSink &sink) {
+    ReturnCode snapshot(const Sink &sink) {
         auto now = ::platform::get_time();
         if (now < _lastSnapshotTimestamp) {
             // Time went backwards, likely due to overflow. Reset all totals to
@@ -135,8 +134,7 @@ class Monitoring : public HasLifecycle<Monitoring>,
     std::array<float, ::platform::CoreCount> _coreUtilizationPctTotal{0.0F};
     std::array<float, ::platform::CoreCount> _coreUtilizationPctDelta{0.0F};
     static constexpr size_t MaxTaskSnapshots =
-        static_cast<size_t>(TaskRegistryConfig::controllerCountMax) *
-        static_cast<size_t>(TaskControllerConfig::maxTasksPerClass);
+        static_cast<size_t>(TaskRegistryConfig::observedTaskCountMax);
     std::array<TaskController::TaskRuntimeSnapshot, MaxTaskSnapshots>
         _taskSnapshots{};
     uint8_t _taskCount = 0;

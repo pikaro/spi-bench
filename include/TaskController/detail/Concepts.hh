@@ -1,7 +1,8 @@
 #pragma once
 
-#include "TaskController/detail/Types.hh"
+#include "TaskController/Interfaces/TaskRuntimeSnapshot.hh"
 #include "Types/Error.hh"
+
 namespace Totem::TaskController::detail {
 
 template <typename Fn>

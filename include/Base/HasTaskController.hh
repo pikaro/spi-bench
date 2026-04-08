@@ -3,6 +3,8 @@
 #include "Base/HasLifecycle.hh"
 #include "Concepts/Base.hh"
 #include "TaskController/Facade.hh"
+#include "TaskController/Interfaces/Config.hh"
+#include "TaskController/Interfaces/RegistryHooks.hh"
 #include "Types/Error.hh"
 
 template <class Derived, typename ConfT = NoConfig> class HasTaskController {

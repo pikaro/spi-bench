@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Macros/Facade.hh"
 #include "PlatformSelect.hh"
 
 namespace Totem::TaskController::detail {

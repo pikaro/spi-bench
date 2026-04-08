@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Platform/PlatformSelect.hh"
+
 #if defined(PLATFORM_ESP32)
 #include "platform/PlatformESP32.hh"
 #elif defined(PLATFORM_TEST)

@@ -3,12 +3,14 @@
 #include "Common.hh"
 
 #include "Base/HasLifecycle.hh"
-#include "Config.hh"
 #include "Directory.hh"
 #include "Runner.hh"
+#include "TaskController/Interfaces/Config.hh"
+#include "TaskController/Interfaces/RegistryHooks.hh"
+#include "TaskController/Interfaces/TaskHooks.hh"
 #include "TaskController/detail/Concepts.hh"
 #include "TaskController/detail/PlatformSelect.hh"
-#include "TaskController/detail/Types.hh"
+#include "TaskControllerRegistry/Interfaces/TaskSourceHooks.hh"
 #include <array>
 #include <atomic>
 #include <cstddef>
@@ -37,12 +39,22 @@ class Controller : public HasLifecycle<Controller, Config> {
           _ownerName(ownerName) {
         ABORT_IF_NOT(_registryHooks.validate(),
                      "Invalid registry hooks for %s of %s", name, _ownerName);
-        ABORT_IF_ERR(_registryHooks.registerController(ownerName, this),
+        auto sourceInfo = TaskControllerRegistry::TaskSourceInfo{
+            .displayName = ownerName,
+            .kind = TaskControllerRegistry::TaskSourceKind::ManagedController,
+            .capabilities =
+                TaskControllerRegistry::TaskSourceCapability::Reap |
+                TaskControllerRegistry::TaskSourceCapability::Managed,
+        };
+        ABORT_IF_ERR(_registryHooks.registerSource(
+                         ownerName,
+                         TaskControllerRegistry::TaskSourceHooks::bind(*this),
+                         sourceInfo),
                      "Failed to register %s of %s", name, _ownerName);
     }
 
     ~Controller() {
-        ABORT_IF_ERR(_registryHooks.deregisterController(_ownerName),
+        ABORT_IF_ERR(_registryHooks.deregisterSource(_ownerName),
                      "Failed to deregister %s of %s", name, _ownerName);
     }
 

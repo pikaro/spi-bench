@@ -1,12 +1,13 @@
 #pragma once
 
 #include "Macros/Facade.hh"
-#include "TaskController/detail/Config.hh"
+#include "TaskController/Interfaces/Config.hh"
+#include "TaskController/Interfaces/TaskHooks.hh"
+#include "TaskController/Interfaces/TaskRuntimeSnapshot.hh"
 #include "TaskController/detail/ScopedWatchdog.hh"
 #include "TaskController/detail/SignalHandler.hh"
 #include "TaskController/detail/StateManager.hh"
 #include "TaskController/detail/StepScheduler.hh"
-#include "TaskController/detail/Types.hh"
 #include "Types/Error.hh"
 
 namespace Totem::TaskController::detail {

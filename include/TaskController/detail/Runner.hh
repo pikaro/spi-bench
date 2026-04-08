@@ -1,11 +1,12 @@
 #pragma once
 
 #include "Macros/Facade.hh"
-#include "TaskController/detail/Config.hh"
+#include "TaskController/Interfaces/Config.hh"
+#include "TaskController/Interfaces/TaskHooks.hh"
+#include "TaskController/Interfaces/TaskRuntimeSnapshot.hh"
 #include "TaskController/detail/Loop.hh"
 #include "TaskController/detail/PlatformSelect.hh"
 #include "TaskController/detail/StateManager.hh"
-#include "TaskController/detail/Types.hh"
 #include "Types/Error.hh"
 #include "Types/Signal.hh"
 #include <atomic>
@@ -77,7 +78,8 @@ class Runner {
         return _stopResult;
     }
 
-    [[nodiscard]] std::expected<TaskRuntimeSnapshot, ReturnCode>
+    [[nodiscard]] std::expected<Totem::TaskController::TaskRuntimeSnapshot,
+                                ReturnCode>
     snapshot() const {
         if (!_hasSnapshot.load(std::memory_order_acquire)) {
             return std::unexpected(ERR(NotFound));
@@ -113,7 +115,7 @@ class Runner {
                               static_cast<float>(timestampDelta);
         }
 
-        _runtimeSnapshot = TaskRuntimeSnapshot{
+        _runtimeSnapshot = Totem::TaskController::TaskRuntimeSnapshot{
             .timestamp = timestamp,
             .timestampDelta = timestampDelta,
             .name = _config.name,

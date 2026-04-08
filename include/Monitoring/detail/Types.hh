@@ -1,12 +1,7 @@
 #pragma once
 
-#include "TaskController/Facade.hh"
 #include "Traits/Bitmask.hh"
-#include "Types/Error.hh"
-#include <cstddef>
 #include <cstdint>
-#include <span>
-#include <string_view>
 #include <type_traits>
 
 namespace Totem::Monitoring::detail {
@@ -27,46 +22,6 @@ enum class MemoryStatFlags : uint8_t {
     Overlapping = 1U << 0, // overlaps other reported views
     Conditional = 1U << 1, // only exists on some SKUs / configs
     Specialized = 1U << 2, // niche/special-purpose rather than general heap
-};
-
-struct MemoryStats {
-    std::string_view name;
-    size_t totalBytes;
-    size_t freeBytes;
-    size_t minFreeBytes;
-    float freePct;
-    float minFreePct;
-    uint32_t attrs;
-    uint32_t flags;
-};
-
-struct GlobalMonitoringSnapshot {
-    uint8_t taskCount = 0;
-    std::span<uint32_t> coreIdleTimeTotalMs;
-    std::span<uint32_t> coreIdleTimeDeltaMs;
-    std::span<float> coreUtilizationPctTotal;
-    std::span<float> coreUtilizationPctDelta;
-    std::span<MemoryStats> memoryStats;
-};
-
-struct MonitoringFrame {
-    uint32_t timestamp = 0;
-    GlobalMonitoringSnapshot global;
-    std::span<const TaskController::TaskRuntimeSnapshot> tasks;
-};
-
-struct MonitoringSink {
-    void *self = nullptr;
-
-    ReturnCode (*consumeHook)(void *, const MonitoringFrame &) = nullptr;
-
-    ReturnCode consume(const MonitoringFrame &frame) const {
-        return consumeHook(self, frame);
-    }
-
-    [[nodiscard]] bool validate() const {
-        return self != nullptr && consumeHook != nullptr;
-    }
 };
 
 } // namespace Totem::Monitoring::detail

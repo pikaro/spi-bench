@@ -2,8 +2,8 @@
 
 #include "Base/HasLifecycle.hh"
 #include "Macros/Facade.hh"
+#include "Output/Interfaces/Sink.hh"
 #include "Output/detail/Config.hh"
-#include "Output/detail/Types.hh"
 #include "Platform/Uart.hh"
 #include "StaticConfig/Logging.hh"
 #include "Types/Error.hh"

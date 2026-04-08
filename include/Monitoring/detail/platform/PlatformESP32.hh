@@ -1,11 +1,11 @@
 #pragma once
 
 #include "Macros/Facade.hh"
+#include "Monitoring/Interfaces/Sink.hh"
 #include "Monitoring/detail/Types.hh"
 #include "Support/Basic.hh"
 #include "Types/Error.hh"
 #include "esp_heap_caps.h"
-#include "esp_timer.h"
 #include "freertos/idf_additions.h"
 #include "freertos/portable.h"
 #include "portmacro.h"

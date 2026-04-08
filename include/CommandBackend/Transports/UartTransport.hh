@@ -1,6 +1,6 @@
 #pragma once
 
-#include "CommandBackend/detail/Types.hh"
+#include "CommandBackend/Interfaces/Transport.hh"
 #include "Macros/Facade.hh"
 #include "Platform/Uart.hh"
 #include "StaticConfig/Command.hh"

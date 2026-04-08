@@ -2,13 +2,14 @@
 
 #include "Base/HasLifecycle.hh"
 #include "Base/HasTaskController.hh"
+#include "CommandBackend/Interfaces/Transport.hh"
 #include "CommandBackend/detail/Dispatcher.hh"
 #include "CommandBackend/detail/Registrar.hh"
 #include "CommandBackend/detail/Store.hh"
-#include "CommandBackend/detail/Types.hh"
 #include "Macros/Facade.hh"
 #include "StaticConfig/Command.hh"
-#include "TaskController/Facade.hh"
+#include "TaskController/Interfaces/RegistryHooks.hh"
+#include "TaskController/Interfaces/TaskHooks.hh"
 #include "Types/Command.hh"
 #include "Types/Error.hh"
 #include <array>
@@ -27,7 +28,7 @@ class Controller : public HasLifecycle<Controller>,
     DELETE_COPY(Controller)
     DELETE_MOVE(Controller)
 
-    static constexpr const char *name = "CommandBackend::Controller";
+    static constexpr const char *name = "CommandCtrl";
 
     explicit Controller(TaskController::RegistryHooks registryHooks)
         : HasTaskController(registryHooks), _registrar(_store) {}

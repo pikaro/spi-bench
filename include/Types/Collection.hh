@@ -11,11 +11,16 @@
 #include <cstring>
 #include <expected>
 #include <functional>
+#include <string_view>
 #include <strings.h>
 
 template <size_t N> struct NameKey {
     std::array<char, N> name{};
     SmallestUintType<N> len = 0;
+
+    [[nodiscard]] std::string_view view() const {
+        return std::string_view{name.data(), len};
+    }
 
     bool operator==(const NameKey &other) const {
         return len == other.len &&
@@ -37,6 +42,19 @@ template <size_t N> struct NameKey {
         std::memcpy(out.name.data(), str, len);
         ABORT_IF(len == 0, "NameKey cannot be created from empty string");
         out.len = len;
+        return out;
+    }
+
+    static NameKey fromStringView(std::string_view sv) {
+        if (sv.empty()) [[unlikely]] {
+            ABORT("NameKey cannot be created from empty string_view");
+        }
+        if (sv.size() > N) [[unlikely]] {
+            ABORT("NameKey length overflow: %zu > %zu", sv.size(), N);
+        }
+        NameKey out{};
+        std::memcpy(out.name.data(), sv.data(), sv.size());
+        out.len = static_cast<SmallestUintType<N>>(sv.size());
         return out;
     }
 };

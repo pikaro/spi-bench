@@ -3,11 +3,13 @@
 #include "Base/HasLifecycle.hh"
 #include "Base/HasTaskController.hh"
 #include "Macros/Facade.hh"
+#include "Output/Interfaces/Sink.hh"
 #include "Output/detail/Config.hh"
-#include "Output/detail/Types.hh"
 #include "RingBuffer/Facade.hh"
 #include "StaticConfig/Logging.hh"
 #include "TaskController/Facade.hh"
+#include "TaskController/Interfaces/RegistryHooks.hh"
+#include "TaskController/Interfaces/TaskHooks.hh"
 #include "Types/Error.hh"
 #include "Types/Logging.hh"
 #include <array>
@@ -27,7 +29,7 @@ class Aggregator : public HasLifecycle<Aggregator, AggregatorConfig>,
     explicit Aggregator(TaskController::RegistryHooks registryHooks)
         : HasTaskController(registryHooks) {}
 
-    static constexpr const char *name = "Output::Aggregator";
+    static constexpr const char *name = "Aggregator";
 
     ReturnCode setLogLevel(LogLevel level) {
         _logLevel = level;

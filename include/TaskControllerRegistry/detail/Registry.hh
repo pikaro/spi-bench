@@ -3,6 +3,9 @@
 #include "Base/HasLifecycle.hh"
 #include "Macros/Facade.hh"
 #include "TaskController/Facade.hh"
+#include "TaskController/Interfaces/RegistryHooks.hh"
+#include "TaskController/Interfaces/TaskRuntimeSnapshot.hh"
+#include "TaskControllerRegistry/Interfaces/TaskSourceHooks.hh"
 #include "TaskControllerRegistry/detail/Directory.hh"
 #include "TaskControllerRegistry/detail/Metrics.hh"
 #include "Types/Error.hh"
@@ -17,7 +20,7 @@ class Registry : public HasLifecycle<Registry> {
     friend struct LifecycleContract<Registry>;
 
   public:
-    using ControllerNameKey = Directory::EntryNameKey;
+    using SourceNameKey = Directory::EntryNameKey;
 
     DELETE_COPY(Registry)
     DELETE_MOVE(Registry)
@@ -28,59 +31,59 @@ class Registry : public HasLifecycle<Registry> {
 
     static constexpr const char *name = "TaskControllerRegistry::Registry";
 
-    ReturnCode registerController(const char *ownerName,
-                                  TaskController::Controller *controller) {
-        FAIL_IF_NULL(ownerName, ERR(InvalidArgument),
-                     "Cannot register controller with null owner name");
-        FAIL_IF_NULL(controller, ERR(InvalidArgument),
-                     "Cannot register null controller");
-        auto nameKey = ControllerNameKey::fromCharPtr(ownerName);
-        return registerController(nameKey, controller);
+    ReturnCode registerSource(const char *sourceName, TaskSourceHooks hooks,
+                              TaskSourceInfo info) {
+        FAIL_IF_NULL(sourceName, ERR(InvalidArgument),
+                     "Cannot register task source with null source name");
+        auto nameKey = SourceNameKey::fromCharPtr(sourceName);
+        return registerSource(nameKey, hooks, info);
     }
 
-    ReturnCode registerController(ControllerNameKey ownerNameKey,
-                                  TaskController::Controller *controller) {
-        auto ret = _directory.add(ownerNameKey, controller);
-        FAIL_IF(!ret, ret.error(), "Failed to register controller %s",
-                ownerNameKey.name.data());
+    ReturnCode registerSource(SourceNameKey sourceNameKey,
+                              TaskSourceHooks hooks, TaskSourceInfo info) {
+        auto ret = _directory.add(sourceNameKey, hooks, info);
+        FAIL_IF(!ret, ret.error(), "Failed to register task source %s",
+                sourceNameKey.name.data());
         FAIL_IF_ERR_FWD(
             _metrics.addTask(),
-            "Failed to update metrics for registering controller %s",
-            ownerNameKey.name.data());
+            "Failed to update metrics for registering task source %s",
+            sourceNameKey.name.data());
         return OK();
     }
 
-    ReturnCode deregisterController(const char *ownerName) {
-        FAIL_IF_NULL(ownerName, ERR(InvalidArgument),
-                     "Cannot deregister controller with null owner name");
-        auto nameKey = ControllerNameKey::fromCharPtr(ownerName);
-        return deregisterController(nameKey);
+    ReturnCode deregisterSource(const char *sourceName) {
+        FAIL_IF_NULL(sourceName, ERR(InvalidArgument),
+                     "Cannot deregister task source with null source name");
+        auto nameKey = SourceNameKey::fromCharPtr(sourceName);
+        return deregisterSource(nameKey);
     }
 
-    ReturnCode deregisterController(ControllerNameKey ownerNameKey) {
-        auto ret = _directory.remove(ownerNameKey);
-        FAIL_IF_ERR(ret, ret, "Failed to deregister controller %s",
-                    ownerNameKey.name.data());
+    ReturnCode deregisterSource(SourceNameKey sourceNameKey) {
+        auto ret = _directory.remove(sourceNameKey);
+        FAIL_IF_ERR(ret, ret, "Failed to deregister task source %s",
+                    sourceNameKey.name.data());
         FAIL_IF_ERR_FWD(
             _metrics.removeTask(),
-            "Failed to update metrics for deregistering controller %s",
-            ownerNameKey.name.data());
+            "Failed to update metrics for deregistering task source %s",
+            sourceNameKey.name.data());
         return OK();
     }
 
     ReturnCode reap() {
-        return _directory.withAll(
-            [](const ControllerNameKey &,
-               const ControllerEntry &entry) -> ReturnCode {
-                FAIL_IF_UNEXPECTED_FWD(count, entry.controller->reap(),
-                                       "Failed to reap tasks for controller %s",
-                                       entry.controller->ownerName());
-                if (count > 0) {
-                    _log_i("Reaped %u tasks for controller %s", count,
-                           entry.controller->ownerName());
-                }
+        return _directory.withAll([](const SourceNameKey &sourceName,
+                                     SourceEntry &entry) -> ReturnCode {
+            if (entry.hooks.reapHook == nullptr) {
                 return OK();
-            });
+            }
+            FAIL_IF_UNEXPECTED_FWD(count, entry.hooks.reap(),
+                                   "Failed to reap tasks for source %s",
+                                   sourceName.name.data());
+            if (count > 0) {
+                _log_i("Reaped %u tasks for source %s", count,
+                       sourceName.name.data());
+            }
+            return OK();
+        });
     }
 
     template <typename Fn>
@@ -106,20 +109,21 @@ class Registry : public HasLifecycle<Registry> {
         return TaskController::RegistryHooks::bind(*this);
     }
 
-    [[nodiscard]] std::expected<uint8_t, ReturnCode> controllerCount() const {
+    [[nodiscard]] std::expected<uint8_t, ReturnCode> sourceCount() const {
         return _directory.size();
     }
 
-    [[nodiscard]] std::expected<bool, ReturnCode> taskCount() const {
+    [[nodiscard]] std::expected<uint8_t, ReturnCode> taskCount() const {
         uint8_t count = 0;
-        auto ret = _directory.withAllConst(
-            [&count](const ControllerNameKey &, const ControllerEntry &entry) {
-                auto taskCountResult = entry.controller->taskCount();
+        auto ret =
+            _directory.withAllConst([&count](const SourceNameKey &sourceName,
+                                             const SourceEntry &entry) {
+                auto taskCountResult = entry.hooks.taskCount();
                 if (!taskCountResult) {
                     FAIL(taskCountResult.error(),
-                         "Failed to get task count for controller "
+                         "Failed to get task count for task source "
                          "%s during registry task count",
-                         entry.controller->name);
+                         sourceName.name.data());
                 }
                 count += taskCountResult.value();
                 return OK();

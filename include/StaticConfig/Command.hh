@@ -1,6 +1,6 @@
 #pragma once
 
-#include "TaskController/Facade.hh"
+#include "TaskController/Interfaces/Config.hh"
 #include <cstdint>
 
 struct CommandConfig {

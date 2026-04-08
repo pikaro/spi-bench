@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace Totem::TaskController::detail {
+namespace Totem::TaskController {
 
 struct Config {
     struct CorePreference {
@@ -35,4 +35,4 @@ struct Config {
     }
 };
 
-} // namespace Totem::TaskController::detail
+} // namespace Totem::TaskController

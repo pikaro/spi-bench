@@ -2,10 +2,11 @@
 
 #include "Common.hh"
 
-#include "TaskController/detail/Config.hh"
+#include "TaskController/Interfaces/Config.hh"
+#include "TaskController/Interfaces/TaskHooks.hh"
 #include "TaskController/detail/PlatformSelect.hh"
-#include "TaskController/detail/Types.hh"
 #include "Types/Signal.hh"
+#include <cstdint>
 
 namespace Totem::TaskController::detail {
 

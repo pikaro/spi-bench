@@ -2,8 +2,8 @@
 
 #include "Common.hh"
 
-#include "TaskController/detail/Config.hh"
-#include "TaskController/detail/Types.hh"
+#include "TaskController/Interfaces/Config.hh"
+#include "TaskController/Interfaces/TaskRuntimeSnapshot.hh"
 #include "TaskController/detail/platform/PlatformCommon.hh"
 #include "Types/Signal.hh"
 #include "esp_task_wdt.h"
@@ -22,10 +22,10 @@ struct Platform {
     using TaskHandle = ::platform::TaskHandle;
     using TaskStatus = ::platform::TaskStatus;
     using StackDepth = ::platform::StackDepth;
+    using TaskFunction = ::platform::TaskFunction;
 
-    static PlatformResultCreateTask create_task(Config config,
-                                                TaskFunction_t taskFunction,
-                                                void *taskParameter) {
+    static PlatformResultCreateTask
+    create_task(Config config, TaskFunction taskFunction, void *taskParameter) {
         auto affinity = (config.core.kind == Config::CorePreference::Kind::Any)
                             ? tskNO_AFFINITY
                             : config.core.core;

@@ -1,7 +1,0 @@
-#!/bin/bash
-
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-
-. "${HOME}/.platformio/penv/.espidf-$(cat "${REPO_ROOT}/.espidf-version")/bin/activate"
-
-pip install -r "${REPO_ROOT}/requirements.txt"

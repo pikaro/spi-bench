@@ -59,9 +59,28 @@ inline static ReturnCode dump_monitoring_snaphot(const MonitoringFrame &frame) {
         const auto &task = frame.tasks[i];
         const size_t stackSize =
             task.config != nullptr ? task.config->stackSize : 0;
+        if (stackSize > 0 && task.stackLowestFree <= stackSize) {
+            _log_i(
+                "    %2zu: " SV_FMT " -> " SV_FMT " <%s" SV_FMT SV_FMT
+                "> p%3u @ c%2d "
+                "(%5zuB / %5zuB = %6.2f%%) %6.2f%% in %8zums | %6.2f%% total",
+                i,
+                SV_ARG(task.sourceName, TaskRegistryConfig::sourceNameMaxLen),
+                SV_ARG(task.name, -TaskControllerConfig::maxTaskNameLen),
+                task.hasEverStarted ? "S" : "X",
+                SV_ARG(TaskController::state_to_string(task.state)),
+                SV_ARG(TaskController::platform_state_to_string(
+                    task.platformState)),
+                task.currentPriority, task.coreId,
+                stackSize - task.stackLowestFree, stackSize,
+                (double)task.stackUsedPct, (double)task.runTimeDeltaPct,
+                task.timestampDelta, (double)task.runTimeTotalPct);
+            continue;
+        }
+
         _log_i("    %2zu: " SV_FMT " -> " SV_FMT " <%s" SV_FMT SV_FMT
                "> p%3u @ c%2d "
-               "(%5zuB / %5zuB = %6.2f%%) %6.2f%% in %8zums | %6.2f%% total",
+               "( low %5luB              ) %6.2f%% in %8zums | %6.2f%% total",
                i, SV_ARG(task.sourceName, TaskRegistryConfig::sourceNameMaxLen),
                SV_ARG(task.name, -TaskControllerConfig::maxTaskNameLen),
                task.hasEverStarted ? "S" : "X",
@@ -69,9 +88,9 @@ inline static ReturnCode dump_monitoring_snaphot(const MonitoringFrame &frame) {
                SV_ARG(TaskController::platform_state_to_string(
                    task.platformState)),
                task.currentPriority, task.coreId,
-               stackSize - task.stackLowestFree, stackSize,
-               (double)task.stackUsedPct, (double)task.runTimeDeltaPct,
-               task.timestampDelta, (double)task.runTimeTotalPct);
+               static_cast<unsigned long>(task.stackLowestFree),
+               (double)task.runTimeDeltaPct, task.timestampDelta,
+               (double)task.runTimeTotalPct);
     }
 
     return OK(CoreError);

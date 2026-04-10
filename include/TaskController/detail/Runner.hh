@@ -119,6 +119,8 @@ class Runner {
             .timestamp = timestamp,
             .timestampDelta = timestampDelta,
             .name = _config.name,
+            .sourceName = {},
+            .nativeHandle = reinterpret_cast<uintptr_t>(_handle),
             .hasEverStarted = _hasEverStarted.load(std::memory_order_acquire),
             .lastStopResult = hasStopped() ? _stopResult : std::nullopt,
             .state = _stateManager.state(),

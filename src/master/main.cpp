@@ -15,6 +15,7 @@ Totem::Output::UartOutput uart;
 
 Totem::CommandBackend::Controller commandController(taskRegistry.hooks());
 Totem::CommandBackend::UartTransport uartSource;
+Totem::TaskControllerRegistry::SystemTaskSource systemTaskSource(taskRegistry);
 
 Totem::Monitoring::Monitoring monitoring(taskRegistry);
 

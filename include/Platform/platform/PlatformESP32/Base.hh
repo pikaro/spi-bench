@@ -30,6 +30,8 @@ using MutexHandle = SemaphoreHandle_t;
 using TaskStatus = TaskStatus_t;
 using StackDepth = configSTACK_DEPTH_TYPE;
 
+inline constexpr auto MaxTaskNameLen = configMAX_TASK_NAME_LEN;
+
 inline bool in_isr() { return xPortInIsrContext() != pdFALSE; }
 
 } // namespace platform

@@ -110,6 +110,7 @@ struct TaskRuntimeSnapshot {
     uint32_t timestampDelta;
     std::string_view name;
     std::string_view sourceName;
+    uintptr_t nativeHandle = 0;
     TaskSourceKind sourceKind = TaskSourceKind::Unknown;
     uint32_t sourceCapabilities = TaskSourceCapability::None;
     bool isManaged = false;

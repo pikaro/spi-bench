@@ -9,6 +9,7 @@
 #include "TaskControllerRegistry/detail/Directory.hh"
 #include "TaskControllerRegistry/detail/Metrics.hh"
 #include "Types/Error.hh"
+#include <array>
 #include <cstdint>
 #include <expected>
 #include <span>
@@ -89,7 +90,25 @@ class Registry : public HasLifecycle<Registry> {
     template <typename Fn>
         requires TaskController::IsSnapshotHandler<Fn>
     ReturnCode forEachTaskSnapshot(Fn &&fun) {
-        return _directory.forEachTaskSnapshot(fun);
+        std::array<uintptr_t, TaskRegistryConfig::observedTaskCountMax>
+            seenHandles{};
+        size_t seenHandleCount = 0;
+        return _directory.forEachTaskSnapshot(
+            [&fun, &seenHandles,
+             &seenHandleCount](const TaskController::TaskRuntimeSnapshot &snap) {
+                if (snap.nativeHandle != 0) {
+                    for (size_t i = 0; i < seenHandleCount; ++i) {
+                        if (seenHandles[i] == snap.nativeHandle) {
+                            return OK();
+                        }
+                    }
+                    FAIL_IF(seenHandleCount >= seenHandles.size(),
+                            ERR(OutOfMemory),
+                            "Not enough space to deduplicate task snapshots");
+                    seenHandles[seenHandleCount++] = snap.nativeHandle;
+                }
+                return fun(snap);
+            });
     }
 
     ReturnCode collectTaskSnapshotsInto(
@@ -115,17 +134,11 @@ class Registry : public HasLifecycle<Registry> {
 
     [[nodiscard]] std::expected<uint8_t, ReturnCode> taskCount() const {
         uint8_t count = 0;
-        auto ret =
-            _directory.withAllConst([&count](const SourceNameKey &sourceName,
-                                             const SourceEntry &entry) {
-                auto taskCountResult = entry.hooks.taskCount();
-                if (!taskCountResult) {
-                    FAIL(taskCountResult.error(),
-                         "Failed to get task count for task source "
-                         "%s during registry task count",
-                         sourceName.name.data());
-                }
-                count += taskCountResult.value();
+        auto ret = const_cast<Registry *>(this)->forEachTaskSnapshot(
+            [&count](const TaskController::TaskRuntimeSnapshot &) {
+                FAIL_IF(count == UINT8_MAX, ERR(Overflow),
+                        "Task count overflow in registry");
+                ++count;
                 return OK();
             });
         FAIL_IF_ERR_FWD_UNEXPECTED(ret,

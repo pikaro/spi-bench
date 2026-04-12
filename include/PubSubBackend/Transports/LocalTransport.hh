@@ -23,13 +23,13 @@ struct LocalTransportDependencies {
     toBaseDeps(void *ctx, SendCallback sendCallback = nullptr,
                ReceiveCallback receiveCallback = nullptr) const {
         auto deps = base;
-        if (ctx == nullptr) {
+        if (deps.transport == nullptr) {
             deps.transport = ctx;
         }
-        if (sendCallback == nullptr) {
+        if (deps.sendCallback == nullptr) {
             deps.sendCallback = sendCallback;
         }
-        if (receiveCallback == nullptr) {
+        if (deps.receiveCallback == nullptr) {
             deps.receiveCallback = receiveCallback;
         }
         return deps;

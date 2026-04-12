@@ -22,3 +22,7 @@
 #define MAGIC_PUBSUB_SV_ARG(header)                                            \
     MAGIC_SV_ARG(Topic, header.topic), MAGIC_SV_ARG(NodeId, header.source),    \
         header.messageId
+
+#define ERR_FMT "[%d] %s::%s"
+#define ERR_ARG(err)                                                           \
+    (err).format().code, (err).format().domain, (err).format().name

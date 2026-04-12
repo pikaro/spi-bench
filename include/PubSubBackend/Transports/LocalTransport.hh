@@ -20,12 +20,18 @@ struct LocalTransportDependencies {
     [[nodiscard]] bool valid() const { return base.valid(); }
 
     BaseTransportDependencies
-    toBaseDeps(void *ctx, SendCallback sendCallback,
-               ReceiveCallback receiveCallback) const {
+    toBaseDeps(void *ctx, SendCallback sendCallback = nullptr,
+               ReceiveCallback receiveCallback = nullptr) const {
         auto deps = base;
-        deps.transport = ctx;
-        deps.sendCallback = sendCallback;
-        deps.receiveCallback = receiveCallback;
+        if (ctx == nullptr) {
+            deps.transport = ctx;
+        }
+        if (sendCallback == nullptr) {
+            deps.sendCallback = sendCallback;
+        }
+        if (receiveCallback == nullptr) {
+            deps.receiveCallback = receiveCallback;
+        }
         return deps;
     }
 };
@@ -67,9 +73,10 @@ class LocalTransport : public BaseTransport {
     ReturnCode _onBegin() {
         auto rxFrameQueueResult =
             Totem::Queue::Platform::create(_rxFrameQueueStorage);
-        FAIL_IF_ASSIGN_UNEXPECTED_FWD(_rxFrameQueue, rxFrameQueueResult,
-                                      "Failed to create rxFrame queue: %s",
-                                      rxFrameQueueResult.error().format());
+        FAIL_IF_ASSIGN_UNEXPECTED_FWD(
+            _rxFrameQueue, rxFrameQueueResult,
+            "Failed to create rxFrame queue: " ERR_FMT,
+            ERR_ARG(rxFrameQueueResult.error()));
         return Base::_onBegin();
     }
 
@@ -112,11 +119,11 @@ class LocalTransport : public BaseTransport {
             Totem::Queue::Platform::receive(_rxFrameQueue, &rxFrame, 0);
         if (!receiveRet.ok()) {
             if (receiveRet == ERR(Timeout)) {
-                return 0;
+                return std::unexpected(ERR(Timeout));
             }
             FAIL(std::unexpected(receiveRet),
-                 "Failed to receive frame from rxFrame queue: %s",
-                 receiveRet.format());
+                 "Failed to receive frame from rxFrame queue: " ERR_FMT,
+                 ERR_ARG(receiveRet));
         }
         FAIL_IF(out.size() < rxFrame.size,
                 std::unexpected(ERR(InvalidArgument)),

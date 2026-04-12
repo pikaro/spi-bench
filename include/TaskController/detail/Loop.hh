@@ -75,10 +75,10 @@ class Loop {
                 runResult = Result{.reason = ExitReason::StopHookFailed,
                                    .error = stopResult};
             } else {
-                _log_e("Runner %s: onStop hook failed with error %s while "
-                       "already exiting with error %s",
-                       _config.name, stopResult.format(),
-                       runResult.error.format());
+                _log_e("Runner %s: onStop hook failed with error " ERR_FMT
+                       " while already exiting with error " ERR_FMT,
+                       _config.name, ERR_ARG(stopResult),
+                       ERR_ARG(runResult.error));
             }
         }
 

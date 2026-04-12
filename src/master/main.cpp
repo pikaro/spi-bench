@@ -31,7 +31,7 @@ PubSubNode pubSubNode(taskRegistry.hooks());
 Totem::PubSubBackend::Transports::LocalTransport testPubSub1({
     .base =
         {
-            .owner = static_cast<void *>(&pubSubNode),
+            .pubSubNode = static_cast<void *>(&pubSubNode),
             .transportId =
                 static_cast<uint8_t>(NodeData::PubSub::Transport::SPI),
             .name = "SPI",
@@ -42,7 +42,7 @@ Totem::PubSubBackend::Transports::LocalTransport testPubSub1({
 Totem::PubSubBackend::Transports::LocalBufferedTransport testPubSub2({
     .base =
         {
-            .owner = static_cast<void *>(&pubSubNode),
+            .pubSubNode = static_cast<void *>(&pubSubNode),
             .transportId =
                 static_cast<uint8_t>(NodeData::PubSub::Transport::WebSocket),
             .name = "WebSocket",
@@ -112,7 +112,8 @@ void app_main() {
     setup();
     for (;;) {
         if (auto reapResult = taskRegistry.reap(); !reapResult.ok()) {
-            _log_e("Error during task registry reap: %s", reapResult.format());
+            _log_e("Error during task registry reap: " ERR_FMT,
+                   ERR_ARG(reapResult));
         }
         ::platform::delay_until(&lastWakeTime, 1000);
     }

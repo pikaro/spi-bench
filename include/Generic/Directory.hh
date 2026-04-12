@@ -435,8 +435,8 @@ class Directory : HasMutex<Directory<Entry, N, IdLen>> {
             auto fnRet = std::invoke(fn, key, entry);
             if (!fnRet.ok()) {
                 result = fnRet;
-                _log_e("Error while iterating directory entry %s: %s",
-                       key.name.data(), fnRet.format());
+                _log_e("Error while iterating directory entry %s: " ERR_FMT,
+                       key.name.data(), ERR_ARG(fnRet));
             }
         }
 

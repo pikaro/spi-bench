@@ -154,8 +154,8 @@ class Runner {
         if (result.reason == ExitReason::StopRequested) {
             _log_i("Runner %s exited successfully", self->_config.name);
         } else {
-            _log_e("Runner %s exited with error: %s (reason code %d)",
-                   self->_config.name, result.error.format(),
+            _log_e("Runner %s exited with error: " ERR_FMT " (reason code %d)",
+                   self->_config.name, ERR_ARG(result.error),
                    static_cast<uint8_t>(result.reason));
         }
         // Publish the stopped state only after the task has finished touching

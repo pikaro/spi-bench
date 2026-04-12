@@ -28,7 +28,7 @@ using ReceiveCallback = std::expected<size_t, ReturnCode> (*)(
 
 struct BaseTransportDependencies {
     void *pubSubNode;
-    void *transport;
+    void *transport = nullptr;
     detail::TransportId transportId;
     std::string_view name;
     SendAckCallback sendAckCallback;
@@ -105,8 +105,8 @@ class BaseTransport : public HasLifecycle<BaseTransport> {
             if (ret == ERR(Timeout)) {
                 return OK();
             }
-            FAIL(ret, "Failed to receive frame from send queue: %s",
-                 ret.format());
+            FAIL(ret, "Failed to receive frame from send queue: " ERR_FMT,
+                 ERR_ARG(ret));
         }
         return OK();
     }
@@ -141,8 +141,8 @@ class BaseTransport : public HasLifecycle<BaseTransport> {
             if (ret == ERR(Timeout)) {
                 return OK();
             }
-            FAIL(ret, "Failed to receive frame with transport: %s",
-                 ret.format());
+            FAIL(ret, "Failed to receive frame with transport: " ERR_FMT,
+                 ERR_ARG(ret));
         }
         return OK();
     }
@@ -159,8 +159,8 @@ class BaseTransport : public HasLifecycle<BaseTransport> {
                     return OK();
                 }
                 FAIL(receiveRet,
-                     "Failed to receive item from publish queue: %s",
-                     receiveRet.format());
+                     "Failed to receive item from publish queue: " ERR_FMT,
+                     ERR_ARG(receiveRet));
             }
             FAIL_IF_ERR_FWD(callback(ctx, item),
                             "Failed to process item from publish queue");
@@ -176,14 +176,16 @@ class BaseTransport : public HasLifecycle<BaseTransport> {
     ReturnCode _onBegin() {
         auto sendQueueResult =
             Totem::Queue::Platform::create(_sendQueueStorage);
-        FAIL_IF_ASSIGN_UNEXPECTED_FWD(_sendQueue, sendQueueResult,
-                                      "Failed to create publish queue: %s",
-                                      sendQueueResult.error().format());
+        FAIL_IF_ASSIGN_UNEXPECTED_FWD(
+            _sendQueue, sendQueueResult,
+            "Failed to create publish queue: " ERR_FMT,
+            ERR_ARG(sendQueueResult.error()));
         auto publishQueueResult =
             Totem::Queue::Platform::create(_publishQueueStorage);
-        FAIL_IF_ASSIGN_UNEXPECTED_FWD(_publishQueue, publishQueueResult,
-                                      "Failed to create publish queue: %s",
-                                      publishQueueResult.error().format());
+        FAIL_IF_ASSIGN_UNEXPECTED_FWD(
+            _publishQueue, publishQueueResult,
+            "Failed to create publish queue: " ERR_FMT,
+            ERR_ARG(publishQueueResult.error()));
         return OK();
     }
 

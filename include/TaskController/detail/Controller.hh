@@ -138,8 +138,9 @@ class Controller : public HasLifecycle<Controller, Config> {
             auto &entry = extractedResult.value().entries[i];
             auto ret = _handleStoppedRunner(*this, entry);
             if (!ret.ok()) {
-                _log_e("Error while handling stopped runner for %s of %s: %s",
-                       name, _ownerName, ret.format());
+                _log_e("Error while handling stopped runner for %s of "
+                       "%s: " ERR_FMT,
+                       name, _ownerName, ERR_ARG(ret));
                 if (finalRet.ok()) {
                     finalRet = ret;
                 }
@@ -228,8 +229,9 @@ class Controller : public HasLifecycle<Controller, Config> {
         _log_i("Beginning shutdown of task controller for %s", _ownerName);
         auto retTerminate = terminate();
         if (!retTerminate) {
-            _log_e("Error while requesting termination during shutdown: %s",
-                   retTerminate.error().format());
+            _log_e(
+                "Error while requesting termination during shutdown: " ERR_FMT,
+                ERR_ARG(retTerminate.error()));
         }
         if (retTerminate.value() == 0) {
             _log_i("Task controller for %s closed successfully", _ownerName);
@@ -243,8 +245,8 @@ class Controller : public HasLifecycle<Controller, Config> {
 
         auto retReap = reap();
         if (!retReap) {
-            _log_e("Error while performing shutdown work for %s: %s",
-                   _ownerName, retReap.error().format());
+            _log_e("Error while performing shutdown work for %s: " ERR_FMT,
+                   _ownerName, ERR_ARG(retReap.error()));
             return retReap.error();
         }
         if (retReap.value() == retTerminate.value()) {
@@ -271,9 +273,9 @@ class Controller : public HasLifecycle<Controller, Config> {
         auto hooks = entry.hooks;
         auto ref = RunnerNameKey::fromCharPtr(config.name);
         if (!result->isClean()) {
-            _log_e("Task runner %s->%s stopped with error: "
-                   "%s (reason code %d)",
-                   self._ownerName, ref.name.data(), result->error.format(),
+            _log_e("Task runner %s->%s stopped with error: " ERR_FMT
+                   " (reason code %d)",
+                   self._ownerName, ref.name.data(), ERR_ARG(result->error),
                    static_cast<int>(result->reason));
             if (!self._permitRegistration.load(std::memory_order_acquire)) {
                 _log_i("Not auto-restarting task runner %s->%s "
@@ -286,9 +288,10 @@ class Controller : public HasLifecycle<Controller, Config> {
                        ref.name.data());
                 auto restartResult = _restartTask(self, ref, hooks, config);
                 if (!restartResult.ok()) {
-                    _log_e("Failed to auto-restart task runner %s->%s: %s",
-                           self._ownerName, ref.name.data(),
-                           restartResult.format());
+                    _log_e(
+                        "Failed to auto-restart task runner %s->%s: " ERR_FMT,
+                        self._ownerName, ref.name.data(),
+                        ERR_ARG(restartResult));
                 }
             }
         } else {
@@ -307,8 +310,8 @@ class Controller : public HasLifecycle<Controller, Config> {
             self._ownerName, ref.name.data());
         auto startResult = self.startTask(ref, config);
         if (!startResult.ok()) {
-            _log_e("Failed to restart task runner %s->%s: %s", self._ownerName,
-                   ref.name.data(), startResult.format());
+            _log_e("Failed to restart task runner %s->%s: " ERR_FMT,
+                   self._ownerName, ref.name.data(), ERR_ARG(startResult));
             (void)self._directory.remove(ref);
             return startResult;
         }

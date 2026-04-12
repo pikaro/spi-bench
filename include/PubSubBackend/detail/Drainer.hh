@@ -85,8 +85,8 @@ class Drainer {
         if (ret == ERR(Timeout)) {
             return OK();
         }
-        FAIL(ret, "Failed to receive publish request from queue: %s",
-             ret.format());
+        FAIL(ret, "Failed to receive publish request from queue: " ERR_FMT,
+             ERR_ARG(ret));
     }
 
     struct PublishContext {
@@ -157,8 +157,9 @@ class Drainer {
                                 MAGIC_SV_ARG(Spec::Topic, item.header.topic));
                 return ret;
             }
-            FAIL(storeResult.error(), "Failed to store in-flight message: %s",
-                 storeResult.error().format());
+            FAIL(storeResult.error(),
+                 "Failed to store in-flight message: " ERR_FMT,
+                 ERR_ARG(storeResult.error()));
         }
         ret.combine(
             _publisher.publishToTransports(*storeResult, ingressTransport));

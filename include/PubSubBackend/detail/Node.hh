@@ -125,8 +125,8 @@ class Node : public HasLifecycle<Node>, public HasTaskController<Node> {
         auto publishQueueResult =
             Totem::Queue::Platform::create(_publishQueueStorage);
         FAIL_IF_UNEXPECTED_FWD(publishQueue, publishQueueResult,
-                               "Failed to create publish queue: %s",
-                               publishQueueResult.error().format());
+                               "Failed to create publish queue: " ERR_FMT,
+                               ERR_ARG(publishQueueResult.error()));
         _publishQueue = publishQueue;
         return OK();
     }

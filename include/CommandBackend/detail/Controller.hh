@@ -92,8 +92,8 @@ class Controller : public HasLifecycle<Controller>,
                     continue;
                 }
                 if (pollResult.error().domain == ErrorDomain::Command) {
-                    _log_w("Command error from transport %s: %s",
-                           transport.name, pollResult.error().format());
+                    _log_w("Command error from transport %s: " ERR_FMT,
+                           transport.name, ERR_ARG(pollResult.error()));
                     continue;
                 }
                 FAIL(pollResult.error(), "Error from command transport %s",

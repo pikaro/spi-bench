@@ -16,11 +16,10 @@
         }                                                                      \
     } while (0)
 
-#define INTERNAL_FAIL_IF_IMPL_ERR(cond, why, action, msg, errfmt, ...)         \
+#define INTERNAL_FAIL_IF_IMPL_ERR(cond, why, action, msg, err, ...)            \
     do {                                                                       \
         if (cond) {                                                            \
-            LOG_LOC("%s: [%d] %s::%s " msg, why, errfmt.code, errfmt.domain,   \
-                    errfmt.name, ##__VA_ARGS__);                               \
+            LOG_LOC("%s: " ERR_FMT " " msg, why, ERR_ARG(err), ##__VA_ARGS__); \
             action;                                                            \
         }                                                                      \
     } while (0)
@@ -178,7 +177,7 @@
 // Fail if ReturnCode error
 #define FAIL_IF_ERR_THEN(expr, action, msg, ...)                               \
     if (auto _rc_ = (expr); !_rc_.ok()) {                                      \
-        INTERNAL_FAIL_IF_IMPL_ERR(true, "Error", action, msg, _rc_.format(),   \
+        INTERNAL_FAIL_IF_IMPL_ERR(true, "Error", action, msg, _rc_,            \
                                   ##__VA_ARGS__);                              \
     }
 #define ABORT_IF_ERR(expr, msg, ...)                                           \
@@ -216,7 +215,7 @@
     if (!CONCAT(_result_, var)) {                                              \
         auto _error_ = CONCAT(_result_, var).error();                          \
         INTERNAL_FAIL_IF_IMPL_ERR(true, "Unexpected Error", action, msg,       \
-                                  _error_.format(), ##__VA_ARGS__);            \
+                                  _error_, ##__VA_ARGS__);                     \
     }                                                                          \
     auto var = std::move(*CONCAT(_result_, var));
 #define ABORT_IF_UNEXPECTED(var, expr, msg, ...)                               \
@@ -238,7 +237,7 @@
         if (!CONCAT(_result_, var)) {                                          \
             auto _error_ = CONCAT(_result_, var).error();                      \
             INTERNAL_FAIL_IF_IMPL_ERR(true, "Unexpected assign error", action, \
-                                      msg, _error_.format(), ##__VA_ARGS__);   \
+                                      msg, _error_, ##__VA_ARGS__);            \
         }                                                                      \
         (var) = std::move(*CONCAT(_result_, var));                             \
     } while (0)

@@ -26,6 +26,10 @@ class LocalBufferedTransport : public LocalTransport {
   public:
     explicit LocalBufferedTransport(LocalTransportDependencies deps)
         : LocalTransport(deps) {}
+    explicit LocalBufferedTransport(LocalTransportDependencies deps)
+        : LocalTransport({.base = deps.toBaseDeps(this, _sendCallback)}) {
+        ABORT_IF_NOT(deps.valid(), "Invalid LocalTransport dependencies");
+    }
 
     static constexpr const char *name = "LocalBufferedTransport";
 

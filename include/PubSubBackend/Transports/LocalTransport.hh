@@ -2,73 +2,147 @@
 
 #include "BaseTransport.hh"
 #include "Macros/Facade.hh"
-#include "PubSubBackend/Interfaces/Frame.hh"
+#include "PubSubBackend/Interfaces/Wire.hh"
 #include "PubSubBackend/detail/Types.hh"
 #include "Queue/Facade.hh"
 #include "Types/Error.hh"
+#include <array>
+#include <cstddef>
+#include <cstring>
 #include <expected>
+#include <span>
 
 namespace Totem::PubSubBackend::Transports {
 
 struct LocalTransportDependencies {
     BaseTransportDependencies base;
 
-    [[nodiscard]] bool validate() const { return base.validate(); }
+    [[nodiscard]] bool valid() const { return base.valid(); }
+
+    BaseTransportDependencies
+    toBaseDeps(void *ctx, SendCallback sendCallback,
+               ReceiveCallback receiveCallback) const {
+        auto deps = base;
+        deps.transport = ctx;
+        deps.sendCallback = sendCallback;
+        deps.receiveCallback = receiveCallback;
+        return deps;
+    }
 };
 
 class LocalTransport : public BaseTransport {
     using Base = BaseTransport;
+    friend struct BaseTransportContract;
+
+    struct RxFrame {
+        std::array<std::byte, Base::bufferSize> data;
+        size_t size;
+    };
 
   public:
-    explicit LocalTransport(LocalTransportDependencies deps) : Base(deps.base) {
-        ABORT_IF_NOT(deps.validate(), "Invalid LocalTransport dependencies");
+    explicit LocalTransport(LocalTransportDependencies deps)
+        : Base(deps.toBaseDeps(this, _sendCallback, _receiveCallback)) {
+        ABORT_IF_NOT(deps.valid(), "Invalid LocalTransport dependencies");
     }
 
-    ReturnCode pollInto(void *ctx, detail::PollIntoCallback callback) {
+    DELETE_COPY(LocalTransport)
+    DELETE_MOVE(LocalTransport)
+
+    static constexpr const char *name = "LocalTransport";
+
+    ReturnCode addLink(LocalTransport &other) {
+        FAIL_IF_INACTIVE_ERR("Cannot link inactive LocalTransport");
+        FAIL_IF_NOT(other.active(), ERR(InvalidState),
+                    "Cannot link to an inactive LocalTransport");
+        FAIL_IF_NOT_NULL(link, ERR(InvalidState),
+                         "Link already established for LocalTransport");
+        FAIL_IF_NOT_NULL(other.link, ERR(InvalidState),
+                         "Link already established for other LocalTransport");
+        link = &other;
+        other.link = this;
+        return OK();
+    }
+
+  protected:
+    ReturnCode _onBegin() {
+        auto rxFrameQueueResult =
+            Totem::Queue::Platform::create(_rxFrameQueueStorage);
+        FAIL_IF_ASSIGN_UNEXPECTED_FWD(_rxFrameQueue, rxFrameQueueResult,
+                                      "Failed to create rxFrame queue: %s",
+                                      rxFrameQueueResult.error().format());
+        return Base::_onBegin();
+    }
+
+    ReturnCode _onEnd() {
         auto ret = OK();
-        while (ret.ok()) {
-            auto itemResult = _getItemFromLocalQueue();
-            if (!itemResult) {
-                if (itemResult.error() == ERR(Timeout)) {
-                    return OK();
-                }
-                FAIL(itemResult.error(),
-                     "Failed to receive item from local queue: %s",
-                     itemResult.error().format());
-            }
-            ret.combine(callback(ctx, *itemResult));
+        if (_rxFrameQueue != nullptr) {
+            FAIL_IF_ERR_FWD(Totem::Queue::Platform::destroy(_rxFrameQueue),
+                            "Failed to destroy rxFrame queue");
+            _rxFrameQueue = {};
         }
         return ret;
     }
 
-    ReturnCode send(const PublishRequest &request) {
-        return Totem::Queue::Platform::send(_localQueue, &request);
+    static ReturnCode _sendCallback(void *opaque, const Header &header,
+                                    std::span<const std::byte> frame) {
+        auto *self = static_cast<LocalTransport *>(opaque);
+        return self->_send(header, frame);
     }
 
-  private:
-    ReturnCode _onBegin() {
-        auto sendQueueResult =
-            Totem::Queue::Platform::create(_localQueueStorage);
-        FAIL_IF_ASSIGN_UNEXPECTED_FWD(_localQueue, sendQueueResult,
-                                      "Failed to create publish queue: %s",
-                                      sendQueueResult.error().format());
-        return Base::_onBegin();
+    ReturnCode _send(const Header & /*unused*/,
+                     std::span<const std::byte> frame) {
+        FAIL_IF_NULL(link, ERR(InvalidState),
+                     "No link established for LocalTransport");
+        FAIL_IF_ERR_FWD(link->_receiveThroughLink(frame),
+                        "Failed to send frame over LocalTransport");
+        return {};
     }
 
-    std::expected<PublishRequest, ReturnCode> _getItemFromLocalQueue() {
-        PublishRequest item;
-        auto result = Totem::Queue::Platform::receive(_localQueue, &item);
-        if (!result.ok()) {
-            return std::unexpected(result);
+    static std::expected<size_t, ReturnCode>
+    _receiveCallback(void *opaque, std::span<std::byte> out) {
+        auto *self = static_cast<LocalTransport *>(opaque);
+        return self->_receive(out);
+    }
+
+    std::expected<size_t, ReturnCode> _receive(std::span<std::byte> out) {
+        FAIL_IF_NULL(link, std::unexpected(ERR(InvalidState)),
+                     "No link established for LocalTransport");
+        RxFrame rxFrame;
+        auto receiveRet =
+            Totem::Queue::Platform::receive(_rxFrameQueue, &rxFrame, 0);
+        if (!receiveRet.ok()) {
+            if (receiveRet == ERR(Timeout)) {
+                return 0;
+            }
+            FAIL(std::unexpected(receiveRet),
+                 "Failed to receive frame from rxFrame queue: %s",
+                 receiveRet.format());
         }
-        return item;
+        FAIL_IF(out.size() < rxFrame.size,
+                std::unexpected(ERR(InvalidArgument)),
+                "Output buffer too small for received frame");
+        std::memcpy(out.data(), rxFrame.data.data(), rxFrame.size);
+        return rxFrame.size;
     }
 
-    Totem::Queue::Handle _localQueue{};
-    Totem::Queue::Platform::Storage<PublishRequest,
-                                    detail::Spec::Limits::maxMessageQueueSize>
-        _localQueueStorage{};
+    ReturnCode _receiveThroughLink(std::span<const std::byte> frame) {
+        RxFrame rxFrame;
+        FAIL_IF(frame.size() > rxFrame.data.size(), ERR(InvalidArgument),
+                "Frame size exceeds maximum for LocalTransport");
+        std::memcpy(rxFrame.data.data(), frame.data(), frame.size());
+        rxFrame.size = frame.size();
+        FAIL_IF_ERR_FWD(
+            Totem::Queue::Platform::send(_rxFrameQueue, &rxFrame, 0),
+            "Failed to send frame to rxFrame queue");
+        return OK();
+    }
 
+    LocalTransport *link;
+
+    Totem::Queue::Handle _rxFrameQueue{};
+    Totem::Queue::Platform::Storage<RxFrame,
+                                    detail::Spec::Limits::maxMessageQueueSize>
+        _rxFrameQueueStorage{};
     using DefaultError = CoreError;
 };
 

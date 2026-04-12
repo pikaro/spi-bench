@@ -1,7 +1,8 @@
 #pragma once
 
 #include "Config.hh"
-#include "PubSubBackend/Interfaces/Frame.hh"
+#include "PubSubBackend/Interfaces/Envelope.hh"
+#include "PubSubBackend/Interfaces/Types.hh"
 #include "Types/Error.hh"
 #include <cstdint>
 
@@ -10,14 +11,13 @@ namespace Totem::PubSubBackend::detail {
 using Spec = NodeData::PubSub;
 
 using MessageId = uint32_t;
-using NextMessageIdCallback = MessageId (*)(void *owner);
 
 using TopicMask = TopicId;
 using TransportId = uint8_t;
 using TransportMask = TransportId;
 
 struct StoredFrame {
-    PublishRequest request{};
+    Envelope envelope{};
     TransportMask pendingMask = 0;
     uint8_t pendingCount = 0;
 
@@ -28,9 +28,7 @@ struct StoredFrame {
 
 using FrameHandle = StoredFrame *;
 
-using PollIntoCallback = ReturnCode (*)(void *ctx,
-                                        const PublishRequest &request);
-using PublishCallback = ReturnCode (*)(void *ctx,
-                                       const PublishRequest &request);
+using PollIntoCallback = ReturnCode (*)(void *ctx, const Envelope &envelope);
+using PublishCallback = ReturnCode (*)(void *ctx, const Envelope &envelope);
 
 } // namespace Totem::PubSubBackend::detail

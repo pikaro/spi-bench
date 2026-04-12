@@ -10,9 +10,8 @@
 
 namespace Totem::MetricsBackend::detail {
 
-using MetricDirectoryImpl =
-    Generic::Directory<Metric, MetricConfig::maxMetrics,
-                       MetricConfig::maxMetricNameLength>;
+using MetricDirectoryImpl = Directory<Metric, MetricConfig::maxMetrics,
+                                      MetricConfig::maxMetricNameLength>;
 
 class MetricDirectory : public MetricDirectoryImpl {
   public:

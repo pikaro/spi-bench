@@ -14,8 +14,6 @@
 #include <functional>
 #include <optional>
 
-namespace Totem::Generic {
-
 template <typename Entry> struct DirectoryHooks {
     void *self = nullptr;
 
@@ -54,7 +52,7 @@ class Directory : HasMutex<Directory<Entry, N, IdLen>> {
     static_assert(N > 0, "Directory size N must be greater than 0");
 
   public:
-    static constexpr const char *name = "Generic::Directory";
+    static constexpr const char *name = "Directory";
 
     using EntryNameKey = NameKey<IdLen>;
 
@@ -485,6 +483,4 @@ class GettableDirectory : public Directory<Entry, N, IdLen> {
     using DefaultError = CoreError;
 };
 
-inline constexpr MutexContract<Directory<void *, 1>> _directory_mutex_contract;
-
-} // namespace Totem::Generic
+inline constexpr MutexContract<Directory<void *, 1>> directory_mutex_contract;

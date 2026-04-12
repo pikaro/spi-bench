@@ -7,6 +7,7 @@
 #include "Platform/Uart.hh"
 #include "Platform/platform/PlatformESP32/Base.hh"
 #include "PubSubBackend/Facade.hh"
+#include "PubSubBackend/Transports/LocalBufferedTransport.hh"
 #include "PubSubBackend/Transports/LocalTransport.hh"
 #include "Services/Commands.hh"
 #include "Services/PubSub.hh"
@@ -25,9 +26,9 @@ Totem::TaskControllerRegistry::SystemTaskSource systemTaskSource(taskRegistry);
 
 Totem::Monitoring::Monitoring monitoring(taskRegistry);
 
-using PubSubNode = Totem::PubSubBackend::Node<NodeData::PubSub>;
+using PubSubNode = Totem::PubSubBackend::Node;
 PubSubNode pubSubNode(taskRegistry.hooks());
-Totem::PubSubBackend::Transports::LocalTransport<8> testPubSub1({
+Totem::PubSubBackend::Transports::LocalTransport testPubSub1({
     .base =
         {
             .owner = static_cast<void *>(&pubSubNode),
@@ -35,9 +36,10 @@ Totem::PubSubBackend::Transports::LocalTransport<8> testPubSub1({
                 static_cast<uint8_t>(NodeData::PubSub::Transport::SPI),
             .name = "SPI",
             .sendAckCallback = PubSubNode::ack,
+            .ingress = pubSubNode.ingress(),
         },
 });
-Totem::PubSubBackend::Transports::LocalTransport<8> testPubSub2({
+Totem::PubSubBackend::Transports::LocalBufferedTransport testPubSub2({
     .base =
         {
             .owner = static_cast<void *>(&pubSubNode),
@@ -45,16 +47,7 @@ Totem::PubSubBackend::Transports::LocalTransport<8> testPubSub2({
                 static_cast<uint8_t>(NodeData::PubSub::Transport::WebSocket),
             .name = "WebSocket",
             .sendAckCallback = PubSubNode::ack,
-        },
-});
-Totem::PubSubBackend::Transports::LocalTransport<8> testPubSub3({
-    .base =
-        {
-            .owner = static_cast<void *>(&pubSubNode),
-            .transportId =
-                static_cast<uint8_t>(NodeData::PubSub::Transport::RS485),
-            .name = "RS485",
-            .sendAckCallback = PubSubNode::ack,
+            .ingress = pubSubNode.ingress(),
         },
 });
 
@@ -75,18 +68,16 @@ void setup() {
     ABORT_IF_ERR_BEGIN(pubSubNode.begin());
     ABORT_IF_ERR_BEGIN(testPubSub1.begin());
     ABORT_IF_ERR_BEGIN(testPubSub2.begin());
-    ABORT_IF_ERR_BEGIN(testPubSub3.begin());
+    ABORT_IF_ERR(testPubSub1.addLink(testPubSub2),
+                 "Failed to link test PubSub transports together");
     ABORT_IF_UNEXPECTED(testHandle1, pubSubNode.registerTransport(testPubSub1),
                         "Failed to register local transport to PubSub node");
     ABORT_IF_UNEXPECTED(testHandle2, pubSubNode.registerTransport(testPubSub2),
                         "Failed to register local2 transport to PubSub node");
-    ABORT_IF_UNEXPECTED(testHandle3, pubSubNode.registerTransport(testPubSub3),
-                        "Failed to register local3 transport to PubSub node");
-    PubSubService<NodeData::PubSub>::setBackend(pubSubNode);
+    PubSubService::setBackend(pubSubNode);
 
     (void)testHandle1;
     (void)testHandle2;
-    (void)testHandle3;
 
     ABORT_IF_ERR(register_core_commands(),
                  "Failed to register core commands to command controller");

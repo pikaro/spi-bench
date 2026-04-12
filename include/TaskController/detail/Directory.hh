@@ -24,8 +24,8 @@ struct RunnerEntry {
 };
 
 using DirectoryImpl =
-    Generic::Directory<RunnerEntry, TaskControllerConfig::maxTasksPerClass,
-                       TaskControllerConfig::maxTaskNameLen>;
+    Directory<RunnerEntry, TaskControllerConfig::maxTasksPerClass,
+              TaskControllerConfig::maxTaskNameLen>;
 
 class Directory : public DirectoryImpl {
   public:

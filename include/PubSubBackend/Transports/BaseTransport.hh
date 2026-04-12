@@ -2,26 +2,44 @@
 
 #include "Base/HasLifecycle.hh"
 #include "Macros/Facade.hh"
-#include "PubSubBackend/Interfaces/Frame.hh"
+#include "PubSubBackend/Interfaces/Envelope.hh"
+#include "PubSubBackend/detail/IngressBuffer.hh"
+#include "PubSubBackend/detail/SerDe.hh"
 #include "PubSubBackend/detail/Types.hh"
 #include "Queue/Facade.hh"
 #include "Types/Error.hh"
+#include <array>
+#include <cstddef>
+#include <expected>
+#include <limits>
+#include <span>
 #include <string_view>
+#include <utility>
 
 namespace Totem::PubSubBackend::Transports {
 
 using SendAckCallback = ReturnCode (*)(void *owner,
                                        detail::TransportId transportId,
-                                       const PublishRequest &req);
+                                       const Envelope &req);
+using SendCallback = ReturnCode (*)(void *owner, const Header &header,
+                                    std::span<const std::byte> frame);
+using ReceiveCallback = std::expected<size_t, ReturnCode> (*)(
+    void *owner, std::span<std::byte> out);
 
 struct BaseTransportDependencies {
-    void *owner;
+    void *pubSubNode;
+    void *transport;
     detail::TransportId transportId;
     std::string_view name;
     SendAckCallback sendAckCallback;
+    SendCallback sendCallback = nullptr;
+    ReceiveCallback receiveCallback = nullptr;
+    detail::IngressBuffer &ingress;
 
-    [[nodiscard]] bool validate() const {
-        return owner != nullptr && sendAckCallback != nullptr;
+    [[nodiscard]] bool valid() const {
+        return pubSubNode != nullptr && transport != nullptr &&
+               sendAckCallback != nullptr && receiveCallback != nullptr &&
+               sendCallback != nullptr && !name.empty();
     }
 };
 
@@ -31,10 +49,12 @@ class BaseTransport : public HasLifecycle<BaseTransport> {
 
   public:
     explicit BaseTransport(const BaseTransportDependencies &deps)
-        : _owner(deps.owner), _instanceName(deps.name),
-          _transportId(deps.transportId),
-          _sendAckCallback(deps.sendAckCallback) {
-        ABORT_IF_NOT(deps.validate(), "Invalid BaseTransport dependencies");
+        : _pubSubNode(deps.pubSubNode), _transport(deps.transport),
+          _instanceName(deps.name), _transportId(deps.transportId),
+          _sendAckCallback(deps.sendAckCallback),
+          _sendCallback(deps.sendCallback),
+          _receiveCallback(deps.receiveCallback), _ingress(deps.ingress) {
+        ABORT_IF_NOT(deps.valid(), "Invalid BaseTransport dependencies");
     }
 
     DELETE_COPY(BaseTransport)
@@ -56,15 +76,29 @@ class BaseTransport : public HasLifecycle<BaseTransport> {
         return OK();
     }
 
-    ReturnCode work() {
+    ReturnCode send(size_t maxCount = std::numeric_limits<size_t>::max()) {
+        FAIL_IF_INACTIVE_ERR("Cannot work inactive transport %s",
+                             _instanceName);
         auto ret = OK();
+        size_t count = 0;
+
         detail::FrameHandle item;
-        while (ret.ok()) {
+        auto buf = std::array<std::byte, bufferSize>{};
+
+        while (ret.ok() && count < maxCount) {
             ret.combine(Totem::Queue::Platform::receive(
                 _sendQueue, static_cast<void *>(&item), 0));
             if (ret.ok()) {
-                FAIL_IF_ERR_FWD(_ack(item->request),
+                FAIL_IF_UNEXPECTED_FWD(
+                    frameSize, detail::SerDe::serialize(item->envelope, buf),
+                    "Failed to serialize frame for sending");
+                auto frame = std::span<const std::byte>{buf.data(), frameSize};
+                FAIL_IF_ERR_FWD(
+                    _sendCallback(_transport, item->envelope.header, frame),
+                    "Failed to process frame from send queue");
+                FAIL_IF_ERR_FWD(_ack(item->envelope),
                                 "Failed to acknowledge frame with transport");
+                ++count;
             }
         }
         if (!ret.ok()) {
@@ -77,9 +111,66 @@ class BaseTransport : public HasLifecycle<BaseTransport> {
         return OK();
     }
 
+    ReturnCode receive(size_t maxCount = std::numeric_limits<size_t>::max()) {
+        FAIL_IF_INACTIVE_ERR("Cannot work inactive transport %s",
+                             _instanceName);
+        auto ret = OK();
+        size_t count = 0;
+
+        auto buf = std::array<std::byte, bufferSize>{};
+
+        while (ret.ok() && count < maxCount) {
+            auto receiveResult = _receiveCallback(_transport, buf);
+
+            if (receiveResult) {
+                FAIL_IF_UNEXPECTED_FWD(
+                    envelope,
+                    _ingress.storeFrame(
+                        std::span<const std::byte>{buf.data(), *receiveResult}),
+                    "Failed to store received frame in ingress");
+                FAIL_IF_ERR_FWD(
+                    Totem::Queue::Platform::send(
+                        _publishQueue, static_cast<void *>(&envelope)),
+                    "Failed to enqueue received frame for publishing");
+                ++count;
+            } else {
+                ret.combine(receiveResult.error());
+            }
+        }
+        if (!ret.ok()) {
+            if (ret == ERR(Timeout)) {
+                return OK();
+            }
+            FAIL(ret, "Failed to receive frame with transport: %s",
+                 ret.format());
+        }
+        return OK();
+    }
+
+    ReturnCode pollInto(void *ctx, detail::PollIntoCallback callback,
+                        size_t maxCount = std::numeric_limits<size_t>::max()) {
+        size_t count = 0;
+        while (count++ < maxCount) {
+            Envelope item;
+            auto receiveRet = Totem::Queue::Platform::receive(
+                _publishQueue, static_cast<void *>(&item), 0);
+            if (!receiveRet.ok()) {
+                if (receiveRet == ERR(Timeout)) {
+                    return OK();
+                }
+                FAIL(receiveRet,
+                     "Failed to receive item from publish queue: %s",
+                     receiveRet.format());
+            }
+            FAIL_IF_ERR_FWD(callback(ctx, item),
+                            "Failed to process item from publish queue");
+        }
+        std::unreachable();
+    }
+
   protected:
-    ReturnCode _ack(const PublishRequest &req) {
-        return _sendAckCallback(_owner, _transportId, req);
+    ReturnCode _ack(const Envelope &req) {
+        return _sendAckCallback(_pubSubNode, _transportId, req);
     }
 
     ReturnCode _onBegin() {
@@ -88,6 +179,11 @@ class BaseTransport : public HasLifecycle<BaseTransport> {
         FAIL_IF_ASSIGN_UNEXPECTED_FWD(_sendQueue, sendQueueResult,
                                       "Failed to create publish queue: %s",
                                       sendQueueResult.error().format());
+        auto publishQueueResult =
+            Totem::Queue::Platform::create(_publishQueueStorage);
+        FAIL_IF_ASSIGN_UNEXPECTED_FWD(_publishQueue, publishQueueResult,
+                                      "Failed to create publish queue: %s",
+                                      publishQueueResult.error().format());
         return OK();
     }
 
@@ -98,18 +194,37 @@ class BaseTransport : public HasLifecycle<BaseTransport> {
                             "Failed to destroy publish queue");
             _sendQueue = {};
         }
+        if (_publishQueue != nullptr) {
+            FAIL_IF_ERR_FWD(Totem::Queue::Platform::destroy(_publishQueue),
+                            "Failed to destroy publish queue");
+            _publishQueue = {};
+        }
         return ret;
     }
 
-    void *_owner = nullptr;
+    void *_pubSubNode = nullptr;
+    void *_transport = nullptr;
     std::string_view _instanceName;
     detail::TransportId _transportId;
     SendAckCallback _sendAckCallback = nullptr;
+    SendCallback _sendCallback = nullptr;
+    ReceiveCallback _receiveCallback = nullptr;
+
     Totem::Queue::Handle _sendQueue{};
     Totem::Queue::Platform::Storage<detail::FrameHandle,
                                     detail::Spec::Limits::maxMessageQueueSize>
         _sendQueueStorage{};
 
+    Totem::Queue::Handle _publishQueue{};
+    Totem::Queue::Platform::Storage<Envelope,
+                                    detail::Spec::Limits::maxMessageQueueSize>
+        _publishQueueStorage{};
+
+    detail::IngressBuffer &_ingress;
+
+    static constexpr auto bufferSize = detail::SerDe::headerSize +
+                                       detail::Spec::Limits::maxPayloadSize +
+                                       detail::SerDe::overheadSize;
     using DefaultError = CoreError;
 
 }; // namespace Totem::PubSub::detail

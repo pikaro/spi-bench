@@ -3,10 +3,12 @@
 #include "Base/HasLifecycle.hh"
 #include "Base/HasTaskController.hh"
 #include "Macros/Facade.hh"
-#include "PubSubBackend/Interfaces/Frame.hh"
+#include "PubSubBackend/Interfaces/Envelope.hh"
 #include "PubSubBackend/Interfaces/Subscriber.hh"
+#include "PubSubBackend/Interfaces/Types.hh"
 #include "PubSubBackend/detail/ControlPlane.hh"
 #include "PubSubBackend/detail/Drainer.hh"
+#include "PubSubBackend/detail/IngressBuffer.hh"
 #include "PubSubBackend/detail/Publisher.hh"
 #include "PubSubBackend/detail/SubscriberDirectory.hh"
 #include "PubSubBackend/detail/SubscriptionManager.hh"
@@ -67,9 +69,11 @@ class Node : public HasLifecycle<Node>, public HasTaskController<Node> {
                              static_cast<TopicId>(topic)),
             "Failed to add subscriber %s for topic " SV_FMT, subscriberName,
             SV_ARG(magic_enum::enum_name(topic)));
-        FAIL_IF_ERR_FWD(_subscriptionManager.registerSubscription(topic),
-                        "Failed to register subscription for topic " SV_FMT,
-                        SV_ARG(magic_enum::enum_name(topic)));
+        FAIL_IF_ERR_FWD_UNEXPECTED(
+            _subscriptionManager.registerSubscription(
+                static_cast<TopicId>(topic)),
+            "Failed to register subscription for topic " SV_FMT,
+            SV_ARG(magic_enum::enum_name(topic)));
         return subscriberNameKey;
     }
 
@@ -85,24 +89,23 @@ class Node : public HasLifecycle<Node>, public HasTaskController<Node> {
         return _subscribers.remove(subscriberNameKey);
     }
 
-    ReturnCode publish(const PublishRequest &req) {
-        FAIL_IF_ERR_FWD(
-            Totem::Queue::Platform::send(_publishQueue, &req),
-            "Failed to enqueue publish request for topic " SV_FMT,
-            SV_ARG(magic_enum::enum_name(static_cast<Topic>(req.topic))));
+    ReturnCode publish(const Envelope &req) {
+        FAIL_IF_ERR_FWD(Totem::Queue::Platform::send(_publishQueue, &req),
+                        "Failed to enqueue publish request for topic " SV_FMT,
+                        MAGIC_SV_ARG(Topic, req.header.topic));
         return OK();
     }
 
-    static ReturnCode publish(void *opaque, const PublishRequest &req) {
+    static ReturnCode publish(void *opaque, const Envelope &req) {
         auto *node = static_cast<Node *>(opaque);
         return node->publish(req);
     }
 
     static ReturnCode ack(void *opaque, TransportId transportId,
-                          const PublishRequest &req) {
+                          const Envelope &req) {
         auto *node = static_cast<Node *>(opaque);
-        node->_drainer.ack(transportId, req);
-        return OK();
+        return node->_drainer.ack(static_cast<Spec::Transport>(transportId),
+                                  req);
     }
 
     [[nodiscard]] static NodeId nodeId() {
@@ -115,6 +118,7 @@ class Node : public HasLifecycle<Node>, public HasTaskController<Node> {
         auto *node = static_cast<Node *>(opaque);
         return node->nextMessageId();
     }
+    [[nodiscard]] IngressBuffer &ingress() { return _ingress; }
 
   private:
     ReturnCode _onBegin() {
@@ -141,7 +145,7 @@ class Node : public HasLifecycle<Node>, public HasTaskController<Node> {
         FAIL_IF_ERR_FWD(
             _transporters.withAll([](const TransporterNameKey & /*unused*/,
                                      const TransporterEntry &entry) {
-                return entry.transporter.work();
+                return entry.transporter.send();
             }),
             "Failed to work PubSub transporters");
         return OK();
@@ -152,8 +156,7 @@ class Node : public HasLifecycle<Node>, public HasTaskController<Node> {
     TransporterDirectory _transporters{name};
     SubscriberDirectory _subscribers{name};
 
-    Totem::Queue::Platform::Storage<PublishRequest,
-                                    Spec::Limits::maxMessageQueueSize>
+    Totem::Queue::Platform::Storage<Envelope, Spec::Limits::maxMessageQueueSize>
         _publishQueueStorage;
     Totem::Queue::Handle _publishQueue;
 
@@ -174,6 +177,8 @@ class Node : public HasLifecycle<Node>, public HasTaskController<Node> {
         .controlPlane = _controlPlane,
         .publishQueue = &_publishQueue,
     }};
+
+    IngressBuffer _ingress;
 
     using DefaultError = CoreError;
 };

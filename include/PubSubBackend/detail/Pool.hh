@@ -2,12 +2,11 @@
 
 #include "Base/HasMutex.hh"
 #include "Macros/Facade.hh"
-#include "PubSubBackend/Interfaces/Frame.hh"
+#include "PubSubBackend/Interfaces/Envelope.hh"
 #include "PubSubBackend/detail/Codec.hh"
 #include "PubSubBackend/detail/Types.hh"
 #include "Types/Error.hh"
 #include <array>
-#include <concepts>
 #include <cstddef>
 #include <cstring>
 #include <expected>
@@ -17,16 +16,8 @@
 
 namespace Totem::PubSubBackend::detail {
 
-template <class C, class T>
-concept CodecLike = requires(std::span<const std::byte> bytes,
-                             std::span<std::byte> out, const T &value) {
-    { C::decode(bytes) } -> std::same_as<std::expected<T, ReturnCode>>;
-    { C::encode(value, out) } -> std::same_as<ReturnCode>;
-};
-
-template <typename T, size_t Capacity, typename CodecT = Codec<T>>
-    requires CodecLike<CodecT, T>
-class Pool : public HasMutex<Pool<T, Capacity, CodecT>> {
+template <typename T, size_t Capacity>
+class Pool : public HasMutex<Pool<T, Capacity>> {
     struct Slot {
         MessageId messageId{};
         std::optional<T> value;
@@ -54,14 +45,14 @@ class Pool : public HasMutex<Pool<T, Capacity, CodecT>> {
         return std::unexpected(ERR(Overflow));
     }
 
-    static ReturnCode release(void *owner, const PublishRequest &req) {
+    static ReturnCode release(void *owner, const Envelope &req) {
         auto *pool = static_cast<Pool *>(owner);
         return pool->release(req);
     }
 
-    ReturnCode release(const PublishRequest &req) {
+    ReturnCode release(const Envelope &req) {
         for (auto &slot : _storage) {
-            if (slot.value && slot.messageId == req.messageId) {
+            if (slot.value && slot.messageId == req.header.messageId) {
                 slot.value.reset();
                 return OK();
             }
@@ -69,41 +60,47 @@ class Pool : public HasMutex<Pool<T, Capacity, CodecT>> {
         return ERR(NotFound);
     }
 
+    [[nodiscard]] static std::expected<const void *, ReturnCode>
+    getPtr(void *owner, const Envelope &req) {
+        auto *pool = static_cast<Pool *>(owner);
+        return pool->getPtr(req);
+    }
+
+    [[nodiscard]] std::expected<const void *, ReturnCode>
+    getPtr(const Envelope &req) const {
+        for (const auto &slot : _storage) {
+            if (slot.value && slot.messageId == req.header.messageId) {
+                return static_cast<const void *>(std::addressof(*slot.value));
+            }
+        }
+        return std::unexpected(ERR(NotFound));
+    }
+
     [[nodiscard]] static std::expected<std::reference_wrapper<const T>,
                                        ReturnCode>
-    get(void *owner, const PublishRequest &req) {
+    get(void *owner, const Envelope &req) {
         auto *pool = static_cast<Pool *>(owner);
         return pool->get(req);
     }
 
     [[nodiscard]] std::expected<std::reference_wrapper<const T>, ReturnCode>
-    get(const PublishRequest &req) const {
+    get(const Envelope &req) const {
         for (const auto &slot : _storage) {
-            if (slot.value && slot.messageId == req.messageId) {
+            if (slot.value && slot.messageId == req.header.messageId) {
                 return std::cref(*slot.value);
             }
         }
         return std::unexpected(ERR(NotFound));
     }
 
-    [[nodiscard]] static ReturnCode
-    getRaw(void *owner, const PublishRequest &req, std::span<std::byte> out) {
+    static ReturnCode encodePayload(void *owner, const Envelope &env,
+                                    std::span<std::byte> out) {
         auto *pool = static_cast<Pool *>(owner);
-        return pool->getRaw(req, out);
-    }
-
-    [[nodiscard]] ReturnCode getRaw(const PublishRequest &req,
-                                    std::span<std::byte> out) const {
-        auto valueResult = get(req);
-        FAIL_IF_UNEXPECTED_FWD(value, valueResult,
-                               "Failed to get value for "
-                               "messageId %u",
-                               req.messageId);
-        auto encodeResult = CodecT::encode(value.get(), out);
-        FAIL_IF_UNEXPECTED_FWD(encoded, encodeResult,
-                               "Failed to encode value for messageId %u: %s",
-                               req.messageId, encodeResult.error().format());
-        return OK();
+        auto value = pool->get(env);
+        if (!value) {
+            return value.error();
+        }
+        return Codec<T>::encode(value->get(), out);
     }
 
   private:
@@ -115,5 +112,4 @@ class Pool : public HasMutex<Pool<T, Capacity, CodecT>> {
 };
 
 inline constexpr MutexContract<Pool<int, 0>> _pool_mutex_contract;
-
 } // namespace Totem::PubSubBackend::detail

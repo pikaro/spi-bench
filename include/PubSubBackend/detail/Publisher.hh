@@ -1,13 +1,12 @@
 #pragma once
 
 #include "Macros/Facade.hh"
-#include "PubSubBackend/Interfaces/Frame.hh"
+#include "PubSubBackend/Interfaces/Envelope.hh"
 #include "PubSubBackend/detail/SubscriberDirectory.hh"
 #include "PubSubBackend/detail/TransporterDirectory.hh"
 #include "PubSubBackend/detail/Types.hh"
 #include "Support/Basic.hh"
 #include "Types/Error.hh"
-#include "magic_enum/magic_enum.hpp"
 #include <optional>
 
 namespace Totem::PubSubBackend::detail {
@@ -25,12 +24,12 @@ class Publisher {
     publish(FrameHandle frameHandle,
             std::optional<TransportId> ingressTransport = std::nullopt) {
         auto ret = OK();
-        ret.combine(publishToSubscribers(frameHandle->request));
+        ret.combine(publishToSubscribers(frameHandle->envelope));
         ret.combine(publishToTransports(frameHandle, ingressTransport));
         return ret;
     }
 
-    ReturnCode publishToSubscribers(const PublishRequest &req) {
+    ReturnCode publishToSubscribers(const Envelope &req) {
         return _subscribers.withAll(
             [&](const SubscriberNameKey &nameKey,
                 const SubscriberEntry &entry) -> ReturnCode {
@@ -38,12 +37,11 @@ class Publisher {
                                 "Failed to publish to subscriber " SV_FMT
                                 " for topic " SV_FMT,
                                 SV_ARG(nameKey.name),
-                                SV_ARG(magic_enum::enum_name(
-                                    static_cast<Spec::Topic>(req.topic))));
+                                MAGIC_SV_ARG(Spec::Topic, req.header.topic));
                 return OK();
             },
-            [topicId = req.topic](const SubscriberNameKey & /* unused*/,
-                                  const SubscriberEntry &entry) -> bool {
+            [topicId = req.header.topic](const SubscriberNameKey & /* unused*/,
+                                         const SubscriberEntry &entry) -> bool {
                 return entry.topic == topicId;
             });
     }
@@ -59,11 +57,11 @@ class Publisher {
                     "Failed to enqueue message to transport " SV_FMT
                     " for topic " SV_FMT,
                     SV_ARG(nameKey.name),
-                    SV_ARG(magic_enum::enum_name(
-                        static_cast<Spec::Topic>(frameHandle->request.topic))));
+                    MAGIC_SV_ARG(Spec::Topic,
+                                 frameHandle->envelope.header.topic));
                 return OK();
             },
-            [topicId = frameHandle->request.topic,
+            [topicId = frameHandle->envelope.header.topic,
              ingressTransport](const TransporterNameKey & /* unused*/,
                                const TransporterEntry &entry) -> bool {
                 if (ingressTransport.has_value() &&

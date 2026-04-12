@@ -19,8 +19,8 @@ struct TransporterEntry {
 };
 
 using TransporterDirectoryImpl =
-    Generic::Directory<TransporterEntry, Spec::Limits::maxTransports,
-                       Spec::Limits::maxTransportNameLength>;
+    Directory<TransporterEntry, Spec::Limits::maxTransports,
+              Spec::Limits::maxTransportNameLength>;
 
 class TransporterDirectory : public TransporterDirectoryImpl {
     using Base = TransporterDirectoryImpl;

@@ -11,8 +11,8 @@
 namespace Totem::MetricsBackend::detail {
 
 using MetricGroupDirectoryImpl =
-    Generic::Directory<MetricGroup, MetricConfig::maxMetricGroups,
-                       MetricConfig::maxMetricGroupNameLength>;
+    Directory<MetricGroup, MetricConfig::maxMetricGroups,
+              MetricConfig::maxMetricGroupNameLength>;
 
 class MetricGroupDirectory : public MetricGroupDirectoryImpl {
   public:

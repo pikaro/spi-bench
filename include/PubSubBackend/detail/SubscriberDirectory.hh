@@ -3,8 +3,8 @@
 #include "Common.hh"
 
 #include "Generic/Directory.hh"
-#include "PubSubBackend/Interfaces/Frame.hh"
 #include "PubSubBackend/Interfaces/Subscriber.hh"
+#include "PubSubBackend/Interfaces/Types.hh"
 #include "PubSubBackend/detail/Types.hh"
 #include <cstring>
 #include <expected>
@@ -17,8 +17,8 @@ struct SubscriberEntry {
 };
 
 using SubscriberDirectoryImpl =
-    Generic::Directory<SubscriberEntry, Spec::Limits::maxSubscribers,
-                       Spec::Limits::maxSubscriberNameLength>;
+    Directory<SubscriberEntry, Spec::Limits::maxSubscribers,
+              Spec::Limits::maxSubscriberNameLength>;
 
 class SubscriberDirectory : public SubscriberDirectoryImpl {
     using Base = SubscriberDirectoryImpl;

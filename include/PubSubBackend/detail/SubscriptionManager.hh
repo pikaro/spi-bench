@@ -1,11 +1,12 @@
 #pragma once
 
 #include "Macros/Facade.hh"
-#include "PubSubBackend/Interfaces/Frame.hh"
-#include "PubSubBackend/detail/Codec.hh"
+#include "PubSubBackend/Interfaces/Envelope.hh"
+#include "PubSubBackend/Interfaces/Types.hh"
 #include "PubSubBackend/detail/Pool.hh"
 #include "PubSubBackend/detail/TransporterDirectory.hh"
 #include "PubSubBackend/detail/Types.hh"
+#include "PubSubBackend/detail/Wire.hh"
 #include "Types/Error.hh"
 #include "magic_enum/magic_enum.hpp"
 #include <array>
@@ -16,20 +17,6 @@
 #include <optional>
 
 namespace Totem::PubSubBackend::detail {
-
-enum class SubscribeEventType : uint8_t {
-    Register,
-    Unregister,
-};
-
-struct PubSubEvent {
-    TopicId topic;
-    SubscribeEventType type;
-};
-
-static_assert(std::is_trivially_copyable_v<PubSubEvent>);
-static_assert(std::is_standard_layout_v<PubSubEvent>);
-static_assert(std::has_unique_object_representations_v<PubSubEvent>);
 
 struct SubscriptionManagerDependencies {
     void *pubSubNode;
@@ -71,7 +58,7 @@ class SubscriptionManager {
                 "Cannot subscribe to topic 0");
 
         FAIL_IF_UNEXPECTED_FWD(
-            count, _setSubscriberCount(topic, 1),
+            _, _setSubscriberCount(topic, 1),
             "Failed to increment subscriber count for topic " SV_FMT,
             SV_ARG(magic_enum::enum_name(static_cast<Topic>(topic))));
 
@@ -126,15 +113,15 @@ class SubscriptionManager {
     }
 
     ReturnCode handlePubSubEvent(
-        const PublishRequest &request,
+        const Envelope &request,
         std::optional<TransportId> ingressTransport = std::nullopt) {
-        auto topic = static_cast<Topic>(request.topic);
+        auto topic = static_cast<Topic>(request.header.topic);
         FAIL_IF(topic != Topic::PubSub, ERR(InvalidArgument),
                 "Received non-PubSub event in PubSub event handler");
         FAIL_IF_UNEXPECTED_FWD(
-            event, request.getPayload(),
+            event, request.getPayloadAs<PubSubEvent>(),
             "Failed to get PubSub event from pool for message ID %u",
-            request.messageId);
+            request.header.messageId);
         return handlePubSubEvent(event, ingressTransport);
     }
 
@@ -162,16 +149,19 @@ class SubscriptionManager {
     ReturnCode _sendPubSubEvent(const PubSubEvent &event) {
         FAIL_IF_UNEXPECTED_FWD(messageId, _eventPool.store(event),
                                "Failed to store subscription event");
+        auto envelopeResult = Envelope::make<PubSubEvent>({
+            .owner = &_eventPool,
+            .topic = Topic::PubSub,
+            .messageId = messageId,
+            .getPayloadPtr = EventPool::getPtr,
+            .encodePayload = EventPool::encodePayload,
+            .release = EventPool::release,
+        });
+        FAIL_IF_UNEXPECTED_FWD(
+            envelope, envelopeResult,
+            "Failed to create envelope for subscription event");
         FAIL_IF_ERR_FWD(
-            _publishCallback(_pubSubNode,
-                             PublishRequest{
-                                 .messageId = messageId,
-                                 .topic = static_cast<TopicId>(Topic::PubSub),
-                                 .source = static_cast<NodeId>(Spec::nodeId),
-                                 .owner = &_eventPool,
-                                 .getPayload = EventPool::getRaw,
-                                 .release = EventPool::release,
-                             }),
+            _publishCallback(_pubSubNode, envelope),
             "Failed to publish event for topic " SV_FMT,
             SV_ARG(magic_enum::enum_name(static_cast<Topic>(event.topic))));
         return OK();

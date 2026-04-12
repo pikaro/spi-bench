@@ -1,7 +1,8 @@
 #pragma once
 
 #include "Macros/Facade.hh"
-#include "PubSubBackend/Interfaces/Frame.hh"
+#include "PubSubBackend/Interfaces/Envelope.hh"
+#include "PubSubBackend/Interfaces/Types.hh"
 #include "PubSubBackend/detail/SubscriptionManager.hh"
 #include "PubSubBackend/detail/Types.hh"
 #include "Types/Error.hh"
@@ -18,13 +19,13 @@ class ControlPlane {
         : _subscriptionManager(subscriptionManager) {}
 
     ReturnCode
-    handle(const PublishRequest &request,
+    handle(const Envelope &request,
            std::optional<TransportId> ingressTransport = std::nullopt) {
-        if (!isControlPlaneTopic(request.topic)) {
+        if (!isControlPlaneTopic(request.header.topic)) {
             return OK();
         }
 
-        auto topic = static_cast<Topic>(request.topic);
+        auto topic = static_cast<Topic>(request.header.topic);
         if (topic == Topic::PubSub) {
             return _subscriptionManager.handlePubSubEvent(request,
                                                           ingressTransport);
@@ -32,7 +33,7 @@ class ControlPlane {
 
         FAIL(ERR(InvalidArgument),
              "Received message with invalid control plane topic " SV_FMT,
-             SV_ARG(magic_enum::enum_name(topic)));
+             MAGIC_SV_ARG(topic));
     }
 
     [[nodiscard]] static constexpr bool isControlPlaneTopic(TopicId topicId) {

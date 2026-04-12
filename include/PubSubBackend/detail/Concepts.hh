@@ -2,22 +2,11 @@
 
 #include "PubSubBackend/detail/Types.hh"
 #include "Traits/Bitmask.hh"
-#include <bit>
 #include <concepts>
 #include <cstdint>
 #include <type_traits>
 
 namespace Totem::PubSubBackend::detail {
-
-static_assert(
-    std::endian::native == std::endian::little,
-    "PubSub implementation currently only supports little-endian platforms");
-
-template <class T>
-constexpr bool IsWireMessage =
-    std::is_trivially_copyable_v<T> && std::is_standard_layout_v<T> &&
-    std::has_unique_object_representations_v<T> &&
-    (sizeof(T) <= Spec::Limits::maxPayloadSize);
 
 struct Contract {
     using NodeId = typename Spec::NodeId;

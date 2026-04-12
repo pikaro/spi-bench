@@ -27,9 +27,8 @@ struct SourceEntry {
     uint32_t capabilities = TaskSourceCapability::None;
 };
 
-using DirectoryImpl =
-    Generic::Directory<SourceEntry, TaskRegistryConfig::sourceCountMax,
-                       TaskRegistryConfig::sourceNameMaxLen>;
+using DirectoryImpl = Directory<SourceEntry, TaskRegistryConfig::sourceCountMax,
+                                TaskRegistryConfig::sourceNameMaxLen>;
 
 class Directory : public DirectoryImpl {
   public:

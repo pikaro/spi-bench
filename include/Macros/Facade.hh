@@ -12,6 +12,7 @@
 #include "internal/Fail.hh"
 #include "internal/Format.hh"
 #include "internal/Log.hh"
+#include "internal/Markers.hh"
 
 #include "internal/PlatformSelect.hh"
 

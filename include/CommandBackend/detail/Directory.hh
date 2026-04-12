@@ -9,9 +9,8 @@
 
 namespace Totem::CommandBackend::detail {
 
-using DirectoryImpl =
-    Generic::GettableDirectory<CommandDesc, CommandConfig::maxEntries,
-                               CommandConfig::maxNameLength>;
+using DirectoryImpl = GettableDirectory<CommandDesc, CommandConfig::maxEntries,
+                                        CommandConfig::maxNameLength>;
 
 class Directory : public DirectoryImpl {
   public:

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Macros/Facade.hh"
-#include "PubSubBackend/Interfaces/Frame.hh"
+#include "PubSubBackend/Interfaces/Envelope.hh"
 #include "PubSubBackend/detail/ControlPlane.hh"
 #include "PubSubBackend/detail/Publisher.hh"
 #include "PubSubBackend/detail/TransporterDirectory.hh"
@@ -46,18 +46,18 @@ class Drainer {
         return ret;
     }
 
-    ReturnCode ack(Spec::Transport transportId, const PublishRequest &req) {
+    ReturnCode ack(Spec::Transport transportId, const Envelope &req) {
         auto ret = OK();
         auto mask = static_cast<TransportMask>(transportId);
         for (size_t i = 0; i < kMaxInFlightMessages; ++i) {
             auto &frame = _inFlightFrames[i];
             if (frame.valid() && (frame.pendingMask & mask) != 0) {
-                if (frame.request.messageId == req.messageId) {
+                if (frame.envelope.header.messageId == req.header.messageId) {
                     frame.pendingMask &= ~mask;
                     if (--frame.pendingCount == 0) {
-                        if (frame.request.release != nullptr) {
-                            ret.combine(frame.request.release(
-                                frame.request.owner, req));
+                        if (frame.envelope.release != nullptr) {
+                            ret.combine(frame.envelope.release(
+                                frame.envelope.owner, req));
                         }
                         frame = StoredFrame{};
                     }
@@ -68,12 +68,12 @@ class Drainer {
         FAIL(ERR(NotFound),
              "No in-flight message found for ack with messageId "
              "%u from transport " SV_FMT,
-             req.messageId, SV_ARG(magic_enum::enum_name(transportId)));
+             req.header.messageId, SV_ARG(magic_enum::enum_name(transportId)));
     }
 
   private:
     ReturnCode _publishFromQueue() {
-        PublishRequest item;
+        Envelope item;
         auto ret = OK();
         while (ret.ok()) {
             ret.combine(
@@ -94,7 +94,7 @@ class Drainer {
         TransportId ingressTransport;
     };
 
-    static ReturnCode _publishCallback(void *ctx, const PublishRequest &req) {
+    static ReturnCode _publishCallback(void *ctx, const Envelope &req) {
         auto *publishContext = static_cast<PublishContext *>(ctx);
         return publishContext->self->_publishFrame(
             req, publishContext->ingressTransport);
@@ -110,16 +110,15 @@ class Drainer {
             });
     }
 
-    std::expected<FrameHandle, ReturnCode>
-    _storeFrame(const PublishRequest &req) {
+    std::expected<FrameHandle, ReturnCode> _storeFrame(const Envelope &req) {
         StoredFrame frame;
-        frame.request = req;
+        frame.envelope = req;
         TransportMask mask = 0;
         uint8_t pendingCount = 0;
         (void)_transporters.withAll(
             [&](const TransporterNameKey & /*nameKey*/,
                 const TransporterEntry &entry) -> ReturnCode {
-                if ((entry.topicMask & req.topic) != 0) {
+                if ((entry.topicMask & req.header.topic) != 0) {
                     mask |= entry.transportId;
                     ++pendingCount;
                 }
@@ -144,7 +143,7 @@ class Drainer {
     }
 
     ReturnCode
-    _publishFrame(const PublishRequest &item,
+    _publishFrame(const Envelope &item,
                   std::optional<TransportId> ingressTransport = std::nullopt) {
         auto ret = OK();
         ret.combine(_controlPlane.handle(item, ingressTransport));
@@ -155,14 +154,15 @@ class Drainer {
                 FAIL_IF_ERR_FWD(item.release(item.owner, item),
                                 "Failed to release message for topic " SV_FMT
                                 " with no subscribers or transports",
-                                SV_ARG(magic_enum::enum_name(
-                                    static_cast<Spec::Topic>(item.topic))));
+                                MAGIC_SV_ARG(Spec::Topic, item.header.topic));
                 return ret;
             }
             FAIL(storeResult.error(), "Failed to store in-flight message: %s",
                  storeResult.error().format());
         }
-        return ret.combine(_publisher.publish(*storeResult, ingressTransport));
+        ret.combine(
+            _publisher.publishToTransports(*storeResult, ingressTransport));
+        return ret;
     }
 
     TransporterDirectory &_transporters;

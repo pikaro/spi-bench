@@ -3,6 +3,8 @@
 #include "PubSubBackend/detail/Types.hh"
 #include "Types/Error.hh"
 #include <concepts>
+#include <cstddef>
+#include <limits>
 #include <string_view>
 
 namespace Totem::PubSubBackend::detail {
@@ -10,9 +12,13 @@ namespace Totem::PubSubBackend::detail {
 struct Transporter {
     template <class T> struct Contract {
         static_assert(
-            requires(T &cls) {
-                { cls.work() } -> std::same_as<ReturnCode>;
-            }, "T must provide work");
+            requires(T &cls, size_t maxCount) {
+                { cls.send(maxCount) } -> std::same_as<ReturnCode>;
+            }, "T must provide send");
+        static_assert(
+            requires(T &cls, size_t maxCount) {
+                { cls.receive(maxCount) } -> std::same_as<ReturnCode>;
+            }, "T must provide receive");
         static_assert(
             requires(T &cls, void *ctx, PollIntoCallback callback) {
                 { cls.pollInto(ctx, callback) } -> std::same_as<ReturnCode>;
@@ -33,14 +39,20 @@ struct Transporter {
 
     void *self = nullptr;
 
-    ReturnCode (*workHook)(void *) = nullptr;
+    ReturnCode (*sendHook)(void *, size_t) = nullptr;
+    ReturnCode (*receiveHook)(void *, size_t) = nullptr;
     ReturnCode (*enqueueHook)(void *, FrameHandle frameHandle) = nullptr;
     ReturnCode (*pollIntoHook)(void *, void *ctx,
                                PollIntoCallback callback) = nullptr;
     TransportId (*transportIdHook)(void *) = nullptr;
     std::string_view (*instanceNameHook)(void *) = nullptr;
 
-    ReturnCode work() const { return workHook(self); }
+    ReturnCode send(size_t maxCount = All) const {
+        return sendHook(self, maxCount);
+    }
+    ReturnCode receive(size_t maxCount = All) const {
+        return receiveHook(self, maxCount);
+    }
     ReturnCode enqueue(FrameHandle frameHandle) const {
         return enqueueHook(self, frameHandle);
     }
@@ -59,8 +71,11 @@ struct Transporter {
     static Transporter bind(T &obj) {
         return Transporter{
             .self = std::addressof(obj),
-            .workHook = [](void *ptr) -> ReturnCode {
-                return static_cast<T *>(ptr)->work();
+            .sendHook = [](void *ptr, size_t maxCount = All) -> ReturnCode {
+                return static_cast<T *>(ptr)->send(maxCount);
+            },
+            .receiveHook = [](void *ptr, size_t maxCount = All) -> ReturnCode {
+                return static_cast<T *>(ptr)->receive(maxCount);
             },
             // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
             .pollIntoHook = [](void *ptr, void *ctx,
@@ -84,6 +99,9 @@ struct Transporter {
         return self != nullptr && pollIntoHook != nullptr &&
                enqueueHook != nullptr;
     }
+
+  private:
+    static constexpr size_t All = std::numeric_limits<size_t>::max();
 };
 
 } // namespace Totem::PubSubBackend::detail

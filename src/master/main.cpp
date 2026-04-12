@@ -1,12 +1,18 @@
 #include "CommandBackend/Facade.hh"
+#include "Config.hh"
+#include "Data/Facade.hh"
 #include "Macros/Facade.hh"
 #include "Monitoring/Facade.hh"
 #include "Output/Facade.hh"
 #include "Platform/Uart.hh"
 #include "Platform/platform/PlatformESP32/Base.hh"
+#include "PubSubBackend/Facade.hh"
+#include "PubSubBackend/Transports/LocalTransport.hh"
 #include "Services/Commands.hh"
+#include "Services/PubSub.hh"
 #include "Support/CoreCommands.hh"
 #include "TaskControllerRegistry/Facade.hh"
+#include <cstdint>
 
 Totem::TaskControllerRegistry::Registry taskRegistry;
 
@@ -18,6 +24,39 @@ Totem::CommandBackend::UartTransport uartSource;
 Totem::TaskControllerRegistry::SystemTaskSource systemTaskSource(taskRegistry);
 
 Totem::Monitoring::Monitoring monitoring(taskRegistry);
+
+using PubSubNode = Totem::PubSubBackend::Node<NodeData::PubSub>;
+PubSubNode pubSubNode(taskRegistry.hooks());
+Totem::PubSubBackend::Transports::LocalTransport<8> testPubSub1({
+    .base =
+        {
+            .owner = static_cast<void *>(&pubSubNode),
+            .transportId =
+                static_cast<uint8_t>(NodeData::PubSub::Transport::SPI),
+            .name = "SPI",
+            .sendAckCallback = PubSubNode::ack,
+        },
+});
+Totem::PubSubBackend::Transports::LocalTransport<8> testPubSub2({
+    .base =
+        {
+            .owner = static_cast<void *>(&pubSubNode),
+            .transportId =
+                static_cast<uint8_t>(NodeData::PubSub::Transport::WebSocket),
+            .name = "WebSocket",
+            .sendAckCallback = PubSubNode::ack,
+        },
+});
+Totem::PubSubBackend::Transports::LocalTransport<8> testPubSub3({
+    .base =
+        {
+            .owner = static_cast<void *>(&pubSubNode),
+            .transportId =
+                static_cast<uint8_t>(NodeData::PubSub::Transport::RS485),
+            .name = "RS485",
+            .sendAckCallback = PubSubNode::ack,
+        },
+});
 
 void setup() {
     ABORT_IF_ERR_BEGIN(::platform::Uart::init());
@@ -32,6 +71,22 @@ void setup() {
     ABORT_IF_ERR(commandController.addTransport(uartTransport),
                  "Failed to add UART transport to command controller");
     CommandService::setBackend(commandController);
+
+    ABORT_IF_ERR_BEGIN(pubSubNode.begin());
+    ABORT_IF_ERR_BEGIN(testPubSub1.begin());
+    ABORT_IF_ERR_BEGIN(testPubSub2.begin());
+    ABORT_IF_ERR_BEGIN(testPubSub3.begin());
+    ABORT_IF_UNEXPECTED(testHandle1, pubSubNode.registerTransport(testPubSub1),
+                        "Failed to register local transport to PubSub node");
+    ABORT_IF_UNEXPECTED(testHandle2, pubSubNode.registerTransport(testPubSub2),
+                        "Failed to register local2 transport to PubSub node");
+    ABORT_IF_UNEXPECTED(testHandle3, pubSubNode.registerTransport(testPubSub3),
+                        "Failed to register local3 transport to PubSub node");
+    PubSubService<NodeData::PubSub>::setBackend(pubSubNode);
+
+    (void)testHandle1;
+    (void)testHandle2;
+    (void)testHandle3;
 
     ABORT_IF_ERR(register_core_commands(),
                  "Failed to register core commands to command controller");

@@ -54,7 +54,7 @@ struct RingBuffer {
     }
 
     static ReturnCode send(RingBufferHandle handle, const void *data,
-                           size_t sizeBytes, Tick timeout = MS_MAX_DELAY) {
+                           size_t sizeBytes, Tick timeout = TICK_MAX_DELAY) {
         auto result = xRingbufferSend(handle, data, sizeBytes, timeout);
         if (result != pdTRUE) {
             return ERR(CoreError, OperationFailed);
@@ -64,7 +64,7 @@ struct RingBuffer {
 
     template <typename T>
     static std::expected<std::pair<const T *, size_t>, ReturnCode>
-    receive(RingBufferHandle handle, Tick timeout = MS_MAX_DELAY) {
+    receive(RingBufferHandle handle, Tick timeout = TICK_MAX_DELAY) {
         size_t sizeBytes;
         auto *data = xRingbufferReceive(handle, &sizeBytes, timeout);
         if (data == nullptr) {

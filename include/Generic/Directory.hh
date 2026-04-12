@@ -173,6 +173,17 @@ class Directory : HasMutex<Directory<Entry, N, IdLen>> {
                                   std::forward<Filter>(filter));
     }
 
+    template <typename Filter>
+        requires(std::is_invocable_r_v<bool, Filter, const EntryNameKey &,
+                                       const Entry &>)
+    [[nodiscard]] bool any(Filter &&filter) const {
+        auto ret = withAllConst(
+            [](const EntryNameKey & /*unused*/,
+               const Entry & /*unused*/) -> ReturnCode { return OK(); },
+            filter);
+        return ret.ok();
+    }
+
     std::expected<Entry, ReturnCode> extractOne(const char *entryName) {
         FAIL_IF_NULL(entryName, std::unexpected(ERR(InvalidArgument)),
                      "Entry name for %s cannot be null", _ownerName);

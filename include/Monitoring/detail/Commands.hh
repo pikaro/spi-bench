@@ -11,6 +11,7 @@
 #include "Types/Error.hh"
 #include <array>
 #include <cstddef>
+#include <magic_enum/magic_enum.hpp>
 #include <span>
 
 namespace Totem::Monitoring::detail {
@@ -68,9 +69,8 @@ inline static ReturnCode dump_monitoring_snaphot(const MonitoringFrame &frame) {
                 SV_ARG(task.sourceName, TaskRegistryConfig::sourceNameMaxLen),
                 SV_ARG(task.name, -TaskControllerConfig::maxTaskNameLen),
                 task.hasEverStarted ? "S" : "X",
-                SV_ARG(TaskController::state_to_string(task.state)),
-                SV_ARG(TaskController::platform_state_to_string(
-                    task.platformState)),
+                SV_ARG(magic_enum::enum_name(task.state)),
+                SV_ARG(magic_enum::enum_name(task.platformState)),
                 task.currentPriority, task.coreId,
                 stackSize - task.stackLowestFree, stackSize,
                 (double)task.stackUsedPct, (double)task.runTimeDeltaPct,
@@ -84,9 +84,8 @@ inline static ReturnCode dump_monitoring_snaphot(const MonitoringFrame &frame) {
                i, SV_ARG(task.sourceName, TaskRegistryConfig::sourceNameMaxLen),
                SV_ARG(task.name, -TaskControllerConfig::maxTaskNameLen),
                task.hasEverStarted ? "S" : "X",
-               SV_ARG(TaskController::state_to_string(task.state)),
-               SV_ARG(TaskController::platform_state_to_string(
-                   task.platformState)),
+               SV_ARG(magic_enum::enum_name(task.state)),
+               SV_ARG(magic_enum::enum_name(task.platformState)),
                task.currentPriority, task.coreId,
                static_cast<unsigned long>(task.stackLowestFree),
                (double)task.runTimeDeltaPct, task.timestampDelta,

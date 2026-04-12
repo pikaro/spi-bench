@@ -1,8 +1,7 @@
 #pragma once
-#include <array>
+#include "magic_enum/magic_enum.hpp"
+#include <cassert>
 #include <cstdint>
-
-namespace Totem::Core {
 
 enum class ErrorDomain : uint8_t {
     Core,
@@ -26,33 +25,13 @@ enum class CoreError : uint8_t {
     InvalidState,
     InvalidData,
     Overflow,
+    Underflow,
 };
-
-static constexpr auto coreErrorNames = std::to_array<const char *>({
-    "[0] Core::Unknown",
-    "[1] Core::Ok",
-    "[2] Core::Abort",
-    "[3] Core::InvalidArgument",
-    "[4] Core::OutOfMemory",
-    "[5] Core::NotFound",
-    "[6] Core::OperationFailed",
-    "[7] Core::AlreadyExists",
-    "[8] Core::Timeout",
-    "[9] Core::Unexpected",
-    "[10] Core::InvalidState",
-    "[11] Core::InvalidData",
-    "[12] Core::Overflow",
-});
 
 enum class PubSubError : uint8_t {
     Unknown = 0,
     Ok,
 };
-
-static constexpr auto pubSubErrorNames = std::to_array<const char *>({
-    "[0] PubSub::Unknown",
-    "[1] PubSub::Ok",
-});
 
 enum class SpiError : uint8_t {
     Unknown = 0,
@@ -60,13 +39,6 @@ enum class SpiError : uint8_t {
     CommunicationFailure,
     InvalidResponse,
 };
-
-static constexpr auto spiErrorNames = std::to_array<const char *>({
-    "[0] Spi::Unknown",
-    "[1] Spi::Ok",
-    "[2] Spi::CommunicationFailure",
-    "[3] Spi::InvalidResponse",
-});
 
 enum class LifecycleError : uint8_t {
     Unknown = 0,
@@ -76,14 +48,6 @@ enum class LifecycleError : uint8_t {
     InvalidState,
 };
 
-static constexpr auto lifecycleErrorNames = std::to_array<const char *>({
-    "[0] Lifecycle::Unknown",
-    "[1] Lifecycle::Ok",
-    "[2] Lifecycle::Active",
-    "[3] Lifecycle::NotActive",
-    "[4] Lifecycle::InvalidState",
-});
-
 enum class CommandError : uint8_t {
     Unknown = 0,
     Ok,
@@ -91,46 +55,17 @@ enum class CommandError : uint8_t {
     TooLong,
 };
 
-static constexpr auto commandErrorNames = std::to_array<const char *>({
-    "[0] Command::Unknown",
-    "[1] Command::Ok",
-    "[2] Command::SyntaxError",
-    "[3] Command::TooLong",
-});
-
-struct NameTable {
-    const char *const *data;
-    uint8_t size;
-};
-
-static constexpr auto domain_tables = std::to_array<NameTable>({
-    NameTable{.data = coreErrorNames.data(),
-              .size = static_cast<uint8_t>(coreErrorNames.size())},
-    NameTable{.data = lifecycleErrorNames.data(),
-              .size = static_cast<uint8_t>(lifecycleErrorNames.size())},
-    NameTable{.data = pubSubErrorNames.data(),
-              .size = static_cast<uint8_t>(pubSubErrorNames.size())},
-    NameTable{.data = spiErrorNames.data(),
-              .size = static_cast<uint8_t>(spiErrorNames.size())},
-    NameTable{.data = commandErrorNames.data(),
-              .size = static_cast<uint8_t>(commandErrorNames.size())},
-});
-
-static constexpr const char *get_error_name(ErrorDomain domain, uint8_t code) {
-    const auto dom = static_cast<uint8_t>(domain);
-    if (dom >= domain_tables.size()) {
-        return "UnknownErrorDomain";
-    }
-
-    const NameTable tbl = domain_tables[dom];
-    if (code >= tbl.size) {
-        return "UnknownErrorCode";
-    }
-
-    return tbl.data[code];
+template <typename Enum> constexpr const char *error_name(uint8_t value) {
+    return magic_enum::enum_name(static_cast<Enum>(value)).data();
 }
 
 struct [[nodiscard]] ReturnCode {
+    struct FormatView {
+        uint8_t code;
+        const char *domain;
+        const char *name;
+    };
+
     explicit operator bool() const { return ok(); }
     bool operator!() const { return !ok(); }
     bool operator==(const ReturnCode &other) const {
@@ -138,41 +73,69 @@ struct [[nodiscard]] ReturnCode {
     }
     bool operator!=(const ReturnCode &other) const { return !(*this == other); }
 
+    template <typename Enum>
+    static constexpr ReturnCode from(ErrorDomain domain, Enum err) {
+        static_assert(std::is_enum_v<Enum>,
+                      "ReturnCode::from requires an enum type");
+        return {
+            .domain = domain,
+            .code = static_cast<uint8_t>(err),
+        };
+    }
+
     static constexpr ReturnCode from(CoreError err) {
-        return {.domain = ErrorDomain::Core, .code = static_cast<uint8_t>(err)};
+        return from<CoreError>(ErrorDomain::Core, err);
     }
     static constexpr ReturnCode from(PubSubError err) {
-        return {.domain = ErrorDomain::PubSub,
-                .code = static_cast<uint8_t>(err)};
+        return from<PubSubError>(ErrorDomain::PubSub, err);
     }
     static constexpr ReturnCode from(SpiError err) {
-        return {.domain = ErrorDomain::Spi, .code = static_cast<uint8_t>(err)};
+        return from<SpiError>(ErrorDomain::Spi, err);
     }
     static constexpr ReturnCode from(LifecycleError err) {
-        return {.domain = ErrorDomain::Lifecycle,
-                .code = static_cast<uint8_t>(err)};
+        return from<LifecycleError>(ErrorDomain::Lifecycle, err);
     }
     static constexpr ReturnCode from(CommandError err) {
-        return {.domain = ErrorDomain::Command,
-                .code = static_cast<uint8_t>(err)};
+        return from<CommandError>(ErrorDomain::Command, err);
+    }
+
+    [[nodiscard]] constexpr const char *name() const {
+        switch (domain) {
+        case ErrorDomain::Core:
+            return error_name<CoreError>(code);
+        case ErrorDomain::PubSub:
+            return error_name<PubSubError>(code);
+        case ErrorDomain::Spi:
+            return error_name<SpiError>(code);
+        case ErrorDomain::Lifecycle:
+            return error_name<LifecycleError>(code);
+        case ErrorDomain::Command:
+            return error_name<CommandError>(code);
+        default:
+            assert(false && "ReturnCode contains invalid domain");
+            return "InvalidDomain";
+        }
+    }
+
+    void combine(const ReturnCode &other) {
+        if (!other.ok()) {
+            *this = other;
+        }
     }
 
     [[nodiscard]] constexpr bool ok() const { return code == 1; }
 
-    [[nodiscard]] constexpr const char *format() const {
-        return get_error_name(domain, code);
+    [[nodiscard]] constexpr FormatView format() const {
+        auto domainName = magic_enum::enum_name(domain);
+        return {
+            .code = code,
+            // NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage)
+            .domain = domainName.data(),
+            // NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage)
+            .name = name(),
+        };
     }
 
     ErrorDomain domain{ErrorDomain::Core};
     uint8_t code{0};
 };
-
-} // namespace Totem::Core
-
-using Totem::Core::CommandError;
-using Totem::Core::CoreError;
-using Totem::Core::ErrorDomain;
-using Totem::Core::LifecycleError;
-using Totem::Core::PubSubError;
-using Totem::Core::ReturnCode;
-using Totem::Core::SpiError;

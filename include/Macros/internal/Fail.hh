@@ -16,6 +16,15 @@
         }                                                                      \
     } while (0)
 
+#define INTERNAL_FAIL_IF_IMPL_ERR(cond, why, action, msg, errfmt, ...)         \
+    do {                                                                       \
+        if (cond) {                                                            \
+            LOG_LOC("%s: [%d] %s::%s " msg, why, errfmt.code, errfmt.domain,   \
+                    errfmt.name, ##__VA_ARGS__);                               \
+            action;                                                            \
+        }                                                                      \
+    } while (0)
+
 // Fail if active
 #define FAIL_IF_ACTIVE_THEN(action, msg, ...)                                  \
     INTERNAL_FAIL_IF_IMPL(_life.active(), "active", action, msg, ##__VA_ARGS__)
@@ -169,8 +178,8 @@
 // Fail if ReturnCode error
 #define FAIL_IF_ERR_THEN(expr, action, msg, ...)                               \
     if (auto _rc_ = (expr); !_rc_.ok()) {                                      \
-        INTERNAL_FAIL_IF_IMPL_CODE(true, _rc_.format(), action, msg,           \
-                                   _rc_.code, ##__VA_ARGS__);                  \
+        INTERNAL_FAIL_IF_IMPL_ERR(true, "Error", action, msg, _rc_.format(),   \
+                                  ##__VA_ARGS__);                              \
     }
 #define ABORT_IF_ERR(expr, msg, ...)                                           \
     FAIL_IF_ERR_THEN(expr, abort(), msg, ##__VA_ARGS__)
@@ -206,8 +215,8 @@
     auto CONCAT(_result_, var) = (expr);                                       \
     if (!CONCAT(_result_, var)) {                                              \
         auto _error_ = CONCAT(_result_, var).error();                          \
-        INTERNAL_FAIL_IF_IMPL_CODE(true, _error_.format(), action, msg,        \
-                                   _error_.code, ##__VA_ARGS__);               \
+        INTERNAL_FAIL_IF_IMPL_ERR(true, "Unexpected Error", action, msg,       \
+                                  _error_.format(), ##__VA_ARGS__);            \
     }                                                                          \
     auto var = std::move(*CONCAT(_result_, var));
 #define ABORT_IF_UNEXPECTED(var, expr, msg, ...)                               \
@@ -228,8 +237,8 @@
         auto CONCAT(_result_, var) = (expr);                                   \
         if (!CONCAT(_result_, var)) {                                          \
             auto _error_ = CONCAT(_result_, var).error();                      \
-            INTERNAL_FAIL_IF_IMPL_CODE(true, _error_.format(), action, msg,    \
-                                       _error_.code, ##__VA_ARGS__);           \
+            INTERNAL_FAIL_IF_IMPL_ERR(true, "Unexpected assign error", action, \
+                                      msg, _error_.format(), ##__VA_ARGS__);   \
         }                                                                      \
         (var) = std::move(*CONCAT(_result_, var));                             \
     } while (0)

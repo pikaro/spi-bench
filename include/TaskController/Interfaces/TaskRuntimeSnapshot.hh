@@ -20,27 +20,6 @@ enum class ExitReason : uint8_t {
     StopHookFailed,
 };
 
-static constexpr std::string_view exit_reason_to_string(ExitReason reason) {
-    switch (reason) {
-    case ExitReason::Killed:
-        return "Killed";
-    case ExitReason::StopRequested:
-        return "StopRequested";
-    case ExitReason::InvalidStateTransition:
-        return "InvalidStateTransition";
-    case ExitReason::StartHookFailed:
-        return "StartHookFailed";
-    case ExitReason::StepFailed:
-        return "StepFailed";
-    case ExitReason::SignalFailed:
-        return "SignalFailed";
-    case ExitReason::StopHookFailed:
-        return "StopHookFailed";
-    default:
-        return "Unknown";
-    }
-}
-
 struct Result {
     ExitReason reason;
     ReturnCode error{OK(CoreError)};
@@ -56,43 +35,12 @@ enum class State : uint8_t {
     Stopping,
 };
 
-static constexpr std::string_view state_to_string(State state) {
-    switch (state) {
-    case State::Stopped:
-        return "H";
-    case State::Starting:
-        return "S";
-    case State::Running:
-        return "R";
-    case State::Stopping:
-        return "T";
-    default:
-        return "?";
-    }
-}
-
 enum class PlatformState : uint8_t {
     Running = 0,
     Ready,
     Blocked,
     Suspended,
 };
-
-static constexpr std::string_view
-platform_state_to_string(PlatformState state) {
-    switch (state) {
-    case PlatformState::Running:
-        return "R";
-    case PlatformState::Ready:
-        return "A";
-    case PlatformState::Blocked:
-        return "B";
-    case PlatformState::Suspended:
-        return "S";
-    default:
-        return "?";
-    }
-}
 
 struct TaskPlatformSnapshot {
     PlatformState state;

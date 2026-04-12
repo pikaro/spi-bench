@@ -4,6 +4,7 @@
 #include "freertos/FreeRTOS.h" // IWYU pragma: keep
 #include "freertos/idf_additions.h"
 #include "freertos/projdefs.h"
+#include "freertos/queue.h"
 #include "freertos/ringbuf.h"
 #include <cstdint>
 
@@ -25,6 +26,7 @@ inline void delay_until(Tick *lastWakeTime, Tick ticks) {
 }
 
 using RingBufferHandle = RingbufHandle_t;
+using QueueHandle = QueueHandle_t;
 using MutexHandle = SemaphoreHandle_t;
 
 using TaskStatus = TaskStatus_t;

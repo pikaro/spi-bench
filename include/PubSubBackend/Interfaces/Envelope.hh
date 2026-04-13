@@ -119,7 +119,8 @@ struct Envelope {
                     .messageId = def.messageId,
                     .topic = static_cast<TopicId>(def.topic),
                     .source = static_cast<NodeId>(NodeData::PubSub::nodeId),
-                    .payloadSize = detail::Codec<T>::encodedSize(),
+                    .payloadSize =
+                        static_cast<uint16_t>(detail::Codec<T>::encodedSize()),
                 },
             .owner = def.owner,
             .getPayload = def.getPayload,

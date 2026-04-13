@@ -11,6 +11,6 @@ struct WIRE_MSG Message {
     uint32_t uint32Val;
     uint16_t uint16Val;
     uint8_t uint8Val;
-    const char *strVal;
+    std::array<char, 32> strVal;
     std::array<std::byte, 16> byteArrayVal;
 };

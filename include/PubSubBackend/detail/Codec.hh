@@ -279,6 +279,7 @@ template <typename T> constexpr size_t encoded_size() {
     } else {
         static_assert(always_false<CleanT>::value,
                       "Unsupported wire field type");
+        return 0;
     }
 }
 
@@ -315,6 +316,7 @@ constexpr ReturnCode encode_value(const T &value, std::span<std::byte> out,
     } else {
         static_assert(always_false<CleanT>::value,
                       "Unsupported wire field type");
+        return error_code(CoreError::InvalidArgument);
     }
 }
 
@@ -355,6 +357,7 @@ std::expected<T, ReturnCode> decode_value(DecodeCursor &cursor) {
     } else {
         static_assert(always_false<CleanT>::value,
                       "Unsupported wire field type");
+        return std::unexpected(error_code(CoreError::InvalidArgument));
     }
 }
 

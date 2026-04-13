@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 
 class Foo {
   public:
@@ -50,7 +51,8 @@ static Message make_test_message() {
     msg.uint32Val = std::rand() % 100000;
     msg.uint16Val = std::rand() % 65536;
     msg.uint8Val = std::rand() % 256;
-    msg.strVal = "Hello, PubSub!";
+    std::strncpy(msg.strVal.data(), "Hello, PubSub!", msg.strVal.size() - 1);
+    msg.strVal[msg.strVal.size() - 1] = '\0';
     for (size_t i = 0; i < msg.byteArrayVal.size(); ++i) {
         msg.byteArrayVal[i] = std::byte(std::rand() % 256);
     }
@@ -65,6 +67,14 @@ struct Event {
 inline Event make_test_event() {
     Event event{};
     event.message = make_test_message();
-    event.topic = static_cast<Totem::Data::PubSub::Topic>(std::rand() % 7);
+    constexpr auto topics =
+        std::array<Totem::Data::PubSub::Topic, 5>{
+            Totem::Data::PubSub::Topic::Heartbeat,
+            Totem::Data::PubSub::Topic::Sensor,
+            Totem::Data::PubSub::Topic::FftFrame,
+            Totem::Data::PubSub::Topic::Metrics,
+            Totem::Data::PubSub::Topic::Power,
+        };
+    event.topic = topics[static_cast<size_t>(std::rand()) % topics.size()];
     return event;
 }

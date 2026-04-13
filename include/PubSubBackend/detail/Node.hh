@@ -161,6 +161,12 @@ class Node : public HasLifecycle<Node, Config>,
     }
 
     ReturnCode _onTaskStep() {
+        FAIL_IF_ERR_FWD(
+            _transporters.withAll(
+                [](const TransporterKey &, const TransporterEntry &entry) {
+                    return entry.transporter.receive();
+                }),
+            "Failed to receive PubSub transporter input");
         FAIL_IF_ERR_FWD(_drainer.drain(), "Failed to drain PubSub messages");
         FAIL_IF_ERR_FWD(
             _transporters.withAll(

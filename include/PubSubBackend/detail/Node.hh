@@ -27,7 +27,7 @@
 
 namespace Totem::PubSubBackend::detail {
 
-class Node : public HasIdentity<Node>,
+class Node : // public HasIdentity<Node>,
              public HasLifecycle<Node>,
              public HasTaskController<Node> {
     friend class HasLifecycle<Node>;

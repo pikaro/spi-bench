@@ -2,7 +2,6 @@
 
 #include "Types/Error.hh"
 #include <concepts>
-#include <type_traits>
 
 template <class T>
 concept IsNamedEntity = requires {

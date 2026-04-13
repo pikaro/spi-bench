@@ -29,6 +29,9 @@ class Aggregator : public HasLifecycle<Aggregator, AggregatorConfig>,
     explicit Aggregator(TaskController::RegistryHooks registryHooks)
         : HasTaskController(registryHooks) {}
 
+    DELETE_COPY(Aggregator)
+    DELETE_MOVE(Aggregator)
+
     static constexpr const char *name = "Aggregator";
 
     ReturnCode setLogLevel(LogLevel level) {

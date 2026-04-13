@@ -45,16 +45,16 @@ template <size_t N> struct NameKey {
         return out;
     }
 
-    static NameKey fromStringView(std::string_view sv) {
-        if (sv.empty()) [[unlikely]] {
+    static NameKey fromStringView(std::string_view str) {
+        if (str.empty()) [[unlikely]] {
             ABORT("NameKey cannot be created from empty string_view");
         }
-        if (sv.size() > N) [[unlikely]] {
-            ABORT("NameKey length overflow: %zu > %zu", sv.size(), N);
+        if (str.size() > N) [[unlikely]] {
+            ABORT("NameKey length overflow: %zu > %zu", str.size(), N);
         }
         NameKey out{};
-        std::memcpy(out.name.data(), sv.data(), sv.size());
-        out.len = static_cast<SmallestUintType<N>>(sv.size());
+        std::memcpy(out.name.data(), str.data(), str.size());
+        out.len = static_cast<SmallestUintType<N>>(str.size());
         return out;
     }
 };

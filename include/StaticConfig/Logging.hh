@@ -1,6 +1,5 @@
 #pragma once
 
-#include "TaskController/Interfaces/Config.hh"
 #include <cstddef>
 
 struct LoggingConfig {

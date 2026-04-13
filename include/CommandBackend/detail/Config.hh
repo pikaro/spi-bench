@@ -2,7 +2,7 @@
 
 #include "TaskController/Interfaces/Config.hh"
 
-namespace Totem::CommandBackend::detail {
+namespace Totem::CommandBackend {
 
 struct Config {
     Totem::TaskController::Config task{
@@ -10,6 +10,8 @@ struct Config {
         .stackSize = 4096,
         .intervalMs = 10,
     };
+
+    [[nodiscard]] bool validate() const { return task.validate(); }
 };
 
-} // namespace Totem::CommandBackend::detail
+} // namespace Totem::CommandBackend

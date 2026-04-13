@@ -19,8 +19,8 @@ namespace Totem::CommandBackend::detail {
 
 class Controller : public HasLifecycle<Controller, Config>,
                    HasTaskController<Controller, Config> {
-    friend class HasLifecycle<Controller>;
-    friend struct LifecycleContract<Controller>;
+    friend class HasLifecycle<Controller, Config>;
+    friend struct LifecycleContract<Controller, Config>;
 
     friend TaskController::TaskHooks;
     friend struct TaskController::TaskHooks::Contract<Controller>;
@@ -127,7 +127,7 @@ class Controller : public HasLifecycle<Controller, Config>,
     using DefaultError = CoreError;
 };
 
-inline constexpr LifecycleContract<Controller> _controller_lifecycle;
+inline constexpr LifecycleContract<Controller, Config> _controller_lifecycle;
 inline constexpr TaskControllerContract<Controller> _controller_task_controller;
 inline constexpr TaskController::TaskHooks::Contract<Controller>
     _controller_task_hook;

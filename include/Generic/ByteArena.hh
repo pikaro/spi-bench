@@ -13,7 +13,7 @@
 #include <span>
 
 template <class Derived, class T, typename Config>
-class ByteArena : public HasMutex<ByteArena<Derived, T, Config>> {
+class ByteArena : public HasMutex<Derived> {
     struct Slot {
         uint32_t timestampMs;
         T stored;

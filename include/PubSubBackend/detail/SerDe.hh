@@ -5,6 +5,9 @@
 #include "PubSubBackend/Interfaces/Wire.hh"
 #include "PubSubBackend/detail/Codec.hh"
 #include "Types/Error.hh"
+#ifdef BIT_MASK
+#undef BIT_MASK
+#endif
 #include "inc/CRC.h"
 #include <cstddef>
 #include <cstdint>

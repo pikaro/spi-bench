@@ -37,7 +37,9 @@ struct Platform {
     create(Storage<T, N> &storage) {
         auto *handle =
             xQueueCreateStatic(storage.queueLength, storage.itemSize,
-                               storage.buffer.data(), &storage.queueStruct);
+                               reinterpret_cast<uint8_t *>(
+                                   storage.buffer.data()),
+                               &storage._queueStruct);
         FAIL_IF_NULL(handle, std::unexpected(ERR(InvalidArgument)),
                      "Failed to create queue: depth and item size must be "
                      "greater than 0");

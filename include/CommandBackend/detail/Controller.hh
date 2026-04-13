@@ -3,6 +3,7 @@
 #include "Base/HasLifecycle.hh"
 #include "Base/HasTaskController.hh"
 #include "CommandBackend/Interfaces/Transport.hh"
+#include "CommandBackend/detail/Config.hh"
 #include "CommandBackend/detail/Dispatcher.hh"
 #include "CommandBackend/detail/Registrar.hh"
 #include "CommandBackend/detail/Store.hh"
@@ -16,8 +17,8 @@
 
 namespace Totem::CommandBackend::detail {
 
-class Controller : public HasLifecycle<Controller>,
-                   HasTaskController<Controller> {
+class Controller : public HasLifecycle<Controller, Config>,
+                   HasTaskController<Controller, Config> {
     friend class HasLifecycle<Controller>;
     friend struct LifecycleContract<Controller>;
 
@@ -52,7 +53,7 @@ class Controller : public HasLifecycle<Controller>,
     ReturnCode _onBegin() {
         auto taskHooks = TaskController::TaskHooks::bind(*this);
 
-        FAIL_IF_ERR_FWD(_beginTaskController(CommandConfig::task),
+        FAIL_IF_ERR_FWD(_beginTaskController(config().task),
                         "Failed to begin task controller for %s", name);
 
         auto taskAddResult = _taskController.addTask("CommandTask", taskHooks);
@@ -60,7 +61,7 @@ class Controller : public HasLifecycle<Controller>,
                            "Failed to add task to task controller for %s",
                            name);
 
-        FAIL_IF_ERR_FWD(_taskController.startTask(task, CommandConfig::task),
+        FAIL_IF_ERR_FWD(_taskController.startTask(task, config().task),
                         "Failed to start task in task controller for %s", name);
 
         return OK();

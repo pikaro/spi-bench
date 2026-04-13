@@ -3,8 +3,8 @@
 #include "Base/HasLifecycle.hh"
 #include "Base/HasTaskController.hh"
 #include "Macros/Facade.hh"
+#include "Output/Interfaces/Config.hh"
 #include "Output/Interfaces/Sink.hh"
-#include "Output/detail/Config.hh"
 #include "RingBuffer/Facade.hh"
 #include "StaticConfig/Logging.hh"
 #include "TaskController/Facade.hh"
@@ -58,7 +58,7 @@ class Aggregator : public HasLifecycle<Aggregator, AggregatorConfig>,
     ReturnCode _onBegin() {
         auto taskHooks = TaskController::TaskHooks::bind(*this);
 
-        FAIL_IF_ERR_FWD(_beginTaskController(LoggingConfig::task),
+        FAIL_IF_ERR_FWD(_beginTaskController(config().task),
                         "Failed to begin task controller for %s", name);
 
         auto taskAddResult =
@@ -73,7 +73,7 @@ class Aggregator : public HasLifecycle<Aggregator, AggregatorConfig>,
                            "Failed to create ring buffer for %s", name);
         _ringBuffer = ringBuffer;
 
-        FAIL_IF_ERR_FWD(_taskController.startTask(task, LoggingConfig::task),
+        FAIL_IF_ERR_FWD(_taskController.startTask(task, config().task),
                         "Failed to start task for %s", name);
 
         return OK();

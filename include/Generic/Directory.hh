@@ -123,9 +123,10 @@ class Directory : HasMutex<Directory<Entry, N, IdLen>> {
             return _withAllImpl(_entries, std::forward<decltype(fn_)>(fn_),
                                 filter_);
         };
+        auto fnRef = std::ref(fn);
+        auto filterRef = std::ref(filter);
         return this->_locked("Directory::withAll", ERR(Timeout), lambda,
-                             std::forward<Fn>(fn),
-                             std::forward<Filter>(filter));
+                             fnRef, filterRef);
     }
 
     template <typename Fn>
@@ -166,9 +167,10 @@ class Directory : HasMutex<Directory<Entry, N, IdLen>> {
             return _withAllImpl(_entries, std::forward<decltype(fn_)>(fn_),
                                 filter_);
         };
+        auto fnRef = std::cref(fn);
+        auto filterRef = std::cref(filter);
         return this->_lockedConst("Directory::withAllConst", ERR(Timeout),
-                                  lambda, std::forward<Fn>(fn),
-                                  std::forward<Filter>(filter));
+                                  lambda, fnRef, filterRef);
     }
 
     template <typename Filter>

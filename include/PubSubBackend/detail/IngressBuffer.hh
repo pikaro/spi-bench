@@ -28,6 +28,8 @@ class IngressBuffer
     using NodeId = typename Spec::NodeId;
 
   public:
+    static constexpr const char *name = "PubSub::IngressBuffer";
+
     std::expected<Envelope, ReturnCode>
     storeFrame(std::span<const std::byte> frame) {
         FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(

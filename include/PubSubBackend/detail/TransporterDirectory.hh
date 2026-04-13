@@ -9,6 +9,7 @@
 #include "magic_enum/magic_enum.hpp"
 #include <cstring>
 #include <expected>
+#include <string_view>
 
 namespace Totem::PubSubBackend::detail {
 
@@ -37,6 +38,14 @@ class TransporterDirectory : public TransporterDirectoryImpl {
                      "%s: Runner name cannot be null", this->ownerName());
         auto nameKey = EntryNameKey::fromCharPtr(transporterName);
         return add(transportId, nameKey, transporter);
+    }
+
+    std::expected<EntryNameKey, ReturnCode> add(TransportId transportId,
+                                                std::string_view transporterName,
+                                                Transporter transporter) {
+        FAIL_IF(transporterName.empty(), std::unexpected(ERR(InvalidArgument)),
+                "%s: Transporter name cannot be empty", this->ownerName());
+        return add(transportId, transporterName.data(), transporter);
     }
 
     std::expected<EntryNameKey, ReturnCode>
@@ -91,11 +100,12 @@ class TransporterDirectory : public TransporterDirectoryImpl {
         requires(std::is_invocable_r_v<ReturnCode, Fn, const EntryNameKey &,
                                        TransporterEntry &>)
     ReturnCode _withEntryId(TransportId transportId, Fn &&fn) {
-        return this->withAll(std::forward<Fn>(fn),
-                             [&transportId](const EntryNameKey & /*nameKey*/,
-                                            TransporterEntry &entry) {
+        auto fnRef = std::ref(fn);
+        auto filter = [&transportId](const EntryNameKey & /*nameKey*/,
+                                     const TransporterEntry &entry) {
                                  return entry.transportId == transportId;
-                             });
+                             };
+        return this->withAll(fnRef, std::move(filter));
     }
 
     using DefaultError = CoreError;

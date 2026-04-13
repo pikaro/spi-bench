@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Base/HasIdentity.hh"
 #include "Base/HasLifecycle.hh"
 #include "Base/HasTaskController.hh"
 #include "Macros/Facade.hh"
@@ -26,7 +27,9 @@
 
 namespace Totem::PubSubBackend::detail {
 
-class Node : public HasLifecycle<Node>, public HasTaskController<Node> {
+class Node : public HasIdentity<Node>,
+             public HasLifecycle<Node>,
+             public HasTaskController<Node> {
     friend class HasLifecycle<Node>;
     friend struct LifecycleContract<Node>;
     friend struct TaskController::TaskHooks::Contract<Node>;

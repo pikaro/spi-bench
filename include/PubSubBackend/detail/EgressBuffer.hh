@@ -20,6 +20,8 @@ class EgressBuffer : public ByteArena<EgressBuffer<Config>, Header, Config> {
     using NodeId = typename Spec::NodeId;
 
   public:
+    static constexpr const char *name = "PubSub::EgressBuffer";
+
     ReturnCode store(const Header &header, std::span<const std::byte> frame) {
         FAIL_IF(frame.size() != SerDe::encodedSize(header),
                 ERR(InvalidArgument), "Payload size does not match frame size");

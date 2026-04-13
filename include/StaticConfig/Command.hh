@@ -10,10 +10,4 @@ struct CommandConfig {
     static constexpr uint8_t maxTransports = 4;
     static constexpr uint8_t maxTokens = 10;
     static constexpr uint8_t maxLineLen = 128;
-
-    static constexpr Totem::TaskController::Config task{
-        .name = "Command",
-        .stackSize = 4096,
-        .intervalMs = 10,
-    };
 };

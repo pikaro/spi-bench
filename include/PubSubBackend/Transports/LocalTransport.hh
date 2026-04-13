@@ -20,19 +20,18 @@ struct LocalTransportDependencies {
     [[nodiscard]] bool valid() const { return base.valid(); }
 
     BaseTransportDependencies
-    toBaseDeps(void *ctx, SendCallback sendCallback = nullptr,
-               ReceiveCallback receiveCallback = nullptr) const {
-        auto deps = base;
-        if (deps.transport == nullptr) {
-            deps.transport = ctx;
+    withBaseDeps(void *ctx, SendCallback sendCallback = nullptr,
+                 ReceiveCallback receiveCallback = nullptr) {
+        if (this->base.transport == nullptr) {
+            this->base.transport = ctx;
         }
-        if (deps.sendCallback == nullptr) {
-            deps.sendCallback = sendCallback;
+        if (this->base.sendCallback == nullptr) {
+            this->base.sendCallback = sendCallback;
         }
-        if (deps.receiveCallback == nullptr) {
-            deps.receiveCallback = receiveCallback;
+        if (this->base.receiveCallback == nullptr) {
+            this->base.receiveCallback = receiveCallback;
         }
-        return deps;
+        return this->base;
     }
 };
 
@@ -47,7 +46,7 @@ class LocalTransport : public BaseTransport {
 
   public:
     explicit LocalTransport(LocalTransportDependencies deps)
-        : Base(deps.toBaseDeps(this, _sendCallback, _receiveCallback)) {
+        : Base(deps.withBaseDeps(this, _sendCallback, _receiveCallback)) {
         ABORT_IF_NOT(deps.valid(), "Invalid LocalTransport dependencies");
     }
 
@@ -87,6 +86,7 @@ class LocalTransport : public BaseTransport {
                             "Failed to destroy rxFrame queue");
             _rxFrameQueue = {};
         }
+        ret.combine(Base::_onEnd());
         return ret;
     }
 

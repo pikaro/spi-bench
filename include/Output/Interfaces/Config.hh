@@ -3,12 +3,13 @@
 #include "Macros/Facade.hh"
 #include "Platform/PlatformSelect.hh"
 #include "StaticConfig/Uart.hh"
+#include "TaskController/Interfaces/Config.hh"
 #include "Types/Logging.hh"
 #include <algorithm>
 #include <array>
 #include <cstddef>
 
-namespace Totem::Output::detail {
+namespace Totem::Output {
 
 struct AggregatorConfig {
     size_t ringBufferSize = 100;
@@ -19,6 +20,12 @@ struct AggregatorConfig {
     [[nodiscard]] bool validate() const {
         return ringBufferSize > 0 && sendTimeoutMs > 0;
     }
+
+    Totem::TaskController::Config task{
+        .name = "Output",
+        .stackSize = 4096,
+        .intervalMs = 10,
+    };
 };
 
 static constexpr auto supportedBaudRates = std::to_array<int>({
@@ -44,4 +51,4 @@ struct UartConfig {
     }
 };
 
-} // namespace Totem::Output::detail
+} // namespace Totem::Output

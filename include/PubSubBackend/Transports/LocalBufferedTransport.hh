@@ -25,9 +25,7 @@ class LocalBufferedTransport : public LocalTransport {
 
   public:
     explicit LocalBufferedTransport(LocalTransportDependencies deps)
-        : LocalTransport({.base = deps.toBaseDeps(this, _sendCallback)}) {
-        ABORT_IF_NOT(deps.valid(), "Invalid LocalTransport dependencies");
-    }
+        : LocalTransport({.base = deps.withBaseDeps(this, _sendCallback)}) {}
 
     static constexpr const char *name = "LocalBufferedTransport";
 
@@ -42,6 +40,12 @@ class LocalBufferedTransport : public LocalTransport {
     }
 
   private:
+    static ReturnCode _sendCallback(void *opaque, const Header &header,
+                                    std::span<const std::byte> frame) {
+        auto *self = static_cast<LocalBufferedTransport *>(opaque);
+        return self->_send(header, frame);
+    }
+
     ReturnCode _send(const Header &header, std::span<const std::byte> frame) {
         FAIL_IF_ERR_FWD(LocalTransport::_send(header, frame),
                         "Failed to send frame over LocalTransport");

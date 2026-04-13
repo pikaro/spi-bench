@@ -77,14 +77,14 @@ struct Transporter {
             .receiveHook = [](void *ptr, size_t maxCount = All) -> ReturnCode {
                 return static_cast<T *>(ptr)->receive(maxCount);
             },
+            .enqueueHook = [](void *ptr,
+                              FrameHandle frameHandle) -> ReturnCode {
+                return static_cast<T *>(ptr)->enqueue(frameHandle);
+            },
             // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
             .pollIntoHook = [](void *ptr, void *ctx,
                                PollIntoCallback callback) -> ReturnCode {
                 return static_cast<T *>(ptr)->pollInto(ctx, callback);
-            },
-            .enqueueHook = [](void *ptr,
-                              FrameHandle frameHandle) -> ReturnCode {
-                return static_cast<T *>(ptr)->enqueue(frameHandle);
             },
             .transportIdHook = [](void *ptr) -> TransportId {
                 return static_cast<T *>(ptr)->transportId();

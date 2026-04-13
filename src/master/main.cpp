@@ -27,27 +27,30 @@ Totem::TaskControllerRegistry::SystemTaskSource systemTaskSource(taskRegistry);
 Totem::Monitoring::Monitoring monitoring(taskRegistry);
 
 using PubSubNode = Totem::PubSubBackend::Node;
-PubSubNode pubSubNode(taskRegistry.hooks());
+PubSubNode pubSubNode1(taskRegistry.hooks());
+PubSubNode pubSubNode2(taskRegistry.hooks());
+
 Totem::PubSubBackend::Transports::LocalTransport testPubSub1({
     .base =
         {
-            .pubSubNode = static_cast<void *>(&pubSubNode),
+            .pubSubNode = static_cast<void *>(&pubSubNode1),
             .transportId =
                 static_cast<uint8_t>(NodeData::PubSub::Transport::SPI),
             .name = "SPI",
             .sendAckCallback = PubSubNode::ack,
-            .ingress = pubSubNode.ingress(),
+            .ingress = pubSubNode1.ingress(),
         },
 });
+
 Totem::PubSubBackend::Transports::LocalBufferedTransport testPubSub2({
     .base =
         {
-            .pubSubNode = static_cast<void *>(&pubSubNode),
+            .pubSubNode = static_cast<void *>(&pubSubNode2),
             .transportId =
                 static_cast<uint8_t>(NodeData::PubSub::Transport::WebSocket),
             .name = "WebSocket",
             .sendAckCallback = PubSubNode::ack,
-            .ingress = pubSubNode.ingress(),
+            .ingress = pubSubNode2.ingress(),
         },
 });
 
@@ -65,16 +68,23 @@ void setup() {
                  "Failed to add UART transport to command controller");
     CommandService::setBackend(commandController);
 
-    ABORT_IF_ERR_BEGIN(pubSubNode.begin());
+    ABORT_IF_ERR_BEGIN(pubSubNode1.begin());
+    ABORT_IF_ERR_BEGIN(pubSubNode2.begin({
+
+    }));
+
     ABORT_IF_ERR_BEGIN(testPubSub1.begin());
     ABORT_IF_ERR_BEGIN(testPubSub2.begin());
+
     ABORT_IF_ERR(testPubSub1.addLink(testPubSub2),
                  "Failed to link test PubSub transports together");
-    ABORT_IF_UNEXPECTED(testHandle1, pubSubNode.registerTransport(testPubSub1),
+
+    ABORT_IF_UNEXPECTED(testHandle1, pubSubNode1.registerTransport(testPubSub1),
                         "Failed to register local transport to PubSub node");
-    ABORT_IF_UNEXPECTED(testHandle2, pubSubNode.registerTransport(testPubSub2),
+    ABORT_IF_UNEXPECTED(testHandle2, pubSubNode2.registerTransport(testPubSub2),
                         "Failed to register local2 transport to PubSub node");
-    PubSubService::setBackend(pubSubNode);
+
+    PubSubService::setBackend(pubSubNode1);
 
     (void)testHandle1;
     (void)testHandle2;

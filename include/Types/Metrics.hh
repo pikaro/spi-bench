@@ -1,8 +1,7 @@
 #pragma once
 
 #include "Macros/Facade.hh"
-#include "StaticConfig/Metrics.hh"
-#include "Types/Collection.hh"
+#include "StaticConfig/Metrics.hh" // IWYU pragma: export
 #include "Types/Error.hh"
 #include "Types/Logging.hh"
 #include <cstdint>
@@ -66,10 +65,10 @@ struct MetricGroupDesc {
 };
 
 struct MetricDesc {
-    using MetricGroupNameKey = NameKey<MetricConfig::maxMetricGroupNameLength>;
+    using MetricGroupKey = uintptr_t;
 
     const char *name;
-    MetricGroupNameKey group;
+    MetricGroupKey group = 0;
     MetricType type = MetricType::Counter;
     MetricUnit unit = MetricUnit::None;
     bool clearOnRead = false;

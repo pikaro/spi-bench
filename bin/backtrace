@@ -1,5 +1,11 @@
 #!/bin/bash
 
+if [ -t 1 ]; then
+    COLOR=always
+else
+    COLOR=never
+fi
+
 FULL=0
 if [ "$1" = "-f" ]; then
     FULL=1
@@ -9,6 +15,11 @@ PIOENV="${1}"
 shift
 
 color() {
+    if [ "$COLOR" = "never" ]; then
+        shift
+        printf "$*"
+        return
+    fi
     local num
     case $1 in
     black) num=30 ;;
@@ -58,7 +69,10 @@ _repr_loc() {
 _repr_addr() {
     local ADDR="$1"
     echo "${ADDR}" |
-        bat --color=always --language='C++' --plain --paging=never
+        bat --color="${COLOR}" \
+            --language='C++' \
+            --plain \
+            --paging=never
 }
 
 echo

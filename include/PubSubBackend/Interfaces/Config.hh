@@ -1,12 +1,11 @@
 #pragma once
 
 #include "TaskController/Interfaces/Config.hh"
-
-namespace Totem::CommandBackend {
+namespace Totem::PubSubBackend {
 
 struct Config {
     Totem::TaskController::Config task{
-        .name = "Command",
+        .name = "PubSubNode",
         .stackSize = 8192,
         .intervalMs = 10,
     };
@@ -14,4 +13,4 @@ struct Config {
     [[nodiscard]] bool validate() const { return task.validate(); }
 };
 
-} // namespace Totem::CommandBackend
+} // namespace Totem::PubSubBackend

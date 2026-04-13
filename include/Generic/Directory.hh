@@ -8,24 +8,84 @@
 #include <array>
 #include <atomic>
 #include <concepts>
+#include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <expected>
 #include <functional>
 #include <optional>
+#include <string_view>
+#include <type_traits>
+
+inline std::string_view directory_string_view_or_empty(std::string_view value) {
+    return value;
+}
+
+inline std::string_view directory_string_view_or_empty(const char *value) {
+    return value != nullptr ? std::string_view{value} : std::string_view{};
+}
+
+template <typename Key, typename Entry> struct DirectoryRepresentation {
+    static std::string_view keyName(const Key &key) {
+        if constexpr (requires {
+                          {
+                              key.view()
+                          } -> std::convertible_to<std::string_view>;
+                      }) {
+            return key.view();
+        } else {
+            return "<entry>";
+        }
+    }
+
+    static std::string_view entryName(const Key &key, const Entry &entry) {
+        if constexpr (requires {
+                          {
+                              entry.displayName()
+                          } -> std::convertible_to<std::string_view>;
+                      }) {
+            auto name = entry.displayName();
+            if (!name.empty()) {
+                return name;
+            }
+        }
+
+        if constexpr (requires { entry.identity; }) {
+            if (entry.identity != nullptr && !entry.identity->name.empty()) {
+                return entry.identity->name;
+            }
+        }
+
+        if constexpr (requires { entry.displayName; }) {
+            auto name = directory_string_view_or_empty(entry.displayName);
+            if (!name.empty()) {
+                return name;
+            }
+        }
+
+        if constexpr (requires { entry.name; }) {
+            auto name = directory_string_view_or_empty(entry.name);
+            if (!name.empty()) {
+                return name;
+            }
+        }
+
+        return keyName(key);
+    }
+};
 
 template <typename Entry> struct DirectoryHooks {
     void *self = nullptr;
 
-    ReturnCode (*beforeAddHook)(void *, const char *, const Entry &) = nullptr;
-    ReturnCode (*beforeRemoveHook)(void *, const char *,
+    ReturnCode (*beforeAddHook)(void *, std::string_view,
+                                const Entry &) = nullptr;
+    ReturnCode (*beforeRemoveHook)(void *, std::string_view,
                                    const Entry &) = nullptr;
 
-    ReturnCode onBeforeAdd(const char *name, const Entry &entry) const {
+    ReturnCode onBeforeAdd(std::string_view name, const Entry &entry) const {
         return (beforeAddHook != nullptr) ? beforeAddHook(self, name, entry)
                                           : OK(CoreError);
     }
-    ReturnCode onBeforeRemove(const char *name, const Entry &entry) const {
+    ReturnCode onBeforeRemove(std::string_view name, const Entry &entry) const {
         return (beforeRemoveHook != nullptr)
                    ? beforeRemoveHook(self, name, entry)
                    : OK(CoreError);
@@ -38,8 +98,9 @@ template <typename Entry> struct DirectoryHooks {
     }
 };
 
-template <typename Entry, size_t N, size_t IdLen = 32>
-class Directory : HasMutex<Directory<Entry, N, IdLen>> {
+template <typename Key, typename Entry, size_t N,
+          class Representation = DirectoryRepresentation<Key, Entry>>
+class Directory : HasMutex<Directory<Key, Entry, N, Representation>> {
     static_assert(std::is_nothrow_move_constructible_v<Entry>,
                   "Directory entries must be nothrow move constructible");
     static_assert(std::is_nothrow_move_assignable_v<Entry>,
@@ -47,16 +108,14 @@ class Directory : HasMutex<Directory<Entry, N, IdLen>> {
     static_assert(std::is_default_constructible_v<Entry>,
                   "Directory entries must be default constructible");
     static_assert(std::movable<Entry>, "Directory entries must be movable");
-
-    static_assert(IdLen > 0, "IdLen must be greater than 0");
     static_assert(N > 0, "Directory size N must be greater than 0");
 
   public:
     static constexpr const char *name = "Directory";
 
-    using EntryNameKey = NameKey<IdLen>;
+    using EntryKey = Key;
 
-    using EntryKeyArray = std::array<EntryNameKey, N>;
+    using EntryKeyArray = std::array<EntryKey, N>;
     using EntryArray = std::array<Entry, N>;
 
     struct EntryKeySnapshot {
@@ -69,7 +128,7 @@ class Directory : HasMutex<Directory<Entry, N, IdLen>> {
         size_t count = 0;
     };
 
-    using SlottedMapType = SlottedMap<Entry, N, IdLen>;
+    using SlottedMapType = SlottedMap<EntryKey, Entry, N>;
 
     explicit Directory(const char *ownerName) : _ownerName(ownerName) {}
 
@@ -86,38 +145,38 @@ class Directory : HasMutex<Directory<Entry, N, IdLen>> {
     }
 
     template <typename Fn>
-    ReturnCode withEntry(const char *entryName, Fn &&fn) {
+    ReturnCode withEntry(const char *entryName, Fn &&fn)
+        requires requires { EntryKey::fromCharPtr(entryName); }
+    {
         FAIL_IF_NULL(entryName, ERR(InvalidArgument),
                      "Entry name for %s cannot be null", _ownerName);
-        return withEntry(EntryNameKey::fromCharPtr(entryName),
+        return withEntry(EntryKey::fromCharPtr(entryName),
                          std::forward<Fn>(fn));
     }
 
     template <typename Fn>
         requires(std::is_invocable_r_v<ReturnCode, Fn, Entry &>)
-    ReturnCode withEntry(const EntryNameKey &entryNameKey, Fn &&fn) {
-        auto nameKeyCref = std::cref(entryNameKey);
-        auto lambda = [this](const EntryNameKey &nameKey_,
-                             auto &&fn_) -> ReturnCode {
-            return _withEntryImpl(_entries, nameKey_,
+    ReturnCode withEntry(const EntryKey &entryKey, Fn &&fn) {
+        auto keyCref = std::cref(entryKey);
+        auto lambda = [this](const EntryKey &key_, auto &&fn_) -> ReturnCode {
+            return _withEntryImpl(_entries, key_,
                                   std::forward<decltype(fn_)>(fn_));
         };
         return this->_locked("Directory::withEntry", ERR(Timeout), lambda,
-                             nameKeyCref, std::forward<Fn>(fn));
+                             keyCref, std::forward<Fn>(fn));
     }
 
     template <typename Fn>
-        requires(std::is_invocable_r_v<ReturnCode, Fn, const EntryNameKey &,
-                                       Entry &>)
+        requires(
+            std::is_invocable_r_v<ReturnCode, Fn, const EntryKey &, Entry &>)
     ReturnCode withAll(Fn &&fn) {
-        return withAll(
-            std::forward<Fn>(fn),
-            [](const EntryNameKey &, const Entry &) { return true; });
+        return withAll(std::forward<Fn>(fn),
+                       [](const EntryKey &, const Entry &) { return true; });
     }
 
     template <typename Fn, typename Filter>
-        requires(std::is_invocable_r_v<ReturnCode, Fn, const EntryNameKey &,
-                                       Entry &>)
+        requires(
+            std::is_invocable_r_v<ReturnCode, Fn, const EntryKey &, Entry &>)
     ReturnCode withAll(Fn &&fn, Filter &&filter) {
         auto lambda = [this](auto &&fn_, auto &&filter_) -> ReturnCode {
             return _withAllImpl(_entries, std::forward<decltype(fn_)>(fn_),
@@ -125,42 +184,43 @@ class Directory : HasMutex<Directory<Entry, N, IdLen>> {
         };
         auto fnRef = std::ref(fn);
         auto filterRef = std::ref(filter);
-        return this->_locked("Directory::withAll", ERR(Timeout), lambda,
-                             fnRef, filterRef);
+        return this->_locked("Directory::withAll", ERR(Timeout), lambda, fnRef,
+                             filterRef);
     }
 
     template <typename Fn>
-    ReturnCode withEntryConst(const char *entryName, Fn &&fn) const {
+    ReturnCode withEntryConst(const char *entryName, Fn &&fn) const
+        requires requires { EntryKey::fromCharPtr(entryName); }
+    {
         FAIL_IF_NULL(entryName, ERR(InvalidArgument),
                      "Entry name for %s cannot be null", _ownerName);
-        return withEntryConst(EntryNameKey::fromCharPtr(entryName),
+        return withEntryConst(EntryKey::fromCharPtr(entryName),
                               std::forward<Fn>(fn));
     }
 
     template <typename Fn>
         requires(std::is_invocable_r_v<ReturnCode, Fn, const Entry &>)
-    ReturnCode withEntryConst(const EntryNameKey &nameKey, Fn &&fn) const {
-        auto nameKeyCref = std::cref(nameKey);
-        auto lambda = [this](const EntryNameKey &nameKey_,
-                             auto &&fn_) -> ReturnCode {
-            return _withEntryImpl(_entries, nameKey_,
+    ReturnCode withEntryConst(const EntryKey &entryKey, Fn &&fn) const {
+        auto keyCref = std::cref(entryKey);
+        auto lambda = [this](const EntryKey &key_, auto &&fn_) -> ReturnCode {
+            return _withEntryImpl(_entries, key_,
                                   std::forward<decltype(fn_)>(fn_));
         };
         return this->_lockedConst("Directory::withEntryConst", ERR(Timeout),
-                                  lambda, nameKeyCref, std::forward<Fn>(fn));
+                                  lambda, keyCref, std::forward<Fn>(fn));
     }
 
     template <typename Fn>
-        requires(std::is_invocable_r_v<ReturnCode, Fn, const EntryNameKey &,
+        requires(std::is_invocable_r_v<ReturnCode, Fn, const EntryKey &,
                                        const Entry &>)
     ReturnCode withAllConst(Fn &&fn) const {
         return withAllConst(
             std::forward<Fn>(fn),
-            [](const EntryNameKey &, const Entry &) { return true; });
+            [](const EntryKey &, const Entry &) { return true; });
     }
 
     template <typename Fn, typename Filter>
-        requires(std::is_invocable_r_v<ReturnCode, Fn, const EntryNameKey &,
+        requires(std::is_invocable_r_v<ReturnCode, Fn, const EntryKey &,
                                        const Entry &>)
     ReturnCode withAllConst(Fn &&fn, Filter &&filter) const {
         auto lambda = [this](auto &&fn_, auto &&filter_) -> ReturnCode {
@@ -174,49 +234,54 @@ class Directory : HasMutex<Directory<Entry, N, IdLen>> {
     }
 
     template <typename Filter>
-        requires(std::is_invocable_r_v<bool, Filter, const EntryNameKey &,
+        requires(std::is_invocable_r_v<bool, Filter, const EntryKey &,
                                        const Entry &>)
     [[nodiscard]] bool any(Filter &&filter) const {
+        bool found = false;
         auto ret = withAllConst(
-            [](const EntryNameKey & /*unused*/,
-               const Entry & /*unused*/) -> ReturnCode { return OK(); },
+            [&found](const EntryKey &, const Entry &) -> ReturnCode {
+                found = true;
+                return OK();
+            },
             filter);
-        return ret.ok();
+        return ret.ok() && found;
     }
 
-    std::expected<Entry, ReturnCode> extractOne(const char *entryName) {
+    std::expected<Entry, ReturnCode> extractOne(const char *entryName)
+        requires requires { EntryKey::fromCharPtr(entryName); }
+    {
         FAIL_IF_NULL(entryName, std::unexpected(ERR(InvalidArgument)),
                      "Entry name for %s cannot be null", _ownerName);
-        return extractOne(EntryNameKey::fromCharPtr(entryName));
+        return extractOne(EntryKey::fromCharPtr(entryName));
     }
 
-    std::expected<Entry, ReturnCode> extractOne(const EntryNameKey &nameKey) {
-        auto nameKeyCref = std::cref(nameKey);
+    std::expected<Entry, ReturnCode> extractOne(const EntryKey &entryKey) {
+        auto keyCref = std::cref(entryKey);
         std::optional<Entry> out;
 
-        auto lambda = [this](const EntryNameKey &nameKey_,
+        auto lambda = [this](const EntryKey &key_,
                              std::optional<Entry> &out_) -> ReturnCode {
-            auto ret = _entries.extract(nameKey_);
+            auto ret = _entries.extract(key_);
             FAIL_IF_UNEXPECTED(item, ret, ret.error(),
-                               "Failed to extract directory entry %s->%s",
-                               _ownerName, nameKey_.name.data());
+                               "Failed to extract directory entry %s->" SV_FMT,
+                               _ownerName, SV_ARG(_keyName(key_)));
             out_.emplace(std::move(item));
             return OK();
         };
 
         auto ret = this->_locked("Directory::extract", ERR(Timeout), lambda,
-                                 nameKeyCref, std::ref(out));
+                                 keyCref, std::ref(out));
         FAIL_IF_ERR(ret, std::unexpected(ret),
-                    "Failed to extract directory entry %s->%s", _ownerName,
-                    nameKey.name.data());
+                    "Failed to extract directory entry %s->" SV_FMT, _ownerName,
+                    SV_ARG(_keyName(entryKey)));
         FAIL_IF(!out.has_value(), std::unexpected(ERR(NotFound)),
-                "Directory entry %s->%s not found for extraction", _ownerName,
-                nameKey.name.data());
+                "Directory entry %s->" SV_FMT " not found for extraction",
+                _ownerName, SV_ARG(_keyName(entryKey)));
         return std::move(*out);
     }
 
     template <typename Filter>
-        requires(std::is_invocable_r_v<bool, Filter, const EntryNameKey &,
+        requires(std::is_invocable_r_v<bool, Filter, const EntryKey &,
                                        const Entry &>)
     std::expected<EntryExtract, ReturnCode> extract(Filter filter) {
         EntryExtract out{};
@@ -225,10 +290,10 @@ class Directory : HasMutex<Directory<Entry, N, IdLen>> {
             EntryKeySnapshot snap{};
 
             auto snapRet = _entries.forEach(
-                [&snap, &filter](const EntryNameKey &nameKey_,
+                [&snap, &filter](const EntryKey &key_,
                                  const Entry &entry_) -> ReturnCode {
-                    if (std::invoke(filter, nameKey_, entry_)) {
-                        snap.keys[snap.count++] = nameKey_;
+                    if (std::invoke(filter, key_, entry_)) {
+                        snap.keys[snap.count++] = key_;
                     }
                     return OK();
                 });
@@ -239,9 +304,9 @@ class Directory : HasMutex<Directory<Entry, N, IdLen>> {
             for (size_t i = 0; i < snap.count; ++i) {
                 auto extractRet = _entries.extract(snap.keys[i]);
                 FAIL_IF(!extractRet, extractRet.error(),
-                        "Failed to extract directory entry %s->%s "
-                        "during filtered extract",
-                        _ownerName, snap.keys[i].name.data());
+                        "Failed to extract directory entry %s->" SV_FMT
+                        " during filtered extract",
+                        _ownerName, SV_ARG(_keyName(snap.keys[i])));
                 out.entries[out.count++] = std::move(extractRet.value());
             }
 
@@ -255,29 +320,32 @@ class Directory : HasMutex<Directory<Entry, N, IdLen>> {
         return out;
     }
 
-    ReturnCode remove(const char *entryName) {
+    ReturnCode remove(const char *entryName)
+        requires requires { EntryKey::fromCharPtr(entryName); }
+    {
         FAIL_IF_NULL(entryName, ERR(InvalidArgument),
                      "Entry name for %s cannot be null", _ownerName);
-        return remove(EntryNameKey::fromCharPtr(entryName));
+        return remove(EntryKey::fromCharPtr(entryName));
     }
 
-    ReturnCode remove(const EntryNameKey &nameKey) {
-        auto nameKeyCref = std::cref(nameKey);
-        auto lambda = [this](const EntryNameKey &nameKey_) -> ReturnCode {
-            auto ret = _entries.get(nameKey_);
-            FAIL_IF_UNEXPECTED(
-                item, ret, ret.error(),
-                "Failed to get directory entry %s->%s for removal", _ownerName,
-                nameKey_.name.data());
-            FAIL_IF_ERR(_hooks.onBeforeRemove(nameKey_.name.data(), item.get()),
+    ReturnCode remove(const EntryKey &entryKey) {
+        auto keyCref = std::cref(entryKey);
+        auto lambda = [this](const EntryKey &key_) -> ReturnCode {
+            auto ret = _entries.get(key_);
+            FAIL_IF_UNEXPECTED(item, ret, ret.error(),
+                               "Failed to get directory entry %s->" SV_FMT
+                               " for removal",
+                               _ownerName, SV_ARG(_keyName(key_)));
+            auto displayName = _entryName(key_, item.get());
+            FAIL_IF_ERR(_hooks.onBeforeRemove(displayName, item.get()),
                         ERR(OperationFailed),
-                        "BeforeRemove hook failed for %s->%s during removal",
-                        _ownerName, nameKey_.name.data());
-            return _entries.remove(nameKey_);
+                        "BeforeRemove hook failed for %s->" SV_FMT, _ownerName,
+                        SV_ARG(displayName));
+            return _entries.remove(key_);
         };
 
         return this->_locked("Directory::remove", ERR(Timeout), lambda,
-                             nameKeyCref);
+                             keyCref);
     }
 
     [[nodiscard]] std::expected<bool, ReturnCode> empty() const {
@@ -308,25 +376,26 @@ class Directory : HasMutex<Directory<Entry, N, IdLen>> {
     }
 
     [[nodiscard]] std::expected<bool, ReturnCode>
-    contains(const char *entryName) const {
+    contains(const char *entryName) const
+        requires requires { EntryKey::fromCharPtr(entryName); }
+    {
         FAIL_IF_NULL(entryName, std::unexpected(ERR(InvalidArgument)),
                      "Entry name for %s cannot be null", _ownerName);
-        return contains(EntryNameKey::fromCharPtr(entryName));
+        return contains(EntryKey::fromCharPtr(entryName));
     }
 
     [[nodiscard]] std::expected<bool, ReturnCode>
-    contains(const EntryNameKey &nameKey) const {
+    contains(const EntryKey &entryKey) const {
         enum class Result_ : uint8_t { Timeout, NotFound, Found };
-        auto nameKeyCref = std::cref(nameKey);
-        auto lambda = [this](const EntryNameKey &nameKey_) -> Result_ {
-            return _entries.contains(nameKey_) ? Result_::Found
-                                               : Result_::NotFound;
+        auto keyCref = std::cref(entryKey);
+        auto lambda = [this](const EntryKey &key_) -> Result_ {
+            return _entries.contains(key_) ? Result_::Found : Result_::NotFound;
         };
         auto ret = this->_lockedConst("Directory::contains", Result_::Timeout,
-                                      lambda, nameKeyCref);
+                                      lambda, keyCref);
         FAIL_IF(ret == Result_::Timeout, std::unexpected(ERR(Timeout)),
-                "Failed to check if directory for %s contains %s", _ownerName,
-                nameKey.name.data());
+                "Failed to check if directory for %s contains " SV_FMT,
+                _ownerName, SV_ARG(_keyName(entryKey)));
         return ret == Result_::Found;
     }
 
@@ -337,12 +406,12 @@ class Directory : HasMutex<Directory<Entry, N, IdLen>> {
     [[nodiscard]] std::expected<EntryKeySnapshot, ReturnCode>
     snapshotKeys() const {
         return snapshotKeys(
-            [](const EntryNameKey &, const Entry &) { return true; });
+            [](const EntryKey &, const Entry &) { return true; });
     }
 
     template <typename Fn>
-        requires(std::is_invocable_r_v<bool, Fn, const EntryNameKey &,
-                                       const Entry &>)
+        requires(
+            std::is_invocable_r_v<bool, Fn, const EntryKey &, const Entry &>)
     [[nodiscard]] std::expected<EntryKeySnapshot, ReturnCode>
     snapshotKeys(Fn &&filter) const {
         EntryKeySnapshot out{};
@@ -366,40 +435,42 @@ class Directory : HasMutex<Directory<Entry, N, IdLen>> {
         _hooks = hooks;
     }
 
-    std::expected<EntryNameKey, ReturnCode>
-    _addImpl(const EntryNameKey &entryNameKey, Entry entry) {
-        auto nameKeyCref = std::cref(entryNameKey);
-        auto lambda = [this](const EntryNameKey &nameKey_,
+    std::expected<EntryKey, ReturnCode> _addImpl(const EntryKey &entryKey,
+                                                 Entry entry) {
+        auto keyCref = std::cref(entryKey);
+        auto lambda = [this](const EntryKey &key_,
                              Entry &entry_) -> ReturnCode {
             FAIL_IF(!_permitRegistration.load(std::memory_order_acquire),
                     ERR(LifecycleError, InvalidState),
                     "%s: Registration is currently not permitted", _ownerName);
-            FAIL_IF_ERR(_hooks.onBeforeAdd(nameKey_.name.data(), entry_),
+            auto displayName = _entryName(key_, entry_);
+            FAIL_IF_ERR(_hooks.onBeforeAdd(displayName, entry_),
                         ERR(OperationFailed),
-                        "BeforeAdd hook failed for %s->%s", _ownerName,
-                        nameKey_.name.data());
-            auto ret = _entries.insert(nameKey_, std::move(entry_));
-            FAIL_IF_ERR(ret, ret, "Failed to add directory entry %s->%s for %s",
-                        _ownerName, nameKey_.name.data(), _ownerName);
+                        "BeforeAdd hook failed for %s->" SV_FMT, _ownerName,
+                        SV_ARG(displayName));
+            auto ret = _entries.insert(key_, std::move(entry_));
+            FAIL_IF_ERR(ret, ret,
+                        "Failed to add directory entry %s->" SV_FMT " for %s",
+                        _ownerName, SV_ARG(displayName), _ownerName);
             return OK();
         };
         auto ret = this->_locked("Directory::add", ERR(Timeout), lambda,
-                                 nameKeyCref, std::ref(entry));
-        FAIL_IF_ERR(ret, std::unexpected(ret), "Error adding entry %s->%s",
-                    _ownerName, entryNameKey.name.data());
-        return entryNameKey;
+                                 keyCref, std::ref(entry));
+        FAIL_IF_ERR(ret, std::unexpected(ret), "Error adding entry %s->" SV_FMT,
+                    _ownerName, SV_ARG(_entryName(entryKey, entry)));
+        return entryKey;
     }
 
     template <typename MapT, typename Filter>
     static void _snapshotKeysImpl(EntryKeySnapshot &snap, const MapT &entries,
                                   Filter &&filter)
-        requires(std::is_invocable_r_v<bool, Filter, const EntryNameKey &,
+        requires(std::is_invocable_r_v<bool, Filter, const EntryKey &,
                                        const Entry &>)
     {
-        auto lambda = [&snap, &filter](const EntryNameKey &nameKey_,
+        auto lambda = [&snap, &filter](const EntryKey &key_,
                                        const Entry &entry_) -> ReturnCode {
-            if (std::invoke(filter, nameKey_, entry_)) {
-                snap.keys[snap.count++] = nameKey_;
+            if (std::invoke(filter, key_, entry_)) {
+                snap.keys[snap.count++] = key_;
             }
             return OK();
         };
@@ -407,17 +478,17 @@ class Directory : HasMutex<Directory<Entry, N, IdLen>> {
     }
 
     template <typename MapT, typename Fn>
-    static ReturnCode _withEntryImpl(MapT &entries, const EntryNameKey &nameKey,
+    static ReturnCode _withEntryImpl(MapT &entries, const EntryKey &key,
                                      Fn &&fn) {
-        auto ret = entries.get(nameKey);
+        auto ret = entries.get(key);
         FAIL_IF_UNEXPECTED(item, ret, ret.error(),
-                           "Directory entry %s not found for withEntry",
-                           nameKey.name.data());
+                           "Directory entry " SV_FMT " not found for withEntry",
+                           SV_ARG(_keyName(key)));
         return std::invoke(std::forward<Fn>(fn), item.get());
     }
 
     template <typename MapT, typename Fn, typename Filter>
-        requires(std::is_invocable_r_v<bool, Filter, const EntryNameKey &,
+        requires(std::is_invocable_r_v<bool, Filter, const EntryKey &,
                                        const Entry &>)
     static ReturnCode _withAllImpl(MapT &entries, Fn &&fn, Filter &&filter) {
         auto result = OK();
@@ -428,8 +499,8 @@ class Directory : HasMutex<Directory<Entry, N, IdLen>> {
             auto key = snap.keys[i];
             auto ret = entries.get(key);
             if (!ret.has_value()) {
-                _log_w("Entry %s disappeared during withAll iteration",
-                       key.name.data());
+                _log_w("Entry " SV_FMT " disappeared during withAll iteration",
+                       SV_ARG(_keyName(key)));
                 continue;
             }
 
@@ -437,12 +508,22 @@ class Directory : HasMutex<Directory<Entry, N, IdLen>> {
             auto fnRet = std::invoke(fn, key, entry);
             if (!fnRet.ok()) {
                 result = fnRet;
-                _log_e("Error while iterating directory entry %s: " ERR_FMT,
-                       key.name.data(), ERR_ARG(fnRet));
+                _log_e("Error while iterating directory entry " SV_FMT
+                       ": " ERR_FMT,
+                       SV_ARG(_entryName(key, entry)), ERR_ARG(fnRet));
             }
         }
 
         return result;
+    }
+
+    [[nodiscard]] static std::string_view _keyName(const EntryKey &key) {
+        return Representation::keyName(key);
+    }
+
+    [[nodiscard]] static std::string_view _entryName(const EntryKey &key,
+                                                     const Entry &entry) {
+        return Representation::entryName(key, entry);
     }
 
     std::atomic<bool> _permitRegistration{false};
@@ -453,15 +534,16 @@ class Directory : HasMutex<Directory<Entry, N, IdLen>> {
     using DefaultError = CoreError;
 };
 
-template <typename Entry, size_t N, size_t IdLen = 32>
-class GettableDirectory : public Directory<Entry, N, IdLen> {
+template <typename Key, typename Entry, size_t N,
+          class Representation = DirectoryRepresentation<Key, Entry>>
+class GettableDirectory : public Directory<Key, Entry, N, Representation> {
   public:
-    using Base = Directory<Entry, N, IdLen>;
-    using typename Base::EntryNameKey;
+    using Base = Directory<Key, Entry, N, Representation>;
+    using typename Base::EntryKey;
 
     using Base::Base;
 
-    std::expected<Entry, ReturnCode> getCopy(const EntryNameKey &key) const
+    std::expected<Entry, ReturnCode> getCopy(const EntryKey &key) const
         requires(std::copy_constructible<Entry>)
     {
         std::optional<Entry> out;
@@ -485,4 +567,5 @@ class GettableDirectory : public Directory<Entry, N, IdLen> {
     using DefaultError = CoreError;
 };
 
-inline constexpr MutexContract<Directory<void *, 1>> directory_mutex_contract;
+inline constexpr MutexContract<Directory<void *, void *, 1>>
+    directory_mutex_contract;

@@ -113,15 +113,15 @@ class SubscriptionManager {
     }
 
     ReturnCode handlePubSubEvent(
-        const Envelope &request,
+        const Envelope &envelope,
         std::optional<TransportId> ingressTransport = std::nullopt) {
-        auto topic = static_cast<Topic>(request.header.topic);
+        auto topic = static_cast<Topic>(envelope.header.topic);
         FAIL_IF(topic != Topic::PubSub, ERR(InvalidArgument),
                 "Received non-PubSub event in PubSub event handler");
         FAIL_IF_UNEXPECTED_FWD(
-            event, request.getPayloadAs<PubSubEvent>(),
+            event, envelope.getPayloadAs<PubSubEvent>(),
             "Failed to get PubSub event from pool for message ID %u",
-            request.header.messageId);
+            envelope.header.messageId);
         return handlePubSubEvent(event, ingressTransport);
     }
 

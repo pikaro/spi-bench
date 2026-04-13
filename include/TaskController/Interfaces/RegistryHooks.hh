@@ -9,15 +9,14 @@ namespace Totem::TaskController {
 
 template <class T>
 concept HasRegisterSource =
-    requires(T &cls, const char *name,
+    requires(T &cls, uintptr_t key,
              TaskControllerRegistry::TaskSourceHooks hooks,
              TaskControllerRegistry::TaskSourceInfo info) {
-        { cls.registerSource(name, hooks, info) } -> std::same_as<ReturnCode>;
+        { cls.registerSource(key, hooks, info) } -> std::same_as<ReturnCode>;
     };
 
-template <class T>
-concept HasDeregisterSource = requires(T &cls, const char *name) {
-    { cls.deregisterSource(name) } -> std::same_as<ReturnCode>;
+template <class T> concept HasDeregisterSource = requires(T &cls, uintptr_t key) {
+    { cls.deregisterSource(key) } -> std::same_as<ReturnCode>;
 };
 
 struct RegistryHooks {
@@ -35,18 +34,18 @@ struct RegistryHooks {
 
     // All required
     ReturnCode (*registerHook)(
-        void *, const char *, TaskControllerRegistry::TaskSourceHooks,
+        void *, uintptr_t, TaskControllerRegistry::TaskSourceHooks,
         TaskControllerRegistry::TaskSourceInfo) = nullptr;
-    ReturnCode (*deregisterHook)(void *, const char *) = nullptr;
+    ReturnCode (*deregisterHook)(void *, uintptr_t) = nullptr;
 
     ReturnCode
-    registerSource(const char *sourceName,
+    registerSource(uintptr_t sourceKey,
                    TaskControllerRegistry::TaskSourceHooks hooks,
                    TaskControllerRegistry::TaskSourceInfo info) const {
-        return registerHook(self, sourceName, hooks, info);
+        return registerHook(self, sourceKey, hooks, info);
     }
-    ReturnCode deregisterSource(const char *sourceName) const {
-        return deregisterHook(self, sourceName);
+    ReturnCode deregisterSource(uintptr_t sourceKey) const {
+        return deregisterHook(self, sourceKey);
     }
 
     template <class T>
@@ -55,13 +54,13 @@ struct RegistryHooks {
         return RegistryHooks{
             .self = std::addressof(obj),
             .registerHook =
-                [](void *ptr, const char *name,
+                [](void *ptr, uintptr_t key,
                    TaskControllerRegistry::TaskSourceHooks hooks,
                    TaskControllerRegistry::TaskSourceInfo info) -> ReturnCode {
-                return static_cast<T *>(ptr)->registerSource(name, hooks, info);
+                return static_cast<T *>(ptr)->registerSource(key, hooks, info);
             },
-            .deregisterHook = [](void *ptr, const char *name) -> ReturnCode {
-                return static_cast<T *>(ptr)->deregisterSource(name);
+            .deregisterHook = [](void *ptr, uintptr_t key) -> ReturnCode {
+                return static_cast<T *>(ptr)->deregisterSource(key);
             },
         };
     }

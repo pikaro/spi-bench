@@ -1,9 +1,9 @@
 #pragma once
 
-#include "Base/HasIdentity.hh"
 #include "Base/HasLifecycle.hh"
 #include "Base/HasTaskController.hh"
 #include "Macros/Facade.hh"
+#include "PubSubBackend/Interfaces/Config.hh"
 #include "PubSubBackend/Interfaces/Envelope.hh"
 #include "PubSubBackend/Interfaces/Subscriber.hh"
 #include "PubSubBackend/Interfaces/Types.hh"
@@ -27,21 +27,25 @@
 
 namespace Totem::PubSubBackend::detail {
 
-class Node : // public HasIdentity<Node>,
-             public HasLifecycle<Node>,
-             public HasTaskController<Node> {
-    friend class HasLifecycle<Node>;
-    friend struct LifecycleContract<Node>;
+class Node : public HasLifecycle<Node, Config>,
+             public HasTaskController<Node, Config> {
+    friend class HasLifecycle<Node, Config>;
+    friend struct LifecycleContract<Node, Config>;
+
+    friend TaskController::TaskHooks;
     friend struct TaskController::TaskHooks::Contract<Node>;
 
-    using TransporterNameKey = TransporterDirectory::EntryNameKey;
-    using SubscriberNameKey = SubscriberDirectory::EntryNameKey;
+    using TransporterKey = TransporterDirectory::EntryKey;
+    using SubscriberKey = SubscriberDirectory::EntryKey;
 
     using Transport = typename Spec::Transport;
 
   public:
     explicit Node(TaskController::RegistryHooks registryHooks)
-        : HasTaskController<Node>(registryHooks) {}
+        : HasTaskController<Node, Config>(registryHooks) {
+        _transporters.enableRegistration();
+        _subscribers.enableRegistration();
+    }
 
     DELETE_COPY(Node)
     DELETE_MOVE(Node)
@@ -52,23 +56,22 @@ class Node : // public HasIdentity<Node>,
 
     template <class T>
         requires requires { sizeof(Transporter::Contract<T>); }
-    std::expected<TransporterNameKey, ReturnCode>
-    registerTransport(T &transport) {
+    std::expected<TransporterKey, ReturnCode> registerTransport(T &transport) {
         auto transporter = Transporter::bind(transport);
         return _transporters.add(transport.transportId(),
                                  transport.instanceName(), transporter);
     }
 
-    ReturnCode deregisterTransport(TransporterNameKey transportNameKey) {
-        return _transporters.remove(transportNameKey);
+    ReturnCode deregisterTransport(TransporterKey transportKey) {
+        return _transporters.remove(transportKey);
     }
 
-    std::expected<SubscriberNameKey, ReturnCode>
-    subscribe(const char *subscriberName,
-              const SubscriberCallback &subscriberCallback, Topic topic) {
+    std::expected<SubscriberKey, ReturnCode>
+    subscribe(const char *subscriberName, const Subscriber &subscriber,
+              Topic topic) {
         FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
             subscriberNameKey,
-            _subscribers.add(subscriberName, subscriberCallback,
+            _subscribers.add(subscriberName, subscriber,
                              static_cast<TopicId>(topic)),
             "Failed to add subscriber %s for topic " SV_FMT, subscriberName,
             SV_ARG(magic_enum::enum_name(topic)));
@@ -80,35 +83,35 @@ class Node : // public HasIdentity<Node>,
         return subscriberNameKey;
     }
 
-    ReturnCode unsubscribe(SubscriberNameKey subscriberNameKey) {
-        auto topicResult = _subscribers.topicForSubscriber(subscriberNameKey);
-        FAIL_IF_UNEXPECTED_FWD(
-            topic, topicResult, "Failed to get topic for subscriber %s->%s",
-            _subscribers.ownerName(), subscriberNameKey.name.data());
+    ReturnCode unsubscribe(SubscriberKey subscriberKey) {
+        auto topicResult = _subscribers.topicForSubscriber(subscriberKey);
+        FAIL_IF_UNEXPECTED_FWD(topic, topicResult,
+                               "Failed to get topic for subscriber in %s",
+                               _subscribers.ownerName());
         FAIL_IF_ERR_FWD(
             _subscriptionManager.deregisterSubscription(topic),
             "Failed to deregister subscription for topic " SV_FMT,
             SV_ARG(magic_enum::enum_name(static_cast<Topic>(topic))));
-        return _subscribers.remove(subscriberNameKey);
+        return _subscribers.remove(subscriberKey);
     }
 
-    ReturnCode publish(const Envelope &req) {
-        FAIL_IF_ERR_FWD(Totem::Queue::Platform::send(_publishQueue, &req),
-                        "Failed to enqueue publish request for topic " SV_FMT,
-                        MAGIC_SV_ARG(Topic, req.header.topic));
+    ReturnCode publish(const Envelope &envelope) {
+        FAIL_IF_ERR_FWD(Totem::Queue::Platform::send(_publishQueue, &envelope),
+                        "Failed to enqueue publish envelope for topic " SV_FMT,
+                        MAGIC_SV_ARG(Topic, envelope.header.topic));
         return OK();
     }
 
-    static ReturnCode publish(void *opaque, const Envelope &req) {
-        auto *node = static_cast<Node *>(opaque);
-        return node->publish(req);
+    static ReturnCode publish(void *node, const Envelope &envelope) {
+        auto *self = static_cast<Node *>(node);
+        return self->publish(envelope);
     }
 
-    static ReturnCode ack(void *opaque, TransportId transportId,
-                          const Envelope &req) {
-        auto *node = static_cast<Node *>(opaque);
-        return node->_drainer.ack(static_cast<Spec::Transport>(transportId),
-                                  req);
+    static ReturnCode ack(void *node, TransportId transportId,
+                          const Envelope &envelope) {
+        auto *self = static_cast<Node *>(node);
+        return self->_drainer.ack(static_cast<Spec::Transport>(transportId),
+                                  envelope);
     }
 
     [[nodiscard]] static NodeId nodeId() {
@@ -117,25 +120,39 @@ class Node : // public HasIdentity<Node>,
     [[nodiscard]] MessageId nextMessageId() {
         return _nextMessageId.fetch_add(1, std::memory_order_relaxed);
     }
-    [[nodiscard]] static MessageId nextMessageId(void *opaque) {
-        auto *node = static_cast<Node *>(opaque);
-        return node->nextMessageId();
+    [[nodiscard]] static MessageId nextMessageId(void *node) {
+        auto *self = static_cast<Node *>(node);
+        return self->nextMessageId();
     }
     [[nodiscard]] IngressBuffer &ingress() { return _ingress; }
 
   private:
     ReturnCode _onBegin() {
+        auto taskHooks = TaskController::TaskHooks::bind(*this);
+
+        FAIL_IF_ERR_FWD(_beginTaskController(config().task),
+                        "Failed to begin task controller for %s", name);
+
+        auto taskAddResult =
+            _taskController.addTask("AggregatorTask", taskHooks);
+        FAIL_IF_UNEXPECTED(task, taskAddResult, taskAddResult.error(),
+                           "Failed to bind task hooks for %s", name);
         auto publishQueueResult =
             Totem::Queue::Platform::create(_publishQueueStorage);
         FAIL_IF_UNEXPECTED_FWD(publishQueue, publishQueueResult,
                                "Failed to create publish queue: " ERR_FMT,
                                ERR_ARG(publishQueueResult.error()));
         _publishQueue = publishQueue;
+
+        FAIL_IF_ERR_FWD(_taskController.startTask(task, config().task),
+                        "Failed to start task for %s", name);
         return OK();
     }
 
     ReturnCode _onEnd() {
         auto ret = OK();
+        _transporters.disableRegistration();
+        _subscribers.disableRegistration();
         if (_publishQueue != nullptr) {
             ret.combine(Totem::Queue::Platform::destroy(_publishQueue));
             _publishQueue = nullptr;
@@ -146,10 +163,10 @@ class Node : // public HasIdentity<Node>,
     ReturnCode _onTaskStep() {
         FAIL_IF_ERR_FWD(_drainer.drain(), "Failed to drain PubSub messages");
         FAIL_IF_ERR_FWD(
-            _transporters.withAll([](const TransporterNameKey & /*unused*/,
-                                     const TransporterEntry &entry) {
-                return entry.transporter.send();
-            }),
+            _transporters.withAll(
+                [](const TransporterKey &, const TransporterEntry &entry) {
+                    return entry.transporter.send();
+                }),
             "Failed to work PubSub transporters");
         return OK();
     }
@@ -161,7 +178,7 @@ class Node : // public HasIdentity<Node>,
 
     Totem::Queue::Platform::Storage<Envelope, Spec::Limits::maxMessageQueueSize>
         _publishQueueStorage;
-    Totem::Queue::Handle _publishQueue;
+    Totem::Queue::Handle _publishQueue = nullptr;
 
     SubscriptionManager _subscriptionManager{{
         .pubSubNode = this,
@@ -186,7 +203,7 @@ class Node : // public HasIdentity<Node>,
     using DefaultError = CoreError;
 };
 
-inline constexpr LifecycleContract<Node> _node_lifecycle_contract;
+inline constexpr LifecycleContract<Node, Config> _node_lifecycle_contract;
 inline constexpr TaskControllerContract<Node> _node_task_controller_contract;
 inline constexpr TaskController::TaskHooks::Contract<Node>
     _node_task_hooks_contract;

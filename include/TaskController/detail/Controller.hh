@@ -10,8 +10,8 @@
 #include "TaskController/Interfaces/TaskHooks.hh"
 #include "TaskController/detail/Concepts.hh"
 #include "TaskController/detail/PlatformSelect.hh"
+#include "TaskControllerRegistry/Interfaces/TaskSourceFeatures.hh"
 #include "TaskControllerRegistry/Interfaces/TaskSourceHooks.hh"
-#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -30,7 +30,7 @@ class Controller : public HasLifecycle<Controller, Config> {
     using RunnerKeySnapshot = Directory::EntryKeySnapshot;
 
   public:
-    using RunnerNameKey = Directory::EntryNameKey;
+    using RunnerKey = Directory::EntryKey;
 
     static constexpr const char *name = "TaskController::Controller";
 
@@ -47,15 +47,16 @@ class Controller : public HasLifecycle<Controller, Config> {
                 TaskControllerRegistry::TaskSourceCapability::Managed,
         };
         ABORT_IF_ERR(_registryHooks.registerSource(
-                         ownerName,
+                         reinterpret_cast<uintptr_t>(this),
                          TaskControllerRegistry::TaskSourceHooks::bind(*this),
                          sourceInfo),
                      "Failed to register %s of %s", name, _ownerName);
     }
 
     ~Controller() {
-        ABORT_IF_ERR(_registryHooks.deregisterSource(_ownerName),
-                     "Failed to deregister %s of %s", name, _ownerName);
+        ABORT_IF_ERR(
+            _registryHooks.deregisterSource(reinterpret_cast<uintptr_t>(this)),
+            "Failed to deregister %s of %s", name, _ownerName);
     }
 
     // Non-copyable and non-movable to avoid issues with being registered
@@ -67,7 +68,7 @@ class Controller : public HasLifecycle<Controller, Config> {
 
     [[nodiscard]] const char *ownerName() const { return _ownerName; }
 
-    [[nodiscard]] std::expected<RunnerNameKey, ReturnCode>
+    [[nodiscard]] std::expected<RunnerKey, ReturnCode>
     addTask(const char *refName, TaskHooks hooks) {
         FAIL_IF_INACTIVE_UNEXPECTED("%s of %s", name, _ownerName);
         FAIL_IF_NULL(refName, std::unexpected(ERR(InvalidArgument)),
@@ -77,13 +78,7 @@ class Controller : public HasLifecycle<Controller, Config> {
         return _directory.add(refName, hooks);
     }
 
-    ReturnCode startTask(const char *refName, Config config) {
-        FAIL_IF_NULL(refName, ERR(InvalidArgument),
-                     "%s of %s: Task name cannot be null", name, _ownerName);
-        return startTask(RunnerNameKey::fromCharPtr(refName), config);
-    }
-
-    ReturnCode startTask(RunnerNameKey ref, Config config) {
+    ReturnCode startTask(RunnerKey ref, Config config) {
         FAIL_IF_INACTIVE_ERR("%s of %s", name, _ownerName);
         auto ret = _directory.withEntry(
             ref, [&config](RunnerEntry &entry) -> ReturnCode {
@@ -97,17 +92,11 @@ class Controller : public HasLifecycle<Controller, Config> {
                 return OK();
             });
         FAIL_IF_ERR(ret, ret, "%s of %s: Task %s", name, _ownerName,
-                    ref.name.data());
+                    config.name);
         return OK();
     }
 
-    ReturnCode stopTask(const char *refName) {
-        FAIL_IF_NULL(refName, ERR(InvalidArgument),
-                     "%s of %s: Task name cannot be null", name, _ownerName);
-        return stopTask(RunnerNameKey::fromCharPtr(refName));
-    }
-
-    ReturnCode stopTask(RunnerNameKey ref) {
+    ReturnCode stopTask(RunnerKey ref) {
         FAIL_IF_INACTIVE_ERR("%s of %s", name, _ownerName);
         return _directory.withEntry(
             ref, [this](RunnerEntry &entry) -> ReturnCode {
@@ -125,8 +114,7 @@ class Controller : public HasLifecycle<Controller, Config> {
 
     std::expected<uint8_t, ReturnCode> reap() {
         FAIL_IF_INACTIVE_UNEXPECTED("%s of %s", name, _ownerName);
-        auto filter = [](const RunnerNameKey &,
-                         const RunnerEntry &entry) -> bool {
+        auto filter = [](const RunnerKey &, const RunnerEntry &entry) -> bool {
             return entry.runner->hasStopped();
         };
         auto extractedResult = _directory.extract(filter);
@@ -156,23 +144,22 @@ class Controller : public HasLifecycle<Controller, Config> {
         FAIL_IF_INACTIVE_UNEXPECTED("%s of %s", name, _ownerName);
         _disableRegistration();
         uint8_t stopCount = 0;
-        auto ret =
-            _directory.withAll([&stopCount](const RunnerNameKey &runnerName,
-                                            RunnerEntry &entry) -> ReturnCode {
+        auto ret = _directory.withAll(
+            [&stopCount](const RunnerKey &, RunnerEntry &entry) -> ReturnCode {
                 if (!entry.runner->hasEverStarted()) {
-                    _log_d("Skipping terminate initial runner %s",
-                           runnerName.name.data());
+                    _log_d("Skipping terminate initial runner " SV_FMT,
+                           SV_ARG(entry.name));
                     return OK();
                 }
                 if (entry.runner->hasStopped()) {
-                    _log_d("Skipping terminate already stopped runner %s",
-                           runnerName.name.data());
+                    _log_d("Skipping terminate already stopped runner " SV_FMT,
+                           SV_ARG(entry.name));
                     return OK();
                 }
 
                 FAIL_IF_ERR(entry.runner->requestStop(), ERR(OperationFailed),
                             "Failed to request stop for runner");
-                _log_i("Requested stop for runner %s", runnerName.name.data());
+                _log_i("Requested stop for runner " SV_FMT, SV_ARG(entry.name));
                 ++stopCount;
                 return OK();
             });
@@ -185,7 +172,7 @@ class Controller : public HasLifecycle<Controller, Config> {
     void killAll() {
         FAIL_IF_INACTIVE_VOID("%s of %s", name, _ownerName);
         _disableRegistration();
-        (void)_directory.withAll([](const RunnerNameKey &_,
+        (void)_directory.withAll([](const RunnerKey &,
                                     RunnerEntry &entry) -> ReturnCode {
             if (entry.runner->hasEverStarted() && !entry.runner->hasStopped()) {
                 entry.runner->kill();
@@ -271,48 +258,46 @@ class Controller : public HasLifecycle<Controller, Config> {
                entry.config->name);
         auto config = *entry.config;
         auto hooks = entry.hooks;
-        auto ref = RunnerNameKey::fromCharPtr(config.name);
         if (!result->isClean()) {
             _log_e("Task runner %s->%s stopped with error: " ERR_FMT
                    " (reason code %d)",
-                   self._ownerName, ref.name.data(), ERR_ARG(result->error),
+                   self._ownerName, config.name, ERR_ARG(result->error),
                    static_cast<int>(result->reason));
             if (!self._permitRegistration.load(std::memory_order_acquire)) {
                 _log_i("Not auto-restarting task runner %s->%s "
                        "because termination has been requested",
-                       self._ownerName, ref.name.data());
+                       self._ownerName, config.name);
                 return OK();
             }
             if (config.autoRestart) {
                 _log_i("Auto-restarting task runner %s->%s", self._ownerName,
-                       ref.name.data());
-                auto restartResult = _restartTask(self, ref, hooks, config);
+                       config.name);
+                auto restartResult = _restartTask(self, hooks, config);
                 if (!restartResult.ok()) {
                     _log_e(
                         "Failed to auto-restart task runner %s->%s: " ERR_FMT,
-                        self._ownerName, ref.name.data(),
-                        ERR_ARG(restartResult));
+                        self._ownerName, config.name, ERR_ARG(restartResult));
                 }
             }
         } else {
             _log_i("Task runner %s->%s stopped successfully", self._ownerName,
-                   ref.name.data());
+                   config.name);
         }
         return OK();
     }
 
-    static ReturnCode _restartTask(Controller &self, RunnerNameKey ref,
-                                   TaskHooks hooks, Config config) {
-        auto addResult = self._directory.add(ref, hooks);
+    static ReturnCode _restartTask(Controller &self, TaskHooks hooks,
+                                   Config config) {
+        auto addResult = self._directory.add(config.name, hooks);
         FAIL_IF(
             !addResult, addResult.error(),
             "Failed to add task runner %s->%s back to directory for restart",
-            self._ownerName, ref.name.data());
-        auto startResult = self.startTask(ref, config);
+            self._ownerName, config.name);
+        auto startResult = self.startTask(*addResult, config);
         if (!startResult.ok()) {
             _log_e("Failed to restart task runner %s->%s: " ERR_FMT,
-                   self._ownerName, ref.name.data(), ERR_ARG(startResult));
-            (void)self._directory.remove(ref);
+                   self._ownerName, config.name, ERR_ARG(startResult));
+            (void)self._directory.remove(*addResult);
             return startResult;
         }
         return OK();

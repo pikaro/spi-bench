@@ -6,6 +6,7 @@
 #include "freertos/projdefs.h"
 #include "freertos/queue.h"
 #include "freertos/ringbuf.h"
+#include "portmacro.h"
 #include <cstdint>
 
 namespace platform {
@@ -35,5 +36,12 @@ using StackDepth = configSTACK_DEPTH_TYPE;
 inline constexpr auto MaxTaskNameLen = configMAX_TASK_NAME_LEN;
 
 inline bool in_isr() { return xPortInIsrContext() != pdFALSE; }
+
+using Spinlock = portMUX_TYPE;
+
+inline void start_critical_section(Spinlock &lock) {
+    portENTER_CRITICAL(&lock);
+}
+inline void end_critical_section(Spinlock &lock) { portEXIT_CRITICAL(&lock); }
 
 } // namespace platform

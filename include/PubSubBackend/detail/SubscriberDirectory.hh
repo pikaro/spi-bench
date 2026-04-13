@@ -6,19 +6,22 @@
 #include "PubSubBackend/Interfaces/Subscriber.hh"
 #include "PubSubBackend/Interfaces/Types.hh"
 #include "PubSubBackend/detail/Types.hh"
+#include <cstdint>
 #include <cstring>
 #include <expected>
+#include <string_view>
 
 namespace Totem::PubSubBackend::detail {
 
 struct SubscriberEntry {
+    void *subscriber;
     SubscriberCallback callback;
     TopicId topic;
+    std::string_view name;
 };
 
 using SubscriberDirectoryImpl =
-    Directory<SubscriberEntry, Spec::Limits::maxSubscribers,
-              Spec::Limits::maxSubscriberNameLength>;
+    Directory<uintptr_t, SubscriberEntry, Spec::Limits::maxSubscribers>;
 
 class SubscriberDirectory : public SubscriberDirectoryImpl {
     using Base = SubscriberDirectoryImpl;
@@ -26,39 +29,35 @@ class SubscriberDirectory : public SubscriberDirectoryImpl {
   public:
     explicit SubscriberDirectory(const char *ownerName) : Base(ownerName) {}
 
-    using EntryNameKey = typename Base::EntryNameKey;
+    using EntryKey = typename Base::EntryKey;
 
-    std::expected<EntryNameKey, ReturnCode>
-    add(const char *subscriberName,
-        const SubscriberCallback &subscriberCallback, TopicId topic) {
+    std::expected<EntryKey, ReturnCode> add(const char *subscriberName,
+                                            const Subscriber &subscriber,
+                                            TopicId topic) {
         FAIL_IF_NULL(subscriberName, std::unexpected(ERR(InvalidArgument)),
                      "%s: PubSub subscriber name cannot be null",
                      this->ownerName());
-        auto nameKey = EntryNameKey::fromCharPtr(subscriberName);
-        return add(nameKey, subscriberCallback, topic);
-    }
-
-    std::expected<EntryNameKey, ReturnCode>
-    add(const EntryNameKey &subscriberNameKey,
-        const SubscriberCallback &subscriberCallback, TopicId topic) {
         auto entry = SubscriberEntry{
-            .callback = subscriberCallback,
+            .subscriber = subscriber.subscriber,
+            .callback = subscriber.callback,
             .topic = topic,
+            .name = subscriberName,
         };
-        return this->_addImpl(subscriberNameKey, entry);
+        return this->_addImpl(
+            reinterpret_cast<uintptr_t>(subscriber.subscriber), entry);
     }
 
     [[nodiscard]] std::expected<TopicId, ReturnCode>
-    topicForSubscriber(const EntryNameKey &subscriberNameKey) const {
+    topicForSubscriber(const EntryKey &subscriberKey) const {
         TopicId topic;
-        auto ret = this->withEntryConst(subscriberNameKey,
+        auto ret = this->withEntryConst(subscriberKey,
                                         [&topic](const SubscriberEntry &entry) {
                                             topic = entry.topic;
                                             return OK();
                                         });
         FAIL_IF_ERR(ret, std::unexpected(ret),
-                    "Failed to get topic for subscriber %s->%s",
-                    this->ownerName(), subscriberNameKey.name.data());
+                    "Failed to get topic for subscriber in %s",
+                    this->ownerName());
         return topic;
     }
 

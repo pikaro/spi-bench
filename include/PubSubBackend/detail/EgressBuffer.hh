@@ -28,10 +28,10 @@ class EgressBuffer : public ByteArena<EgressBuffer<Config>, Header, Config> {
         return Base::store(header, frame);
     }
 
-    static ReturnCode getRaw(void *opaque, const Header &header,
+    static ReturnCode getRaw(void *egressBuffer, const Header &header,
                              std::span<std::byte> out) {
-        auto *egress = static_cast<EgressBuffer *>(opaque);
-        return egress->getRaw(header, out);
+        auto *self = static_cast<EgressBuffer *>(egressBuffer);
+        return self->getRaw(header, out);
     }
 
     ReturnCode getRaw(const Header &header, std::span<std::byte> out) const {
@@ -41,9 +41,9 @@ class EgressBuffer : public ByteArena<EgressBuffer<Config>, Header, Config> {
         return Base::getRaw(header, 0, out);
     }
 
-    static ReturnCode release(void *opaque, const Header &header) {
-        auto *egress = static_cast<EgressBuffer *>(opaque);
-        return egress->release(header);
+    static ReturnCode release(void *egressBuffer, const Header &header) {
+        auto *self = static_cast<EgressBuffer *>(egressBuffer);
+        return self->release(header);
     }
 
     ReturnCode release(const Header &header) { return Base::release(header); }

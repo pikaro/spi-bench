@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Macros/Facade.hh"
+#include "Platform/Platform.hh"
 #include "TaskController/Interfaces/Config.hh"
 #include "TaskController/Interfaces/TaskHooks.hh"
 #include "TaskController/Interfaces/TaskRuntimeSnapshot.hh"
@@ -40,6 +41,7 @@ class Runner {
     }
 
     ReturnCode requestStop() {
+        ::platform::ScopedSpinlockGuard guard{_lock};
         FAIL_IF_NULL(_handle, ERR(OperationFailed),
                      "Cannot request stop on unstarted runner");
         auto result = Platform::signal_task(_handle, Signal::Stop);
@@ -49,14 +51,18 @@ class Runner {
     }
 
     void kill() {
-        FAIL_IF_NULL_VOID(_handle, "Cannot kill unstarted runner");
+        TaskHandle handle = nullptr;
+        {
+            ::platform::ScopedSpinlockGuard guard{_lock};
+            FAIL_IF_NULL_VOID(_handle, "Cannot kill unstarted runner");
+            handle = _handle;
+            _handle = nullptr;
+        }
         _stateManager.enterStopping();
         _stopResult =
             Result{.reason = ExitReason::Killed, .error = ERR(Unexpected)};
         _hasStopResult.store(true, std::memory_order_release);
         _stateManager.enterStopped();
-        auto *handle = _handle;
-        _handle = nullptr;
 
         Platform::kill_task(handle);
         _log_w("Killed runner %s", _config.name);
@@ -88,19 +94,60 @@ class Runner {
     }
 
     ReturnCode takeSnapshot() {
-        FAIL_IF_NULL(_handle, ERR(NotFound),
-                     "Cannot take snapshot of unstarted runner %s",
-                     _config.name);
-        auto platformResult = Platform::get_snapshot(_handle);
+        auto timestamp = ::platform::get_time();
+        auto timestampDelta = timestamp - _runtimeSnapshot.timestamp;
+
+        std::expected<TaskPlatformSnapshot, ReturnCode> platformResult =
+            std::unexpected(ERR(NotFound));
+        uintptr_t nativeHandle = 0;
+        bool hasHandle = false;
+        {
+            ::platform::ScopedSpinlockGuard guard{_lock};
+            if (_handle != nullptr) {
+                hasHandle = true;
+                nativeHandle = reinterpret_cast<uintptr_t>(_handle);
+                platformResult = Platform::get_snapshot(_handle);
+            }
+        }
+
+        if (!hasHandle) {
+            auto hadSnapshot = _hasSnapshot.load(std::memory_order_acquire);
+            _runtimeSnapshot = Totem::TaskController::TaskRuntimeSnapshot{
+                .timestamp = timestamp,
+                .timestampDelta = timestampDelta,
+                .name = _config.name,
+                .sourceName = {},
+                .nativeHandle = 0,
+                .hasEverStarted =
+                    _hasEverStarted.load(std::memory_order_acquire),
+                .lastStopResult = hasStopped() ? _stopResult : std::nullopt,
+                .state = _stateManager.state(),
+                .platformState = hadSnapshot ? _platformSnapshot.state
+                                             : PlatformState::Suspended,
+                .coreId = hadSnapshot ? _platformSnapshot.coreId
+                                      : static_cast<int8_t>(-1),
+                .currentPriority =
+                    hadSnapshot ? _platformSnapshot.priority : _config.priority,
+                .runTimeTotalPct =
+                    hadSnapshot ? _runtimeSnapshot.runTimeTotalPct : 0.0F,
+                .runTimeDeltaPct = 0.0F,
+                .stackLowestFree = hadSnapshot
+                                       ? _runtimeSnapshot.stackLowestFree
+                                       : _config.stackSize,
+                .stackUsedPct =
+                    hadSnapshot ? _runtimeSnapshot.stackUsedPct : 0.0F,
+                .config = &_config,
+            };
+            _hasSnapshot.store(true, std::memory_order_release);
+            return OK();
+        }
         if (!platformResult) {
             FAIL(platformResult.error(),
                  "Failed to load platform state for Runner %s", _config.name);
         };
-        auto timestamp = ::platform::get_time();
 
         float runTimeTotalPct = 0.0F;
         float runTimeDeltaPct = 0.0F;
-        auto timestampDelta = timestamp - _runtimeSnapshot.timestamp;
 
         if (timestamp > 0) {
             runTimeTotalPct = 100.0F *
@@ -120,7 +167,7 @@ class Runner {
             .timestampDelta = timestampDelta,
             .name = _config.name,
             .sourceName = {},
-            .nativeHandle = reinterpret_cast<uintptr_t>(_handle),
+            .nativeHandle = nativeHandle,
             .hasEverStarted = _hasEverStarted.load(std::memory_order_acquire),
             .lastStopResult = hasStopped() ? _stopResult : std::nullopt,
             .state = _stateManager.state(),
@@ -144,8 +191,8 @@ class Runner {
     }
 
   private:
-    static void _run(void *opaque) {
-        auto *self = static_cast<Runner *>(opaque);
+    static void _run(void *runner) {
+        auto *self = static_cast<Runner *>(runner);
 
         auto loop = Loop({.config = self->_config,
                           .hooks = self->_hooks,
@@ -161,7 +208,10 @@ class Runner {
         // Publish the stopped state only after the task has finished touching
         // Runner storage. Reap may destroy the Runner as soon as hasStopped()
         // becomes visible.
-        self->_handle = nullptr;
+        {
+            ::platform::ScopedSpinlockGuard guard{self->_lock};
+            self->_handle = nullptr;
+        }
         self->_stopResult = result;
         self->_hasStopResult.store(true, std::memory_order_release);
         Platform::delete_current_task();
@@ -182,14 +232,17 @@ class Runner {
             FAIL(ERR(OperationFailed), "Task creation failed");
         }
 
-        _handle = result.handle;
+        {
+            ::platform::ScopedSpinlockGuard guard{_lock};
+            _handle = result.handle;
+        }
 
         _log_i("Started runner %s", _config.name);
 
         return OK();
     }
 
-    TaskHandle _handle;
+    TaskHandle _handle = nullptr;
     StateManager _stateManager;
     Config _config;
     TaskRuntimeSnapshot _runtimeSnapshot{};
@@ -199,6 +252,7 @@ class Runner {
     std::atomic<bool> _hasEverStarted = false;
     std::atomic<bool> _hasStopResult = false;
     std::atomic<bool> _hasSnapshot = false;
+    ::platform::Spinlock _lock = portMUX_INITIALIZER_UNLOCKED;
 
     using DefaultError = CoreError;
 };

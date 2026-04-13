@@ -22,7 +22,6 @@ class SystemTaskSource {
 
   public:
     static constexpr const char *name = "System";
-    static constexpr const char *key = "System";
 
     explicit SystemTaskSource(Registry &registry) : _registry(registry) {
         auto info = TaskSourceInfo{
@@ -31,12 +30,13 @@ class SystemTaskSource {
             .capabilities = TaskSourceCapability::None,
         };
         ABORT_IF_ERR(
-            _registry.registerSource(key, TaskSourceHooks::bind(*this), info),
+            _registry.registerSource(reinterpret_cast<uintptr_t>(this),
+                                     TaskSourceHooks::bind(*this), info),
             "Failed to register system task source");
     }
 
     ~SystemTaskSource() {
-        ABORT_IF_ERR(_registry.deregisterSource(key),
+        ABORT_IF_ERR(_registry.deregisterSource(reinterpret_cast<uintptr_t>(this)),
                      "Failed to deregister system task source");
     }
 

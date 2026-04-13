@@ -1,5 +1,5 @@
 #include "CommandBackend/Facade.hh"
-#include "Config.hh"
+#include "Data.hh"
 #include "Data/Facade.hh"
 #include "Macros/Facade.hh"
 #include "Monitoring/Facade.hh"
@@ -7,13 +7,17 @@
 #include "Platform/Uart.hh"
 #include "Platform/platform/PlatformESP32/Base.hh"
 #include "PubSubBackend/Facade.hh"
+#include "PubSubBackend/Interfaces/Envelope.hh"
 #include "PubSubBackend/Transports/LocalBufferedTransport.hh"
 #include "PubSubBackend/Transports/LocalTransport.hh"
 #include "Services/Commands.hh"
 #include "Services/PubSub.hh"
 #include "Support/CoreCommands.hh"
 #include "TaskControllerRegistry/Facade.hh"
+#include "TestMessage.hh"
+#include "master/PubSubTest.hh"
 #include <cstdint>
+#include <utility>
 
 Totem::TaskControllerRegistry::Registry taskRegistry;
 
@@ -54,6 +58,10 @@ Totem::PubSubBackend::Transports::LocalBufferedTransport testPubSub2({
         },
 });
 
+Foo foo1;
+Foo foo2;
+Foo foo3;
+
 void setup() {
     ABORT_IF_ERR_BEGIN(::platform::Uart::init());
 
@@ -69,9 +77,7 @@ void setup() {
     CommandService::setBackend(commandController);
 
     ABORT_IF_ERR_BEGIN(pubSubNode1.begin());
-    ABORT_IF_ERR_BEGIN(pubSubNode2.begin({
-
-    }));
+    ABORT_IF_ERR_BEGIN(pubSubNode2.begin());
 
     ABORT_IF_ERR_BEGIN(testPubSub1.begin());
     ABORT_IF_ERR_BEGIN(testPubSub2.begin());
@@ -88,6 +94,28 @@ void setup() {
 
     (void)testHandle1;
     (void)testHandle2;
+
+    pubSubNode1.subscribe("foo1node1fft",
+                          {.subscriber = &foo1, .callback = Foo::callback},
+                          NodeData::PubSub::Topic::FftFrame);
+    pubSubNode2.subscribe("foo1node2fft",
+                          {.subscriber = &foo1, .callback = Foo::callback},
+                          NodeData::PubSub::Topic::FftFrame);
+    pubSubNode2.subscribe("foo2node2metrics",
+                          {.subscriber = &foo2, .callback = Foo::callback},
+                          NodeData::PubSub::Topic::Metrics);
+    pubSubNode2.subscribe("foo2node2sensor",
+                          {.subscriber = &foo2, .callback = Foo::callback},
+                          NodeData::PubSub::Topic::Sensor);
+    pubSubNode2.subscribe("foo1node2heartbeat",
+                          {.subscriber = &foo1, .callback = Foo::callback},
+                          NodeData::PubSub::Topic::Heartbeat);
+    pubSubNode2.subscribe("foo2node2heartbeat",
+                          {.subscriber = &foo2, .callback = Foo::callback},
+                          NodeData::PubSub::Topic::Heartbeat);
+    pubSubNode2.subscribe("foo3node2heartbeat",
+                          {.subscriber = &foo3, .callback = Foo::callback},
+                          NodeData::PubSub::Topic::Heartbeat);
 
     ABORT_IF_ERR(register_core_commands(),
                  "Failed to register core commands to command controller");
@@ -118,6 +146,10 @@ void app_main(void);
 
 ::platform::Tick lastWakeTime;
 
+using testPool = Totem::PubSubBackend::Pool<Message, 64>;
+testPool messagePool{static_cast<void *>(&pubSubNode1),
+                     PubSubNode::nextMessageId};
+
 void app_main() {
     setup();
     for (;;) {
@@ -125,6 +157,28 @@ void app_main() {
             _log_e("Error during task registry reap: " ERR_FMT,
                    ERR_ARG(reapResult));
         }
+
+        auto event = make_test_event();
+        ABORT_IF_UNEXPECTED(
+            messageId, messagePool.store(event.message),
+            "Failed to allocate message from pool for topic " SV_FMT,
+            SV_ARG(magic_enum::enum_name(event.topic)));
+        auto envelopeDef = Totem::PubSubBackend::EnvelopeDef{
+            .owner = static_cast<void *>(&messagePool),
+            .topic = event.topic,
+            .messageId = messageId,
+            .getPayloadPtr = testPool::getPtr,
+            .encodePayload = testPool::encodePayload,
+            .release = testPool::release,
+        };
+        auto envelopeResult =
+            Totem::PubSubBackend::Envelope::make<Message>(envelopeDef);
+        auto result = pubSubNode1.publish(std::move(envelopeResult).value());
+
+        if (!result.ok()) {
+            _log_e("Failed to publish message: " ERR_FMT, ERR_ARG(result));
+        }
+
         ::platform::delay_until(&lastWakeTime, 1000);
     }
 }

@@ -45,14 +45,14 @@ class Pool : public HasMutex<Pool<T, Capacity>> {
         return std::unexpected(ERR(Overflow));
     }
 
-    static ReturnCode release(void *owner, const Envelope &req) {
+    static ReturnCode release(void *owner, const Envelope &envelope) {
         auto *pool = static_cast<Pool *>(owner);
-        return pool->release(req);
+        return pool->release(envelope);
     }
 
-    ReturnCode release(const Envelope &req) {
+    ReturnCode release(const Envelope &envelope) {
         for (auto &slot : _storage) {
-            if (slot.value && slot.messageId == req.header.messageId) {
+            if (slot.value && slot.messageId == envelope.header.messageId) {
                 slot.value.reset();
                 return OK();
             }
@@ -61,15 +61,15 @@ class Pool : public HasMutex<Pool<T, Capacity>> {
     }
 
     [[nodiscard]] static std::expected<const void *, ReturnCode>
-    getPtr(void *owner, const Envelope &req) {
+    getPtr(void *owner, const Envelope &envelope) {
         auto *pool = static_cast<Pool *>(owner);
-        return pool->getPtr(req);
+        return pool->getPtr(envelope);
     }
 
     [[nodiscard]] std::expected<const void *, ReturnCode>
-    getPtr(const Envelope &req) const {
+    getPtr(const Envelope &envelope) const {
         for (const auto &slot : _storage) {
-            if (slot.value && slot.messageId == req.header.messageId) {
+            if (slot.value && slot.messageId == envelope.header.messageId) {
                 return static_cast<const void *>(std::addressof(*slot.value));
             }
         }
@@ -78,15 +78,15 @@ class Pool : public HasMutex<Pool<T, Capacity>> {
 
     [[nodiscard]] static std::expected<std::reference_wrapper<const T>,
                                        ReturnCode>
-    get(void *owner, const Envelope &req) {
+    get(void *owner, const Envelope &envelope) {
         auto *pool = static_cast<Pool *>(owner);
-        return pool->get(req);
+        return pool->get(envelope);
     }
 
     [[nodiscard]] std::expected<std::reference_wrapper<const T>, ReturnCode>
-    get(const Envelope &req) const {
+    get(const Envelope &envelope) const {
         for (const auto &slot : _storage) {
-            if (slot.value && slot.messageId == req.header.messageId) {
+            if (slot.value && slot.messageId == envelope.header.messageId) {
                 return std::cref(*slot.value);
             }
         }

@@ -7,4 +7,5 @@ requires-python = ">=3.14"
 dependencies = [
     "esp-idf-size>=2.1.0",
     "platformio>=6.1.19",
+    "pydantic>=2.13.0",
 ]

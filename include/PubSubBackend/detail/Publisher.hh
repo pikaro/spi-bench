@@ -12,8 +12,8 @@
 namespace Totem::PubSubBackend::detail {
 
 class Publisher {
-    using TransporterNameKey = TransporterDirectory::EntryNameKey;
-    using SubscriberNameKey = SubscriberDirectory::EntryNameKey;
+    using TransporterKey = TransporterDirectory::EntryKey;
+    using SubscriberKey = SubscriberDirectory::EntryKey;
 
   public:
     explicit Publisher(TransporterDirectory &transporters,
@@ -29,19 +29,20 @@ class Publisher {
         return ret;
     }
 
-    ReturnCode publishToSubscribers(const Envelope &req) {
+    ReturnCode publishToSubscribers(const Envelope &envelope) {
         return _subscribers.withAll(
-            [&](const SubscriberNameKey &nameKey,
+            [&](const SubscriberKey &,
                 const SubscriberEntry &entry) -> ReturnCode {
-                FAIL_IF_ERR_FWD(entry.callback(req),
-                                "Failed to publish to subscriber " SV_FMT
-                                " for topic " SV_FMT,
-                                SV_ARG(nameKey.name),
-                                MAGIC_SV_ARG(Spec::Topic, req.header.topic));
+                FAIL_IF_ERR_FWD(
+                    entry.callback(entry.subscriber, envelope),
+                    "Failed to publish to subscriber " SV_FMT
+                    " for topic " SV_FMT,
+                    SV_ARG(entry.name),
+                    MAGIC_SV_ARG(Spec::Topic, envelope.header.topic));
                 return OK();
             },
-            [topicId = req.header.topic](const SubscriberNameKey & /* unused*/,
-                                         const SubscriberEntry &entry) -> bool {
+            [topicId = envelope.header.topic](
+                const SubscriberKey &, const SubscriberEntry &entry) -> bool {
                 return entry.topic == topicId;
             });
     }
@@ -50,20 +51,19 @@ class Publisher {
         FrameHandle frameHandle,
         std::optional<TransportId> ingressTransport = std::nullopt) {
         return _transporters.withAll(
-            [&](const TransporterNameKey &nameKey,
+            [&](const TransporterKey &,
                 const TransporterEntry &entry) -> ReturnCode {
                 FAIL_IF_ERR_FWD(
                     entry.transporter.enqueue(frameHandle),
                     "Failed to enqueue message to transport " SV_FMT
                     " for topic " SV_FMT,
-                    SV_ARG(nameKey.name),
+                    SV_ARG(entry.name),
                     MAGIC_SV_ARG(Spec::Topic,
                                  frameHandle->envelope.header.topic));
                 return OK();
             },
-            [topicId = frameHandle->envelope.header.topic,
-             ingressTransport](const TransporterNameKey & /* unused*/,
-                               const TransporterEntry &entry) -> bool {
+            [topicId = frameHandle->envelope.header.topic, ingressTransport](
+                const TransporterKey &, const TransporterEntry &entry) -> bool {
                 if (ingressTransport.has_value() &&
                     entry.transportId == *ingressTransport) {
                     return false;

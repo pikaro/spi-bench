@@ -20,7 +20,7 @@ namespace Totem::PubSubBackend::Transports {
 
 using SendAckCallback = ReturnCode (*)(void *owner,
                                        detail::TransportId transportId,
-                                       const Envelope &req);
+                                       const Envelope &envelope);
 using SendCallback = ReturnCode (*)(void *owner, const Header &header,
                                     std::span<const std::byte> frame);
 using ReceiveCallback = std::expected<size_t, ReturnCode> (*)(
@@ -169,8 +169,8 @@ class BaseTransport : public HasLifecycle<BaseTransport> {
     }
 
   protected:
-    ReturnCode _ack(const Envelope &req) {
-        return _sendAckCallback(_pubSubNode, _transportId, req);
+    ReturnCode _ack(const Envelope &envelope) {
+        return _sendAckCallback(_pubSubNode, _transportId, envelope);
     }
 
     ReturnCode _onBegin() {

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Config.hh"
+#include "Data.hh"
 #include "PubSubBackend/Interfaces/Envelope.hh"
 #include "PubSubBackend/Interfaces/Types.hh"
 #include "Types/Error.hh"

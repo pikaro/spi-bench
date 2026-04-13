@@ -9,19 +9,22 @@
 
 namespace Totem::CommandBackend::detail {
 
-using DirectoryImpl = GettableDirectory<CommandDesc, CommandConfig::maxEntries,
-                                        CommandConfig::maxNameLength>;
+using DirectoryImpl =
+    GettableDirectory<NameKey<CommandConfig::maxNameLength>, CommandDesc,
+                      CommandConfig::maxEntries>;
 
 class Directory : public DirectoryImpl {
   public:
+    using EntryKey = typename DirectoryImpl::EntryKey;
+
     explicit Directory() : DirectoryImpl("Command::Directory") {
         _setHooks({
             .self = this,
         });
     }
 
-    std::expected<EntryNameKey, ReturnCode>
-    add(const EntryNameKey &commandNameKey, const CommandDesc &metricDesc) {
+    std::expected<EntryKey, ReturnCode>
+    add(const EntryKey &commandNameKey, const CommandDesc &metricDesc) {
         return _addImpl(commandNameKey, metricDesc);
     }
 };

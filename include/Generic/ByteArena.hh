@@ -82,10 +82,10 @@ class ByteArena : public HasMutex<Derived> {
         return OK();
     }
 
-    static ReturnCode getRaw(void *opaque, const T &stored, size_t offset,
+    static ReturnCode getRaw(void *arena, const T &stored, size_t offset,
                              std::span<std::byte> out) {
-        auto *arena = static_cast<ByteArena *>(opaque);
-        return arena->getRaw(stored, offset, out);
+        auto *self = static_cast<ByteArena *>(arena);
+        return self->getRaw(stored, offset, out);
     }
 
     ReturnCode getRaw(const T &stored, size_t offset,
@@ -107,9 +107,9 @@ class ByteArena : public HasMutex<Derived> {
         return OK();
     }
 
-    static ReturnCode release(void *opaque, const T &stored) {
-        auto *arena = static_cast<ByteArena *>(opaque);
-        return arena->release(stored);
+    static ReturnCode release(void *arena, const T &stored) {
+        auto *self = static_cast<ByteArena *>(arena);
+        return self->release(stored);
     }
 
     ReturnCode release(const T &stored) {

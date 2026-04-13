@@ -27,7 +27,7 @@ struct DrainerDependencies {
 };
 
 class Drainer {
-    using TransporterNameKey = TransporterDirectory::EntryNameKey;
+    using TransporterKey = TransporterDirectory::EntryKey;
 
     static constexpr auto kMaxInFlightMessages =
         Spec::Limits::maxInFlightMessages;
@@ -46,18 +46,19 @@ class Drainer {
         return ret;
     }
 
-    ReturnCode ack(Spec::Transport transportId, const Envelope &req) {
+    ReturnCode ack(Spec::Transport transportId, const Envelope &envelope) {
         auto ret = OK();
         auto mask = static_cast<TransportMask>(transportId);
         for (size_t i = 0; i < kMaxInFlightMessages; ++i) {
             auto &frame = _inFlightFrames[i];
             if (frame.valid() && (frame.pendingMask & mask) != 0) {
-                if (frame.envelope.header.messageId == req.header.messageId) {
+                if (frame.envelope.header.messageId ==
+                    envelope.header.messageId) {
                     frame.pendingMask &= ~mask;
                     if (--frame.pendingCount == 0) {
                         if (frame.envelope.release != nullptr) {
                             ret.combine(frame.envelope.release(
-                                frame.envelope.owner, req));
+                                frame.envelope.owner, envelope));
                         }
                         frame = StoredFrame{};
                     }
@@ -68,7 +69,8 @@ class Drainer {
         FAIL(ERR(NotFound),
              "No in-flight message found for ack with messageId "
              "%u from transport " SV_FMT,
-             req.header.messageId, SV_ARG(magic_enum::enum_name(transportId)));
+             envelope.header.messageId,
+             SV_ARG(magic_enum::enum_name(transportId)));
     }
 
   private:
@@ -85,7 +87,7 @@ class Drainer {
         if (ret == ERR(Timeout)) {
             return OK();
         }
-        FAIL(ret, "Failed to receive publish request from queue: " ERR_FMT,
+        FAIL(ret, "Failed to receive publish envelope from queue: " ERR_FMT,
              ERR_ARG(ret));
     }
 
@@ -94,15 +96,15 @@ class Drainer {
         TransportId ingressTransport;
     };
 
-    static ReturnCode _publishCallback(void *ctx, const Envelope &req) {
+    static ReturnCode _publishCallback(void *ctx, const Envelope &envelope) {
         auto *publishContext = static_cast<PublishContext *>(ctx);
         return publishContext->self->_publishFrame(
-            req, publishContext->ingressTransport);
+            envelope, publishContext->ingressTransport);
     }
 
     ReturnCode _publishFromTransports() {
         return _transporters.withAllConst(
-            [&](const TransporterNameKey & /*unused*/,
+            [&](const TransporterKey &,
                 const TransporterEntry &entry) -> ReturnCode {
                 auto ctx = PublishContext{
                     .self = this, .ingressTransport = entry.transportId};
@@ -110,15 +112,16 @@ class Drainer {
             });
     }
 
-    std::expected<FrameHandle, ReturnCode> _storeFrame(const Envelope &req) {
+    std::expected<FrameHandle, ReturnCode>
+    _storeFrame(const Envelope &envelope) {
         StoredFrame frame;
-        frame.envelope = req;
+        frame.envelope = envelope;
         TransportMask mask = 0;
         uint8_t pendingCount = 0;
         (void)_transporters.withAll(
-            [&](const TransporterNameKey & /*nameKey*/,
+            [&](const TransporterKey &,
                 const TransporterEntry &entry) -> ReturnCode {
-                if ((entry.topicMask & req.header.topic) != 0) {
+                if ((entry.topicMask & envelope.header.topic) != 0) {
                     mask |= entry.transportId;
                     ++pendingCount;
                 }

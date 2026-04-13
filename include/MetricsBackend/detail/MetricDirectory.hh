@@ -10,20 +10,22 @@
 
 namespace Totem::MetricsBackend::detail {
 
-using MetricDirectoryImpl = Directory<Metric, MetricConfig::maxMetrics,
-                                      MetricConfig::maxMetricNameLength>;
+using MetricDirectoryImpl =
+    Directory<uintptr_t, Metric, MetricConfig::maxMetrics>;
 
 class MetricDirectory : public MetricDirectoryImpl {
   public:
+    using EntryKey = typename MetricDirectoryImpl::EntryKey;
+
     explicit MetricDirectory() : MetricDirectoryImpl("MetricDirectory") {
         _setHooks({
             .self = this,
         });
     }
 
-    std::expected<EntryNameKey, ReturnCode>
-    add(const EntryNameKey &metricNameKey, const MetricDesc &metricDesc) {
-        return _addImpl(metricNameKey, {.desc = metricDesc});
+    std::expected<EntryKey, ReturnCode> add(EntryKey metricKey,
+                                            const MetricDesc &metricDesc) {
+        return _addImpl(metricKey, {.desc = metricDesc});
     }
 };
 

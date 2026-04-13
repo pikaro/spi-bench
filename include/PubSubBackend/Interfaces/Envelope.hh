@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Config.hh"
+#include "Data.hh"
 #include "Macros/Facade.hh"
 #include "PubSubBackend/Interfaces/Types.hh"
 #include "PubSubBackend/Interfaces/Wire.hh" // IWYU pragma: export
@@ -19,12 +19,12 @@ struct Envelope;
 template <typename T> inline constexpr std::byte PayloadTypeTag{};
 
 using PayloadPtrGetter = std::expected<const void *, ReturnCode> (*)(
-    void *owner, const Envelope &req);
-using PayloadGetter = ReturnCode (*)(void *owner, const Envelope &req,
+    void *owner, const Envelope &envelope);
+using PayloadGetter = ReturnCode (*)(void *owner, const Envelope &envelope,
                                      size_t offset, std::span<std::byte> buf);
-using ReleaseCallback = ReturnCode (*)(void *owner, const Envelope &req);
+using ReleaseCallback = ReturnCode (*)(void *owner, const Envelope &envelope);
 using NextMessageIdCallback = MessageId (*)(void *owner);
-using PayloadEncoder = ReturnCode (*)(void *owner, const Envelope &env,
+using PayloadEncoder = ReturnCode (*)(void *owner, const Envelope &envelope,
                                       std::span<std::byte> out);
 
 struct EnvelopeDef {

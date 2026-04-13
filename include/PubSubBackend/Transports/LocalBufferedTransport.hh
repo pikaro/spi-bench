@@ -29,7 +29,9 @@ class LocalBufferedTransport : public LocalTransport {
 
     static constexpr const char *name = "LocalBufferedTransport";
 
-    ReturnCode ackSend(const Envelope &req) { return ackSend(req.header); }
+    ReturnCode ackSend(const Envelope &envelope) {
+        return ackSend(envelope.header);
+    }
 
     ReturnCode ackSend(const Header &header) {
         FAIL_IF_ERR(_egressBuffer.release(header), ERR(OperationFailed),
@@ -40,9 +42,11 @@ class LocalBufferedTransport : public LocalTransport {
     }
 
   private:
-    static ReturnCode _sendCallback(void *opaque, const Header &header,
+    static ReturnCode _sendCallback(void *localBufferedTransport,
+                                    const Header &header,
                                     std::span<const std::byte> frame) {
-        auto *self = static_cast<LocalBufferedTransport *>(opaque);
+        auto *self =
+            static_cast<LocalBufferedTransport *>(localBufferedTransport);
         return self->_send(header, frame);
     }
 

@@ -12,7 +12,7 @@ class Store {
     Store() { _enableRegistration(); }
     ~Store() { _disableRegistration(); }
 
-    using CommandNameKey = Directory::EntryNameKey;
+    using CommandNameKey = Directory::EntryKey;
 
     static constexpr const char *name = "Command::Store";
 

@@ -6,7 +6,6 @@
 #include "PubSubBackend/detail/SubscriptionManager.hh"
 #include "PubSubBackend/detail/Types.hh"
 #include "Types/Error.hh"
-#include "magic_enum/magic_enum.hpp"
 #include <optional>
 
 namespace Totem::PubSubBackend::detail {
@@ -19,15 +18,15 @@ class ControlPlane {
         : _subscriptionManager(subscriptionManager) {}
 
     ReturnCode
-    handle(const Envelope &request,
+    handle(const Envelope &envelope,
            std::optional<TransportId> ingressTransport = std::nullopt) {
-        if (!isControlPlaneTopic(request.header.topic)) {
+        if (!isControlPlaneTopic(envelope.header.topic)) {
             return OK();
         }
 
-        auto topic = static_cast<Topic>(request.header.topic);
+        auto topic = static_cast<Topic>(envelope.header.topic);
         if (topic == Topic::PubSub) {
-            return _subscriptionManager.handlePubSubEvent(request,
+            return _subscriptionManager.handlePubSubEvent(envelope,
                                                           ingressTransport);
         }
 

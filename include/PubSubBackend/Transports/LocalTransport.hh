@@ -90,9 +90,9 @@ class LocalTransport : public BaseTransport {
         return ret;
     }
 
-    static ReturnCode _sendCallback(void *opaque, const Header &header,
+    static ReturnCode _sendCallback(void *localTransport, const Header &header,
                                     std::span<const std::byte> frame) {
-        auto *self = static_cast<LocalTransport *>(opaque);
+        auto *self = static_cast<LocalTransport *>(localTransport);
         return self->_send(header, frame);
     }
 
@@ -106,8 +106,8 @@ class LocalTransport : public BaseTransport {
     }
 
     static std::expected<size_t, ReturnCode>
-    _receiveCallback(void *opaque, std::span<std::byte> out) {
-        auto *self = static_cast<LocalTransport *>(opaque);
+    _receiveCallback(void *localTransport, std::span<std::byte> out) {
+        auto *self = static_cast<LocalTransport *>(localTransport);
         return self->_receive(out);
     }
 

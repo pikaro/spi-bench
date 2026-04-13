@@ -1,8 +1,5 @@
 #pragma once
 
-#include <cstdio>
-#include <functional>
-#include <optional>
 #include <string_view>
 
 template <typename T> consteval std::string_view type_name() {
@@ -13,33 +10,27 @@ template <typename T> consteval std::string_view type_name() {
     return fun.substr(start, end - start);
 }
 
-struct InstanceIdentity {
+struct Identity {
     std::string_view name;
-    InstanceIdentity *owner = nullptr;
-
-    template <class T>
-    static consteval InstanceIdentity
-    create(std::string_view name,
-           std::optional<std::reference_wrapper<InstanceIdentity>> owner =
-               std::nullopt) {
-        InstanceIdentity ret{
-            .name = name,
-            .owner = owner ? &owner->get() : nullptr,
-        };
-
-        return ret;
-    }
 };
 
 template <class Derived> class HasIdentity {
   public:
-    [[nodiscard]] const InstanceIdentity &identity() const { return _identity; }
+    [[nodiscard]] const Identity &identity() const { return _identity; }
     [[nodiscard]] std::string_view name() const { return _identity.name; }
 
   protected:
-    explicit HasIdentity(std::string_view name = type_name<Derived>())
-        : _identity(InstanceIdentity::create<Derived>(name)) {}
+    explicit HasIdentity(std::string_view name = defaultName())
+        : _identity{.name = name} {}
 
   private:
-    const InstanceIdentity _identity;
+    static consteval std::string_view defaultName() {
+        if constexpr (requires { Derived::name; }) {
+            return Derived::name;
+        } else {
+            return type_name<Derived>();
+        }
+    }
+
+    const Identity _identity;
 };

@@ -5,6 +5,11 @@
 
 namespace Totem::PubSubBackend {
 
-using SubscriberCallback = ReturnCode (*)(const Envelope &frameView);
+using SubscriberCallback = ReturnCode (*)(void *subscriber,
+                                          const Envelope &frameView);
+struct Subscriber {
+    void *subscriber;
+    SubscriberCallback callback;
+};
 
 } // namespace Totem::PubSubBackend

@@ -19,9 +19,9 @@ class Registrar {
             desc.validate(),
             "Invalid metric group description for metric group %s:", desc.name);
         FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
-            nameKey, _store.addMetricGroup(desc.name, desc),
+            groupKey, _store.addMetricGroup(desc.name, desc),
             "Failed to add metric group %s:", desc.name);
-        return GroupHandle::make(nameKey);
+        return GroupHandle::make(groupKey);
     }
 
     std::expected<CounterHandle, ReturnCode>
@@ -33,9 +33,9 @@ class Registrar {
             desc.validate(),
             "Invalid metric description for counter metric %s:", desc.name);
         FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
-            nameKey, _store.addMetric(desc.name, desc),
+            metricKey, _store.addMetric(desc.name, desc),
             "Failed to add counter metric %s:", desc.name);
-        return CounterHandle::make(nameKey);
+        return CounterHandle::make(metricKey);
     }
 
     std::expected<GaugeHandle, ReturnCode> addGauge(const MetricDesc &desc) {
@@ -46,9 +46,9 @@ class Registrar {
             desc.validate(),
             "Invalid metric description for gauge metric %s:", desc.name);
         FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
-            nameKey, _store.addMetric(desc.name, desc),
+            metricKey, _store.addMetric(desc.name, desc),
             "Failed to add gauge metric %s:", desc.name);
-        return GaugeHandle::make(nameKey);
+        return GaugeHandle::make(metricKey);
     }
 
   private:

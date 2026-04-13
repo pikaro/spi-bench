@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Config.hh"
+#include "Data.hh"
 #include "Macros/Facade.hh"
 #include "PubSubBackend/Facade.hh" // IWYU pragma: export
 #include "Types/Error.hh"

@@ -58,16 +58,16 @@ class IngressBuffer
         return ByteArena::store(header, payload);
     }
 
-    static ReturnCode getRaw(void *opaque, const Envelope &envelope,
+    static ReturnCode getRaw(void *ingressBuffer, const Envelope &envelope,
                              size_t offset, std::span<std::byte> out) {
-        auto *ingress = static_cast<IngressBuffer *>(opaque);
-        return ingress->getRaw(envelope.header, offset, out);
+        auto *self = static_cast<IngressBuffer *>(ingressBuffer);
+        return self->getRaw(envelope.header, offset, out);
     }
 
-    static ReturnCode getRaw(void *opaque, const Header &header, size_t offset,
-                             std::span<std::byte> out) {
-        auto *ingress = static_cast<IngressBuffer *>(opaque);
-        return ingress->getRaw(header, offset, out);
+    static ReturnCode getRaw(void *ingressBuffer, const Header &header,
+                             size_t offset, std::span<std::byte> out) {
+        auto *self = static_cast<IngressBuffer *>(ingressBuffer);
+        return self->getRaw(header, offset, out);
     }
 
     ReturnCode getRaw(const Envelope &envelope, size_t offset,
@@ -86,14 +86,14 @@ class IngressBuffer
         return ByteArena::getRaw(header, offset, out);
     }
 
-    static ReturnCode release(void *opaque, const Envelope &envelope) {
-        auto *ingress = static_cast<IngressBuffer *>(opaque);
-        return ingress->release(envelope.header);
+    static ReturnCode release(void *ingressBuffer, const Envelope &envelope) {
+        auto *self = static_cast<IngressBuffer *>(ingressBuffer);
+        return self->release(envelope.header);
     }
 
-    static ReturnCode release(void *opaque, const Header &header) {
-        auto *ingress = static_cast<IngressBuffer *>(opaque);
-        return ingress->release(header);
+    static ReturnCode release(void *ingressBuffer, const Header &header) {
+        auto *self = static_cast<IngressBuffer *>(ingressBuffer);
+        return self->release(header);
     }
 
     ReturnCode release(const Envelope &envelope) {

@@ -21,7 +21,7 @@ class Registry : public HasLifecycle<Registry> {
     friend struct LifecycleContract<Registry>;
 
   public:
-    using SourceNameKey = Directory::EntryNameKey;
+    using SourceKey = Directory::EntryKey;
 
     DELETE_COPY(Registry)
     DELETE_MOVE(Registry)
@@ -32,56 +32,39 @@ class Registry : public HasLifecycle<Registry> {
 
     static constexpr const char *name = "TaskControllerRegistry::Registry";
 
-    ReturnCode registerSource(const char *sourceName, TaskSourceHooks hooks,
+    ReturnCode registerSource(SourceKey sourceKey, TaskSourceHooks hooks,
                               TaskSourceInfo info) {
-        FAIL_IF_NULL(sourceName, ERR(InvalidArgument),
-                     "Cannot register task source with null source name");
-        auto nameKey = SourceNameKey::fromCharPtr(sourceName);
-        return registerSource(nameKey, hooks, info);
-    }
-
-    ReturnCode registerSource(SourceNameKey sourceNameKey,
-                              TaskSourceHooks hooks, TaskSourceInfo info) {
-        auto ret = _directory.add(sourceNameKey, hooks, info);
-        FAIL_IF(!ret, ret.error(), "Failed to register task source %s",
-                sourceNameKey.name.data());
+        auto ret = _directory.add(sourceKey, hooks, info);
+        FAIL_IF(!ret, ret.error(), "Failed to register task source " SV_FMT,
+                SV_ARG(info.displayName));
         FAIL_IF_ERR_FWD(
             _metrics.addTask(),
-            "Failed to update metrics for registering task source %s",
-            sourceNameKey.name.data());
+            "Failed to update metrics for registering task source " SV_FMT,
+            SV_ARG(info.displayName));
         return OK();
     }
 
-    ReturnCode deregisterSource(const char *sourceName) {
-        FAIL_IF_NULL(sourceName, ERR(InvalidArgument),
-                     "Cannot deregister task source with null source name");
-        auto nameKey = SourceNameKey::fromCharPtr(sourceName);
-        return deregisterSource(nameKey);
-    }
-
-    ReturnCode deregisterSource(SourceNameKey sourceNameKey) {
-        auto ret = _directory.remove(sourceNameKey);
-        FAIL_IF_ERR(ret, ret, "Failed to deregister task source %s",
-                    sourceNameKey.name.data());
+    ReturnCode deregisterSource(SourceKey sourceKey) {
+        auto ret = _directory.remove(sourceKey);
+        FAIL_IF_ERR(ret, ret, "Failed to deregister task source");
         FAIL_IF_ERR_FWD(
             _metrics.removeTask(),
-            "Failed to update metrics for deregistering task source %s",
-            sourceNameKey.name.data());
+            "Failed to update metrics for deregistering task source");
         return OK();
     }
 
     ReturnCode reap() {
-        return _directory.withAll([](const SourceNameKey &sourceName,
-                                     SourceEntry &entry) -> ReturnCode {
+        return _directory.withAll([](const SourceKey &, SourceEntry &entry)
+                                      -> ReturnCode {
             if (entry.hooks.reapHook == nullptr) {
                 return OK();
             }
             FAIL_IF_UNEXPECTED_FWD(count, entry.hooks.reap(),
-                                   "Failed to reap tasks for source %s",
-                                   sourceName.name.data());
+                                   "Failed to reap tasks for source " SV_FMT,
+                                   SV_ARG(entry.displayName));
             if (count > 0) {
-                _log_i("Reaped %u tasks for source %s", count,
-                       sourceName.name.data());
+                _log_i("Reaped %u tasks for source " SV_FMT, count,
+                       SV_ARG(entry.displayName));
             }
             return OK();
         });

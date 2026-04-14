@@ -56,6 +56,9 @@ class SubscriptionManager {
     ReturnCode registerSubscription(TopicId topic) {
         FAIL_IF(topic == 0, ERR(InvalidArgument),
                 "Cannot subscribe to topic 0");
+        _log_i("SubscriptionManager: register local subscription for "
+               "topic " SV_FMT,
+               SV_ARG(magic_enum::enum_name(static_cast<Topic>(topic))));
 
         FAIL_IF_UNEXPECTED_FWD(
             _, _setSubscriberCount(topic, 1),
@@ -63,6 +66,9 @@ class SubscriptionManager {
             SV_ARG(magic_enum::enum_name(static_cast<Topic>(topic))));
 
         if (subscribed(topic)) {
+            _log_d("SubscriptionManager: topic " SV_FMT
+                   " already subscribed locally",
+                   SV_ARG(magic_enum::enum_name(static_cast<Topic>(topic))));
             return OK();
         }
 
@@ -83,6 +89,9 @@ class SubscriptionManager {
     ReturnCode deregisterSubscription(TopicId topic) {
         FAIL_IF(topic == 0, ERR(InvalidArgument),
                 "Cannot subscribe to topic 0");
+        _log_i("SubscriptionManager: deregister local subscription for "
+               "topic " SV_FMT,
+               SV_ARG(magic_enum::enum_name(static_cast<Topic>(topic))));
 
         if (!subscribed(topic)) {
             FAIL(ERR(NotFound), "Not subscribed to topic " SV_FMT,
@@ -95,6 +104,10 @@ class SubscriptionManager {
             SV_ARG(magic_enum::enum_name(static_cast<Topic>(topic))));
 
         if (count > 0) {
+            _log_d("SubscriptionManager: topic " SV_FMT
+                   " still has %u local subscribers",
+                   SV_ARG(magic_enum::enum_name(static_cast<Topic>(topic))),
+                   count);
             return OK();
         }
 
@@ -122,6 +135,9 @@ class SubscriptionManager {
             event, envelope.getPayloadAs<PubSubEvent>(),
             "Failed to get PubSub event from pool for message ID %u",
             envelope.header.messageId);
+        _log_d("SubscriptionManager: decoded PubSub event %u for topic " SV_FMT,
+               static_cast<unsigned>(event.type),
+               SV_ARG(magic_enum::enum_name(static_cast<Topic>(event.topic))));
         return handlePubSubEvent(event, ingressTransport);
     }
 
@@ -129,14 +145,27 @@ class SubscriptionManager {
         const PubSubEvent &event,
         std::optional<TransportId> ingressTransport = std::nullopt) {
         if (!ingressTransport.has_value()) {
+            _log_d(
+                "SubscriptionManager: ignoring local PubSub control event "
+                "for topic " SV_FMT,
+                SV_ARG(magic_enum::enum_name(static_cast<Topic>(event.topic))));
             return OK();
         }
 
         switch (event.type) {
         case SubscribeEventType::Register:
+            _log_i(
+                "SubscriptionManager: transport %u subscribed to topic " SV_FMT,
+                *ingressTransport,
+                SV_ARG(magic_enum::enum_name(static_cast<Topic>(event.topic))));
             return _transporters.subscribeTransport(*ingressTransport,
                                                     event.topic);
         case SubscribeEventType::Unregister:
+            _log_i(
+                "SubscriptionManager: transport %u unsubscribed from "
+                "topic " SV_FMT,
+                *ingressTransport,
+                SV_ARG(magic_enum::enum_name(static_cast<Topic>(event.topic))));
             return _transporters.unsubscribeTransport(*ingressTransport,
                                                       event.topic);
         default:
@@ -147,6 +176,10 @@ class SubscriptionManager {
 
   private:
     ReturnCode _sendPubSubEvent(const PubSubEvent &event) {
+        _log_d(
+            "SubscriptionManager: emitting control event %u for topic " SV_FMT,
+            static_cast<unsigned>(event.type),
+            SV_ARG(magic_enum::enum_name(static_cast<Topic>(event.topic))));
         FAIL_IF_UNEXPECTED_FWD(messageId, _eventPool.store(event),
                                "Failed to store subscription event");
         auto envelopeResult = Envelope::make<PubSubEvent>({
@@ -220,8 +253,6 @@ class SubscriptionManager {
     PublishCallback _publishCallback;
     EventPool _eventPool;
     TransporterDirectory &_transporters;
-
-    using DefaultError = CoreError;
 };
 
 } // namespace Totem::PubSubBackend::detail

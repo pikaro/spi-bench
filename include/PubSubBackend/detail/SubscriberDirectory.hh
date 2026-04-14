@@ -1,11 +1,11 @@
 #pragma once
 
-#include "Common.hh"
-
 #include "Generic/Directory.hh"
+#include "Macros/Facade.hh"
 #include "PubSubBackend/Interfaces/Subscriber.hh"
 #include "PubSubBackend/Interfaces/Types.hh"
 #include "PubSubBackend/detail/Types.hh"
+#include "Types/Error.hh"
 #include <cstdint>
 #include <cstring>
 #include <expected>
@@ -60,9 +60,6 @@ class SubscriberDirectory : public SubscriberDirectoryImpl {
                     this->ownerName());
         return topic;
     }
-
-  private:
-    using DefaultError = CoreError;
 };
 
 } // namespace Totem::PubSubBackend::detail

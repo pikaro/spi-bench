@@ -36,8 +36,6 @@ class Store {
     void _enableRegistration() { _directory.enableRegistration(); }
 
     Directory _directory;
-
-    using DefaultError = CoreError;
 };
 
 } // namespace Totem::CommandBackend::detail

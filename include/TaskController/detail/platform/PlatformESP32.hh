@@ -1,13 +1,18 @@
 #pragma once
 
-#include "Common.hh"
-
+#include "FreeRTOSConfig.h"
+#include "Macros/Facade.hh"
+#include "Platform/PlatformSelect.hh"
 #include "TaskController/Interfaces/Config.hh"
 #include "TaskController/Interfaces/TaskRuntimeSnapshot.hh"
 #include "TaskController/detail/platform/PlatformCommon.hh"
+#include "Types/Error.hh"
 #include "Types/Signal.hh"
 #include "esp_task_wdt.h"
 #include "freertos/idf_additions.h"
+#include "freertos/projdefs.h"
+#include "portmacro.h"
+#include "sdkconfig.h"
 #include <cstdint>
 #include <expected>
 

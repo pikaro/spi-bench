@@ -1,6 +1,9 @@
 #pragma once
 
 #include "Base.hh"
+#include "Types/Error.hh"
+
+using DefaultError = CoreError;
 
 #define INTERNAL_ERR_DEFAULT(err) ReturnCode::from(DefaultError::err)
 #define INTERNAL_ERR_DOMAIN(domain, err) ReturnCode::from(domain::err)

@@ -1,7 +1,8 @@
 #pragma once
 
 #include "Macros/Facade.hh"
-#include "Platform/Platform.hh"
+#include "Mutex/Facade.hh"
+#include "Platform/PlatformSelect.hh"
 #include "TaskController/Interfaces/Config.hh"
 #include "TaskController/Interfaces/TaskHooks.hh"
 #include "TaskController/Interfaces/TaskRuntimeSnapshot.hh"
@@ -41,7 +42,7 @@ class Runner {
     }
 
     ReturnCode requestStop() {
-        ::platform::ScopedSpinlockGuard guard{_lock};
+        Mutex::ScopedSpinlockGuard guard{_lock};
         FAIL_IF_NULL(_handle, ERR(OperationFailed),
                      "Cannot request stop on unstarted runner");
         auto result = Platform::signal_task(_handle, Signal::Stop);
@@ -53,7 +54,7 @@ class Runner {
     void kill() {
         TaskHandle handle = nullptr;
         {
-            ::platform::ScopedSpinlockGuard guard{_lock};
+            Mutex::ScopedSpinlockGuard guard{_lock};
             FAIL_IF_NULL_VOID(_handle, "Cannot kill unstarted runner");
             handle = _handle;
             _handle = nullptr;
@@ -102,7 +103,7 @@ class Runner {
         uintptr_t nativeHandle = 0;
         bool hasHandle = false;
         {
-            ::platform::ScopedSpinlockGuard guard{_lock};
+            Mutex::ScopedSpinlockGuard guard{_lock};
             if (_handle != nullptr) {
                 hasHandle = true;
                 nativeHandle = reinterpret_cast<uintptr_t>(_handle);
@@ -209,7 +210,7 @@ class Runner {
         // Runner storage. Reap may destroy the Runner as soon as hasStopped()
         // becomes visible.
         {
-            ::platform::ScopedSpinlockGuard guard{self->_lock};
+            Mutex::ScopedSpinlockGuard guard{self->_lock};
             self->_handle = nullptr;
         }
         self->_stopResult = result;
@@ -233,7 +234,7 @@ class Runner {
         }
 
         {
-            ::platform::ScopedSpinlockGuard guard{_lock};
+            Mutex::ScopedSpinlockGuard guard{_lock};
             _handle = result.handle;
         }
 
@@ -252,9 +253,7 @@ class Runner {
     std::atomic<bool> _hasEverStarted = false;
     std::atomic<bool> _hasStopResult = false;
     std::atomic<bool> _hasSnapshot = false;
-    ::platform::Spinlock _lock = portMUX_INITIALIZER_UNLOCKED;
-
-    using DefaultError = CoreError;
+    ::platform::Spinlock _lock = ::platform::create_spinlock();
 };
 
 } // namespace Totem::TaskController::detail

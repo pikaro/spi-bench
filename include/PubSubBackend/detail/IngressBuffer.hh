@@ -32,6 +32,7 @@ class IngressBuffer
 
     std::expected<Envelope, ReturnCode>
     storeFrame(std::span<const std::byte> frame) {
+        _log_d("%s: storing raw frame of %zu bytes", name, frame.size());
         FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
             data, SerDe::deserializeRaw(frame),
             "Failed to deserialize frame for storage");
@@ -55,6 +56,8 @@ class IngressBuffer
     ReturnCode store(const Header &header, std::span<const std::byte> payload) {
         FAIL_IF(payload.size() != header.payloadSize, ERR(InvalidArgument),
                 "Payload size does not match size in header");
+        _log_d("%s: store payload of %zu bytes for " MAGIC_PUBSUB_SV_FMT, name,
+               payload.size(), MAGIC_PUBSUB_SV_ARG(header));
         return ByteArena::store(header, payload);
     }
 
@@ -101,11 +104,10 @@ class IngressBuffer
     }
 
     ReturnCode release(const Header &header) {
+        _log_d("%s: release " MAGIC_PUBSUB_SV_FMT, name,
+               MAGIC_PUBSUB_SV_ARG(header));
         return ByteArena::release(header);
     }
-
-  private:
-    using DefaultError = CoreError;
 };
 
 } // namespace Totem::PubSubBackend::detail

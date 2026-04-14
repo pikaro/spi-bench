@@ -1,10 +1,12 @@
 #pragma once
 
+#include "FreeRTOSConfig.h"
 #include "Macros/Facade.hh"
 #include "Platform/PlatformSelect.hh"
 #include "TaskController/Interfaces/TaskRuntimeSnapshot.hh"
 #include "Types/Error.hh"
 #include "freertos/idf_additions.h"
+#include "sdkconfig.h"
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -55,9 +57,6 @@ struct Platform {
         return ::platform::ticks_to_ms(static_cast<::platform::Tick>(value));
 #endif
     }
-
-  private:
-    using DefaultError = CoreError;
 };
 
 } // namespace Totem::TaskControllerRegistry::detail::platform

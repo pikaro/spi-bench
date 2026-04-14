@@ -5,6 +5,7 @@
 #include "StaticConfig/Metrics.hh"
 #include "Types/Error.hh"
 #include "Types/Metrics.hh"
+#include <cstdint>
 #include <cstring>
 #include <expected>
 
@@ -25,8 +26,7 @@ class MetricGroupDirectory : public MetricGroupDirectoryImpl {
     }
 
     std::expected<EntryKey, ReturnCode>
-    add(EntryKey metricGroupNameKey,
-        const MetricGroupDesc &metricGroupDesc) {
+    add(EntryKey metricGroupNameKey, const MetricGroupDesc &metricGroupDesc) {
         return _addImpl(metricGroupNameKey, {.desc = metricGroupDesc});
     }
 };

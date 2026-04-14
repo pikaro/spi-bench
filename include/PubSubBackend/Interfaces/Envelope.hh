@@ -130,9 +130,6 @@ struct Envelope {
             .release = def.release,
         };
     }
-
-  private:
-    using DefaultError = CoreError;
 };
 
 } // namespace Totem::PubSubBackend

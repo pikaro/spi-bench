@@ -79,6 +79,21 @@ void setup() {
                  "Failed to add UART transport to command controller");
     CommandService::setBackend(commandController);
 
+    ABORT_IF_ERR(register_core_commands(),
+                 "Failed to register core commands to command controller");
+
+    ABORT_IF_UNEXPECTED(uartSink, uart.sink(),
+                        "Failed to get sink from UART output");
+
+    ABORT_IF_ERR_BEGIN(aggregator.begin({.defaultLogLevel = LogLevel::Debug}));
+    ABORT_IF_ERR(aggregator.addSink(uartSink),
+                 "Failed to add UART sink to aggregator");
+
+    ABORT_IF_ERR(LoggingService::setBackend(aggregator),
+                 "Failed to set logger backend to aggregator");
+
+    ABORT_IF_ERR_BEGIN(monitoring.begin());
+
     ABORT_IF_ERR_BEGIN(pubSubNode1.begin());
     ABORT_IF_ERR_BEGIN(pubSubNode2.begin());
 
@@ -148,22 +163,6 @@ void setup() {
     (void)sub5;
     (void)sub6;
     (void)sub7;
-
-    ABORT_IF_ERR(register_core_commands(),
-                 "Failed to register core commands to command controller");
-
-    ABORT_IF_UNEXPECTED(uartSink, uart.sink(),
-                        "Failed to get sink from UART output");
-
-    ABORT_IF_ERR_BEGIN(aggregator.begin());
-    ABORT_IF_ERR(aggregator.addSink(uartSink),
-                 "Failed to add UART sink to aggregator");
-
-    ABORT_IF_ERR(LoggingService::setBackend(aggregator),
-                 "Failed to set logger backend to aggregator");
-
-    ABORT_IF_ERR_BEGIN(monitoring.begin());
-
     _log_i("Setup complete");
 
     _log_d("This is a debug message");

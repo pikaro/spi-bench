@@ -168,8 +168,6 @@ class UartTransport {
     size_t _lastCommandLen = 0;
     bool _hasLastCommand = false;
     bool _pendingLastCommand = false;
-
-    using DefaultError = CoreError;
 };
 
 } // namespace Totem::CommandBackend::detail::Transports

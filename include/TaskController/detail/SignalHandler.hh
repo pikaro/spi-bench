@@ -1,10 +1,10 @@
 #pragma once
 
-#include "Common.hh"
-
+#include "Macros/Facade.hh"
 #include "TaskController/Interfaces/Config.hh"
 #include "TaskController/Interfaces/TaskHooks.hh"
 #include "TaskController/detail/PlatformSelect.hh"
+#include "Types/Error.hh"
 #include "Types/Signal.hh"
 #include <cstdint>
 
@@ -81,8 +81,6 @@ class SignalHandler {
     bool _useNotify = false;
     uint32_t _notifyTimeoutMs = 0;
     bool _notifyExpectTimeout = true;
-
-    using DefaultError = CoreError;
 };
 
 } // namespace Totem::TaskController::detail

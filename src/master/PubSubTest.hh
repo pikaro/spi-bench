@@ -27,8 +27,7 @@ class Foo {
         FAIL_IF_UNEXPECTED_FWD(message, envelope.getPayloadAs<Message>(),
                                "Failed to decode message payload");
         _log_i("%s received message on topic " SV_FMT, name,
-               MAGIC_SV_ARG(Totem::Data::PubSub::Topic,
-                            envelope.header.topic));
+               MAGIC_SV_ARG(Totem::Data::PubSub::Topic, envelope.header.topic));
         _log_i("Flag: %s", message.flag ? "true" : "false");
         _log_i("Int value: %d", message.intVal);
         _log_i("Uint32 value: %u", message.uint32Val);
@@ -42,9 +41,6 @@ class Foo {
         }
         return OK();
     }
-
-  private:
-    using DefaultError = CoreError;
 };
 
 static Message make_test_message() {

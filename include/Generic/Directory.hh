@@ -1,8 +1,7 @@
 #pragma once
 
-#include "Common.hh"
-
 #include "Base/HasMutex.hh"
+#include "Macros/Facade.hh"
 #include "Types/Collection.hh"
 #include "Types/Error.hh"
 #include <array>
@@ -530,8 +529,6 @@ class Directory : HasMutex<Directory<Key, Entry, N, Representation>> {
     SlottedMapType _entries;
     const char *_ownerName;
     DirectoryHooks<Entry> _hooks{};
-
-    using DefaultError = CoreError;
 };
 
 template <typename Key, typename Entry, size_t N,
@@ -562,9 +559,6 @@ class GettableDirectory : public Directory<Key, Entry, N, Representation> {
         }
         return std::move(*out);
     }
-
-  private:
-    using DefaultError = CoreError;
 };
 
 inline constexpr MutexContract<Directory<void *, void *, 1>>

@@ -53,8 +53,6 @@ class Registrar {
 
   private:
     Store &_store;
-
-    using DefaultError = CoreError;
 };
 
 } // namespace Totem::MetricsBackend::detail

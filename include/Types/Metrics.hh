@@ -60,8 +60,6 @@ struct MetricGroupDesc {
         }
         return OK();
     }
-
-    using DefaultError = CoreError;
 };
 
 struct MetricDesc {
@@ -90,6 +88,4 @@ struct MetricDesc {
         }
         return OK();
     }
-
-    using DefaultError = CoreError;
 };

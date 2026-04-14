@@ -133,8 +133,6 @@ struct TaskSourceHooks {
         return self != nullptr && forEachSnapshotHook != nullptr &&
                taskCountHook != nullptr;
     }
-
-    using DefaultError = CoreError;
 };
 
 } // namespace Totem::TaskControllerRegistry

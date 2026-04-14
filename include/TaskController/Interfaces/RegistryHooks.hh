@@ -4,6 +4,7 @@
 #include "TaskControllerRegistry/Interfaces/TaskSourceHooks.hh"
 #include "Types/Error.hh"
 #include <concepts>
+#include <cstdint>
 
 namespace Totem::TaskController {
 
@@ -15,7 +16,8 @@ concept HasRegisterSource =
         { cls.registerSource(key, hooks, info) } -> std::same_as<ReturnCode>;
     };
 
-template <class T> concept HasDeregisterSource = requires(T &cls, uintptr_t key) {
+template <class T>
+concept HasDeregisterSource = requires(T &cls, uintptr_t key) {
     { cls.deregisterSource(key) } -> std::same_as<ReturnCode>;
 };
 

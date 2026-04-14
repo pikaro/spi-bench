@@ -1,113 +1,89 @@
 
-[1] ??:0
+[1] /Users/david.reis/.platformio/packages/framework-espidf@3.50500.0/components/esp_system/task_wdt/task_wdt.c:436
 
-    ??
+    task_wdt_timeout_handling
 
-[2] /builds/idf/crosstool-NG/.build/xtensa-esp-elf/src/newlib/newlib/libc/stdio/vfprintf.c:1521
+[2] /Users/david.reis/.platformio/packages/framework-espidf@3.50500.0/components/esp_system/task_wdt/task_wdt.c:509
 
-    _svfprintf_r
+    task_wdt_isr
 
-[3] /builds/idf/crosstool-NG/.build/xtensa-esp-elf/src/newlib/newlib/libc/stdio/vsnprintf.c:70
+[3] /Users/david.reis/.platformio/packages/framework-espidf@3.50500.0/components/xtensa/xtensa_vectors.S:1240
 
-    _vsnprintf_r
+    _xt_lowint1
 
-[4] /builds/idf/crosstool-NG/.build/xtensa-esp-elf/src/newlib/newlib/libc/stdio/vsnprintf.c:40 #1
-
-    vsnprintf
-
-[5] ./include/Services/Logging.hh:142 #1
-
-    Totem::LoggerSupport::detail::LoggingService::_formatRecord(LogRecord&, LogLevel, char const*, char const*, __va_list_tag)
-
-[6] ./include/Services/Logging.hh:107
-
-    Totem::LoggerSupport::detail::LoggingService::vlogf(LogLevel, char const*, char const*, __va_list_tag)
-
-[7] ./include/Services/Logging.hh:98
-
-    Totem::LoggerSupport::detail::LoggingService::logf(LogLevel, char const*, char const*, ...)
-
-[8] ./src/master/PubSubTest.hh:29 #1
-
-    Foo::handleMessage(Totem::PubSubBackend::Envelope const&) const
-
-[9] ./src/master/PubSubTest.hh:22
-
-    Foo::callback(void*, Totem::PubSubBackend::Envelope const&)
-
-[10] ./include/PubSubBackend/detail/Publisher.hh:36
+[4] ./include/PubSubBackend/detail/Publisher.hh:42 #6
 
     Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}::operator()(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&) const
 
-[11] [xten]/include/c++/14.2.0/bits/invoke.h:61
+[5] [xten]/include/c++/14.2.0/bits/invoke.h:61
 
     ReturnCode std::__invoke_impl<ReturnCode, Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}&, unsigned int&, Totem::PubSubBackend::detail::SubscriberEntry&>(std::__invoke_other, Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}&, unsigned int&, Totem::PubSubBackend::detail::SubscriberEntry&)
 
-[12] [xten]/include/c++/14.2.0/bits/invoke.h:61
+[6] [xten]/include/c++/14.2.0/bits/invoke.h:61
 
     ReturnCode std::__invoke_impl<ReturnCode, std::reference_wrapper<Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}>&, unsigned int&, Totem::PubSubBackend::detail::SubscriberEntry&>(std::__invoke_other, std::reference_wrapper<Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}>&, unsigned int&, Totem::PubSubBackend::detail::SubscriberEntry&)
 
-[13] ./include/Generic/Directory.hh:508
+[7] ./include/Generic/Directory.hh:508
 
     ReturnCode Directory<unsigned int, Totem::PubSubBackend::detail::SubscriberEntry, 8u, DirectoryRepresentation<unsigned int, Totem::PubSubBackend::detail::SubscriberEntry> >::_withAllImpl<SlottedMap<unsigned int, Totem::PubSubBackend::detail::SubscriberEntry, 8u>, std::reference_wrapper<Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}>, std::reference_wrapper<Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#2}>&>(SlottedMap<unsigned int, Totem::PubSubBackend::detail::SubscriberEntry, 8u>&, std::reference_wrapper<Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}>&&, std::reference_wrapper<Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#2}>&)
 
-[14] ./include/Generic/Directory.hh:182
+[8] ./include/Generic/Directory.hh:182
 
     ReturnCode Directory<unsigned int, Totem::PubSubBackend::detail::SubscriberEntry, 8u, DirectoryRepresentation<unsigned int, Totem::PubSubBackend::detail::SubscriberEntry> >::withAll<Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}, Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#2}>(Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}&&, Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#2}&&)::{lambda(auto:1&&, auto:2&&)#1}::operator()<std::reference_wrapper<Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}>, std::reference_wrapper<Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#2}> >(Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}&&, Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#2}&&) const
 
-[15] [xten]/include/c++/14.2.0/tuple:2921
+[9] [xten]/include/c++/14.2.0/tuple:2921
 
     decltype(auto) std::__apply_impl<Directory<unsigned int, Totem::PubSubBackend::detail::SubscriberEntry, 8u, DirectoryRepresentation<unsigned int, Totem::PubSubBackend::detail::SubscriberEntry> >::withAll<Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}, Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#2}>(Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}&&, Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#2}&&)::{lambda(auto:1&&, auto:2&&)#1}, std::tuple<std::reference_wrapper<Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}>, std::reference_wrapper<Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#2}> >, 0u, 1u>(Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}&&, Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#2}&&, std::integer_sequence<unsigned int, 0u, 1u>)
 
-[16] ./include/Base/HasMutex.hh:32
+[10] ./include/Base/HasMutex.hh:32
 
     Totem::Mutex::detail::MutexExecSpec<Directory<unsigned int, Totem::PubSubBackend::detail::SubscriberEntry, 8u, DirectoryRepresentation<unsigned int, Totem::PubSubBackend::detail::SubscriberEntry> >::withAll<Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}, Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#2}>(Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}&&, Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#2}&&)::{lambda(auto:1&&, auto:2&&)#1}, std::reference_wrapper<Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}>, std::reference_wrapper<Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#2}> >::R Totem::Core::HasMutex<Directory<unsigned int, Totem::PubSubBackend::detail::SubscriberEntry, 8u, DirectoryRepresentation<unsigned int, Totem::PubSubBackend::detail::SubscriberEntry> > >::_withMutex<Directory<unsigned int, Totem::PubSubBackend::detail::SubscriberEntry, 8u, DirectoryRepresentation<unsigned int, Totem::PubSubBackend::detail::SubscriberEntry> >::withAll<Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}, Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#2}>(Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}&&, Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#2}&&)::{lambda(auto:1&&, auto:2&&)#1}, std::reference_wrapper<Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}>, std::reference_wrapper<Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#2}> >(Totem::Mutex::detail::MutexExecSpec<Directory<unsigned int, Totem::PubSubBackend::detail::SubscriberEntry, 8u, DirectoryRepresentation<unsigned int, Totem::PubSubBackend::detail::SubscriberEntry> >::withAll<Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}, Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#2}>(Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}&&, Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#2}&&)::{lambda(auto:1&&, auto:2&&)#1}, std::reference_wrapper<Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}>, std::reference_wrapper<Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#2}> >)
 
-[17] ./include/Base/HasMutex.hh:62
+[11] ./include/Base/HasMutex.hh:62
 
     auto Totem::Core::HasMutex<Directory<unsigned int, Totem::PubSubBackend::detail::SubscriberEntry, 8u, DirectoryRepresentation<unsigned int, Totem::PubSubBackend::detail::SubscriberEntry> > >::_locked<ReturnCode, Directory<unsigned int, Totem::PubSubBackend::detail::SubscriberEntry, 8u, DirectoryRepresentation<unsigned int, Totem::PubSubBackend::detail::SubscriberEntry> >::withAll<Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}, Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#2}>(Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}&&, Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#2}&&)::{lambda(auto:1&&, auto:2&&)#1}&, std::reference_wrapper<Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}>&, std::reference_wrapper<Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#2}>&>(char const*, Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}&&, Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#2}&&, std::reference_wrapper<Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}>&, std::reference_wrapper<Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#2}>&)
 
-[18] ./include/Generic/Directory.hh:187
+[12] ./include/Generic/Directory.hh:187
 
     ReturnCode Directory<unsigned int, Totem::PubSubBackend::detail::SubscriberEntry, 8u, DirectoryRepresentation<unsigned int, Totem::PubSubBackend::detail::SubscriberEntry> >::withAll<Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}, Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#2}>(Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#1}&&, Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)::{lambda(unsigned int const&, Totem::PubSubBackend::detail::SubscriberEntry const&)#2}&&)
 
-[19] ./include/PubSubBackend/detail/Publisher.hh:33
+[13] ./include/PubSubBackend/detail/Publisher.hh:39
 
     Totem::PubSubBackend::detail::Publisher::publishToSubscribers(Totem::PubSubBackend::Envelope const&)
 
-[20] ./include/PubSubBackend/detail/Drainer.hh:153
+[14] ./include/PubSubBackend/detail/Drainer.hh:176
 
     Totem::PubSubBackend::detail::Drainer::_publishFrame(Totem::PubSubBackend::Envelope const&, std::optional<unsigned char>)
 
-[21] ./include/PubSubBackend/detail/Drainer.hh:84
+[15] ./include/PubSubBackend/detail/Drainer.hh:96
 
     Totem::PubSubBackend::detail::Drainer::_publishFromQueue()
 
-[22] ./include/PubSubBackend/detail/Drainer.hh:44
+[16] ./include/PubSubBackend/detail/Drainer.hh:47
 
     Totem::PubSubBackend::detail::Drainer::drain()
 
-[23] ./include/PubSubBackend/detail/Node.hh:170
+[17] ./include/PubSubBackend/detail/Node.hh:180
 
     Totem::PubSubBackend::detail::Node::_onTaskStep()
 
-[24] ./include/TaskController/Interfaces/TaskHooks.hh:75
+[18] ./include/TaskController/Interfaces/TaskHooks.hh:75
 
     _ZZN5Totem14TaskController9TaskHooks4bindINS_13PubSubBackend6detail4NodeEEES1_RT_QrqXstNS1_8ContractIS6_EEEENKUlPvE_clESA_
 
-[25] ./include/TaskController/Interfaces/TaskHooks.hh:31
+[19] ./include/TaskController/Interfaces/TaskHooks.hh:31
 
     Totem::TaskController::TaskHooks::onStep() const
 
-[26] ./include/TaskController/detail/Loop.hh:48
+[20] ./include/TaskController/detail/Loop.hh:48
 
     Totem::TaskController::detail::Loop::run()
 
-[27] ./include/TaskController/detail/Runner.hh:200
+[21] ./include/TaskController/detail/Runner.hh:200
 
     Totem::TaskController::detail::Runner::_run(void*)
 
-[28] /Users/david.reis/.platformio/packages/framework-espidf@3.50500.0/components/freertos/FreeRTOS-Kernel/portable/xtensa/port.c:139
+[22] /Users/david.reis/.platformio/packages/framework-espidf@3.50500.0/components/freertos/FreeRTOS-Kernel/portable/xtensa/port.c:139
 
     vPortTaskWrapper
 

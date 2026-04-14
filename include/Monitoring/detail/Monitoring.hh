@@ -138,8 +138,6 @@ class Monitoring : public HasLifecycle<Monitoring>,
     std::array<TaskController::TaskRuntimeSnapshot, MaxTaskSnapshots>
         _taskSnapshots{};
     uint8_t _taskCount = 0;
-
-    using DefaultError = CoreError;
 };
 
 inline constexpr LifecycleContract<Monitoring> _monitoring_lifecycle;

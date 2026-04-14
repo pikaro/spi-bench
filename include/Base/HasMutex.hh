@@ -1,8 +1,7 @@
 #pragma once
 
-#include "Common.hh"
-
 #include "Concepts/Base.hh"
+#include "Macros/Facade.hh"
 #include "Mutex/Facade.hh"
 #include <cstdint>
 #include <type_traits>

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "FreeRTOSConfig.h"
 #include "Macros/Facade.hh"
 #include "Monitoring/Interfaces/Sink.hh"
 #include "Monitoring/detail/Types.hh"
@@ -8,7 +9,9 @@
 #include "esp_heap_caps.h"
 #include "freertos/idf_additions.h"
 #include "freertos/portable.h"
+#include "freertos/projdefs.h"
 #include "portmacro.h"
+#include "sdkconfig.h"
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -116,8 +119,6 @@ struct Platform {
             .flags = flags,
         };
     }
-
-    using DefaultError = CoreError;
 };
 
 } // namespace Totem::Monitoring::detail::platform

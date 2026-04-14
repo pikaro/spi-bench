@@ -103,8 +103,6 @@ class Loop {
     TaskHooks &_hooks;
     StateManager &_stateManager;
     SignalHandler _signalHandler{_hooks, _config};
-
-    using DefaultError = CoreError;
 };
 
 } // namespace Totem::TaskController::detail

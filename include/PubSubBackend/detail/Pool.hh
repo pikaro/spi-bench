@@ -38,6 +38,7 @@ class Pool : public HasMutex<Pool<T, Capacity>> {
             if (!slot.value) {
                 slot.value.emplace(value);
                 slot.messageId = _nextMessageIdCallback(_pubSubNode);
+                _log_d("%s: stored messageId %u", name, slot.messageId);
                 return slot.messageId;
             }
         }
@@ -53,6 +54,8 @@ class Pool : public HasMutex<Pool<T, Capacity>> {
     ReturnCode release(const Envelope &envelope) {
         for (auto &slot : _storage) {
             if (slot.value && slot.messageId == envelope.header.messageId) {
+                _log_d("%s: release messageId %u", name,
+                       envelope.header.messageId);
                 slot.value.reset();
                 return OK();
             }
@@ -107,8 +110,6 @@ class Pool : public HasMutex<Pool<T, Capacity>> {
     void *_pubSubNode;
     std::array<Slot, Capacity> _storage;
     NextMessageIdCallback _nextMessageIdCallback;
-
-    using DefaultError = CoreError;
 };
 
 inline constexpr MutexContract<Pool<int, 0>> _pool_mutex_contract;

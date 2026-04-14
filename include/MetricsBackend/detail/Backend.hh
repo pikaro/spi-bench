@@ -3,7 +3,6 @@
 #include "MetricsBackend/detail/Recorder.hh"
 #include "MetricsBackend/detail/Registrar.hh"
 #include "MetricsBackend/detail/Store.hh"
-#include "Types/Error.hh"
 
 namespace Totem::MetricsBackend::detail {
 
@@ -20,8 +19,6 @@ class Backend {
     Store _store;
     Registrar _registrar;
     Recorder _recorder;
-
-    using DefaultError = CoreError;
 };
 
 } // namespace Totem::MetricsBackend::detail

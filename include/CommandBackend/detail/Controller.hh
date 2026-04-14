@@ -123,8 +123,6 @@ class Controller : public HasLifecycle<Controller, Config>,
     Store _store;
     Registrar _registrar;
     std::array<Transport, CommandConfig::maxTransports> _transports;
-
-    using DefaultError = CoreError;
 };
 
 inline constexpr LifecycleContract<Controller, Config> _controller_lifecycle;

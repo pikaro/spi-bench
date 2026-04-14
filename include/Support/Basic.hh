@@ -37,3 +37,12 @@ template <typename Enum, typename T = std::underlying_type_t<Enum>>
 constexpr bool has_flag(T value, Enum flag) {
     return (T(value) & static_cast<T>(flag)) != 0;
 }
+
+[[nodiscard]] constexpr std::size_t bounded_strlen(const char *str,
+                                                   std::size_t max) noexcept {
+    std::size_t i = 0;
+    while (i < max && str[i] != '\0') {
+        ++i;
+    }
+    return i;
+}

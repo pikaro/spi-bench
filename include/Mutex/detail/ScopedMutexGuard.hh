@@ -1,8 +1,7 @@
 #pragma once
 
-#include "Common.hh"
-
 #include "Concepts/Base.hh"
+#include "Macros/Facade.hh"
 #include "PlatformSelect.hh"
 #include "freertos/FreeRTOS.h" // IWYU pragma: keep
 #include "freertos/semphr.h"

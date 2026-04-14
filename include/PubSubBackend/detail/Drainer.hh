@@ -28,6 +28,8 @@ struct DrainerDependencies {
 
 class Drainer {
     using TransporterKey = TransporterDirectory::EntryKey;
+    using Topic = typename Spec::Topic;
+    using NodeId = typename Spec::NodeId;
 
     static constexpr auto kMaxInFlightMessages =
         Spec::Limits::maxInFlightMessages;
@@ -54,8 +56,14 @@ class Drainer {
             if (frame.valid() && (frame.pendingMask & mask) != 0) {
                 if (frame.envelope.header.messageId ==
                     envelope.header.messageId) {
+                    _log_d("Drainer: ack from transport " SV_FMT
+                           " for " MAGIC_PUBSUB_SV_FMT,
+                           SV_ARG(magic_enum::enum_name(transportId)),
+                           MAGIC_PUBSUB_SV_ARG(envelope.header));
                     frame.pendingMask &= ~mask;
                     if (--frame.pendingCount == 0) {
+                        _log_d("Drainer: final ack for " MAGIC_PUBSUB_SV_FMT,
+                               MAGIC_PUBSUB_SV_ARG(envelope.header));
                         if (frame.envelope.release != nullptr) {
                             ret.combine(frame.envelope.release(
                                 frame.envelope.owner, envelope));
@@ -81,6 +89,8 @@ class Drainer {
             ret.combine(
                 Totem::Queue::Platform::receive(*_publishQueue, &item, 0));
             if (ret.ok()) {
+                _log_d("Drainer: dequeued local publish " MAGIC_PUBSUB_SV_FMT,
+                       MAGIC_PUBSUB_SV_ARG(item.header));
                 ret.combine(_publishFrame(item));
             }
         }
@@ -128,6 +138,8 @@ class Drainer {
                 return OK();
             });
         if (pendingCount == 0) {
+            _log_d("Drainer: no interested transports for " MAGIC_PUBSUB_SV_FMT,
+                   MAGIC_PUBSUB_SV_ARG(envelope.header));
             return std::unexpected(ERR(NotFound));
         }
         frame.pendingMask = mask;
@@ -142,6 +154,10 @@ class Drainer {
         }
         FAIL_IF(stored < 0, std::unexpected(ERR(Overflow)),
                 "No space to store in-flight message");
+        _log_d("Drainer: stored in-flight message in slot %d with pendingMask "
+               "0x%02x and pendingCount %u for " MAGIC_PUBSUB_SV_FMT,
+               stored, static_cast<unsigned>(mask), pendingCount,
+               MAGIC_PUBSUB_SV_ARG(envelope.header));
         return &_inFlightFrames[static_cast<size_t>(stored)];
     }
 
@@ -149,11 +165,17 @@ class Drainer {
     _publishFrame(const Envelope &item,
                   std::optional<TransportId> ingressTransport = std::nullopt) {
         auto ret = OK();
+        _log_d("Drainer: publish frame " MAGIC_PUBSUB_SV_FMT "%s",
+               MAGIC_PUBSUB_SV_ARG(item.header),
+               ingressTransport.has_value() ? " from transport ingress" : "");
         ret.combine(_controlPlane.handle(item, ingressTransport));
         ret.combine(_publisher.publishToSubscribers(item));
         auto storeResult = _storeFrame(item);
         if (!storeResult) {
             if (storeResult.error() == ERR(NotFound)) {
+                _log_d("Drainer: releasing " MAGIC_PUBSUB_SV_FMT
+                       " without transport fanout",
+                       MAGIC_PUBSUB_SV_ARG(item.header));
                 FAIL_IF_ERR_FWD(item.release(item.owner, item),
                                 "Failed to release message for topic " SV_FMT
                                 " with no subscribers or transports",
@@ -174,8 +196,6 @@ class Drainer {
     ControlPlane &_controlPlane;
     Totem::Queue::Handle *_publishQueue;
     std::array<StoredFrame, kMaxInFlightMessages> _inFlightFrames{};
-
-    using DefaultError = CoreError;
 };
 
 } // namespace Totem::PubSubBackend::detail

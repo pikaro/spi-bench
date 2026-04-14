@@ -46,6 +46,8 @@ struct BaseTransportDependencies {
 class BaseTransport : public HasLifecycle<BaseTransport> {
     friend class HasLifecycle<BaseTransport>;
     friend struct LifecycleContract<BaseTransport>;
+    using Topic = typename detail::Spec::Topic;
+    using NodeId = typename detail::Spec::NodeId;
 
   public:
     explicit BaseTransport(const BaseTransportDependencies &deps)
@@ -70,6 +72,9 @@ class BaseTransport : public HasLifecycle<BaseTransport> {
     }
 
     ReturnCode enqueue(detail::FrameHandle frameHandle) {
+        _log_d(SV_FMT ": enqueue send for " MAGIC_PUBSUB_SV_FMT,
+               SV_ARG(_instanceName),
+               MAGIC_PUBSUB_SV_ARG(frameHandle->envelope.header));
         FAIL_IF_ERR_FWD(Totem::Queue::Platform::send(
                             _sendQueue, static_cast<void *>(&frameHandle)),
                         "Failed to enqueue frame for sending");
@@ -89,10 +94,16 @@ class BaseTransport : public HasLifecycle<BaseTransport> {
             ret.combine(Totem::Queue::Platform::receive(
                 _sendQueue, static_cast<void *>(&item), 0));
             if (ret.ok()) {
+                _log_d(SV_FMT ": dequeued send for " MAGIC_PUBSUB_SV_FMT,
+                       SV_ARG(_instanceName),
+                       MAGIC_PUBSUB_SV_ARG(item->envelope.header));
                 FAIL_IF_UNEXPECTED_FWD(
                     frameSize, detail::SerDe::serialize(item->envelope, buf),
                     "Failed to serialize frame for sending");
                 auto frame = std::span<const std::byte>{buf.data(), frameSize};
+                _log_d(SV_FMT ": sending %zu bytes for " MAGIC_PUBSUB_SV_FMT,
+                       SV_ARG(_instanceName), frameSize,
+                       MAGIC_PUBSUB_SV_ARG(item->envelope.header));
                 FAIL_IF_ERR_FWD(
                     _sendCallback(_transport, item->envelope.header, frame),
                     "Failed to process frame from send queue");
@@ -123,11 +134,17 @@ class BaseTransport : public HasLifecycle<BaseTransport> {
             auto receiveResult = _receiveCallback(_transport, buf);
 
             if (receiveResult) {
+                _log_d(SV_FMT ": received raw frame of %zu bytes",
+                       SV_ARG(_instanceName), *receiveResult);
                 FAIL_IF_UNEXPECTED_FWD(
                     envelope,
                     _ingress.storeFrame(
                         std::span<const std::byte>{buf.data(), *receiveResult}),
                     "Failed to store received frame in ingress");
+                _log_d(SV_FMT
+                       ": enqueuing received envelope for " MAGIC_PUBSUB_SV_FMT,
+                       SV_ARG(_instanceName),
+                       MAGIC_PUBSUB_SV_ARG(envelope.header));
                 FAIL_IF_ERR_FWD(
                     Totem::Queue::Platform::send(
                         _publishQueue, static_cast<void *>(&envelope)),
@@ -162,6 +179,8 @@ class BaseTransport : public HasLifecycle<BaseTransport> {
                      "Failed to receive item from publish queue: " ERR_FMT,
                      ERR_ARG(receiveRet));
             }
+            _log_d(SV_FMT ": pollInto dispatch " MAGIC_PUBSUB_SV_FMT,
+                   SV_ARG(_instanceName), MAGIC_PUBSUB_SV_ARG(item.header));
             FAIL_IF_ERR_FWD(callback(ctx, item),
                             "Failed to process item from publish queue");
         }
@@ -170,10 +189,13 @@ class BaseTransport : public HasLifecycle<BaseTransport> {
 
   protected:
     ReturnCode _ack(const Envelope &envelope) {
+        _log_d(SV_FMT ": ack " MAGIC_PUBSUB_SV_FMT, SV_ARG(_instanceName),
+               MAGIC_PUBSUB_SV_ARG(envelope.header));
         return _sendAckCallback(_pubSubNode, _transportId, envelope);
     }
 
     ReturnCode _onBegin() {
+        _log_i(SV_FMT ": begin transport", SV_ARG(_instanceName));
         auto sendQueueResult =
             Totem::Queue::Platform::create(_sendQueueStorage);
         FAIL_IF_ASSIGN_UNEXPECTED_FWD(
@@ -190,6 +212,7 @@ class BaseTransport : public HasLifecycle<BaseTransport> {
     }
 
     ReturnCode _onEnd() {
+        _log_i(SV_FMT ": end transport", SV_ARG(_instanceName));
         auto ret = OK();
         if (_sendQueue != nullptr) {
             FAIL_IF_ERR_FWD(Totem::Queue::Platform::destroy(_sendQueue),
@@ -227,7 +250,6 @@ class BaseTransport : public HasLifecycle<BaseTransport> {
     static constexpr auto bufferSize = detail::SerDe::headerSize +
                                        detail::Spec::Limits::maxPayloadSize +
                                        detail::SerDe::overheadSize;
-    using DefaultError = CoreError;
 
 }; // namespace Totem::PubSub::detail
 

@@ -5,11 +5,12 @@
 #include "Types/Error.hh"
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
+#include "freertos/projdefs.h"
 #include <array>
 #include <concepts>
 #include <cstddef>
+#include <cstdint>
 #include <expected>
-#include <span>
 
 namespace Totem::Queue::detail::platform {
 
@@ -35,11 +36,10 @@ struct Platform {
         requires IsQueueable<T>
     static std::expected<QueueHandle, ReturnCode>
     create(Storage<T, N> &storage) {
-        auto *handle =
-            xQueueCreateStatic(storage.queueLength, storage.itemSize,
-                               reinterpret_cast<uint8_t *>(
-                                   storage.buffer.data()),
-                               &storage._queueStruct);
+        auto *handle = xQueueCreateStatic(
+            storage.queueLength, storage.itemSize,
+            reinterpret_cast<uint8_t *>(storage.buffer.data()),
+            &storage._queueStruct);
         FAIL_IF_NULL(handle, std::unexpected(ERR(InvalidArgument)),
                      "Failed to create queue: depth and item size must be "
                      "greater than 0");
@@ -76,9 +76,6 @@ struct Platform {
     static size_t spacesAvailable(QueueHandle handle) {
         return static_cast<size_t>(uxQueueSpacesAvailable(handle));
     }
-
-  private:
-    using DefaultError = CoreError;
 };
 
 } // namespace Totem::Queue::detail::platform

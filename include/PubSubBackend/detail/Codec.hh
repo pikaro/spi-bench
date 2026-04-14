@@ -415,9 +415,6 @@ template <typename T> struct Codec {
         auto spanReader = wire::SpanReader(data);
         return decode(spanReader.reader);
     }
-
-  private:
-    using DefaultError = CoreError;
 };
 
 } // namespace Totem::PubSubBackend::detail

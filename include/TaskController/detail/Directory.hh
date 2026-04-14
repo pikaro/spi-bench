@@ -1,8 +1,7 @@
 #pragma once
 
-#include "Common.hh"
-
 #include "Generic/Directory.hh"
+#include "Macros/Facade.hh"
 #include "StaticConfig/TaskController.hh"
 #include "TaskController/Interfaces/Config.hh"
 #include "TaskController/Interfaces/TaskHooks.hh"

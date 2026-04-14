@@ -1,7 +1,5 @@
 #pragma once
 
-#include "Common.hh"
-
 #include "Concepts/Performance.hh"
 #include "Macros/Facade.hh"
 #include "Mutex/detail/MutexGuard.hh"

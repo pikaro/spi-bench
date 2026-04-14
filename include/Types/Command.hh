@@ -36,6 +36,4 @@ struct CommandDesc {
         }
         return OK();
     }
-
-    using DefaultError = CoreError;
 };

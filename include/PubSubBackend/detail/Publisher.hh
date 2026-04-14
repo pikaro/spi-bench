@@ -14,6 +14,8 @@ namespace Totem::PubSubBackend::detail {
 class Publisher {
     using TransporterKey = TransporterDirectory::EntryKey;
     using SubscriberKey = SubscriberDirectory::EntryKey;
+    using Topic = typename Spec::Topic;
+    using NodeId = typename Spec::NodeId;
 
   public:
     explicit Publisher(TransporterDirectory &transporters,
@@ -24,15 +26,23 @@ class Publisher {
     publish(FrameHandle frameHandle,
             std::optional<TransportId> ingressTransport = std::nullopt) {
         auto ret = OK();
+        _log_d("Publisher: publish " MAGIC_PUBSUB_SV_FMT,
+               MAGIC_PUBSUB_SV_ARG(frameHandle->envelope.header));
         ret.combine(publishToSubscribers(frameHandle->envelope));
         ret.combine(publishToTransports(frameHandle, ingressTransport));
         return ret;
     }
 
     ReturnCode publishToSubscribers(const Envelope &envelope) {
+        _log_d("Publisher: fanout to subscribers for " MAGIC_PUBSUB_SV_FMT,
+               MAGIC_PUBSUB_SV_ARG(envelope.header));
         return _subscribers.withAll(
             [&](const SubscriberKey &,
                 const SubscriberEntry &entry) -> ReturnCode {
+                _log_d("Publisher: delivering to subscriber " SV_FMT
+                       " for " MAGIC_PUBSUB_SV_FMT,
+                       SV_ARG(entry.name),
+                       MAGIC_PUBSUB_SV_ARG(envelope.header));
                 FAIL_IF_ERR_FWD(
                     entry.callback(entry.subscriber, envelope),
                     "Failed to publish to subscriber " SV_FMT
@@ -50,9 +60,15 @@ class Publisher {
     ReturnCode publishToTransports(
         FrameHandle frameHandle,
         std::optional<TransportId> ingressTransport = std::nullopt) {
+        _log_d("Publisher: fanout to transports for " MAGIC_PUBSUB_SV_FMT,
+               MAGIC_PUBSUB_SV_ARG(frameHandle->envelope.header));
         return _transporters.withAll(
             [&](const TransporterKey &,
                 const TransporterEntry &entry) -> ReturnCode {
+                _log_d("Publisher: enqueue to transport " SV_FMT
+                       " (%u) for " MAGIC_PUBSUB_SV_FMT,
+                       SV_ARG(entry.name), entry.transportId,
+                       MAGIC_PUBSUB_SV_ARG(frameHandle->envelope.header));
                 FAIL_IF_ERR_FWD(
                     entry.transporter.enqueue(frameHandle),
                     "Failed to enqueue message to transport " SV_FMT
@@ -75,8 +91,6 @@ class Publisher {
   private:
     TransporterDirectory &_transporters;
     SubscriberDirectory &_subscribers;
-
-    using DefaultError = CoreError;
 };
 
 } // namespace Totem::PubSubBackend::detail

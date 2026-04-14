@@ -4,6 +4,7 @@
 #include "StaticConfig/Uart.hh"
 #include "Types/Error.hh"
 #include "driver/uart.h"
+#include "freertos/projdefs.h"
 #include "hal/uart_types.h"
 #include "soc/clk_tree_defs.h"
 #include <algorithm>
@@ -86,8 +87,6 @@ struct Uart {
     }
 
   private:
-    using DefaultError = CoreError;
-
     static_assert(::UartConfig::uartNumber < UART_NUM_MAX,
                   "UART number must be less than UART_NUM_MAX");
     static constexpr uart_port_t _uartNumber =

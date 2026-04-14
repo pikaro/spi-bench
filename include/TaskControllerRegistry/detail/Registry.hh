@@ -2,6 +2,7 @@
 
 #include "Base/HasLifecycle.hh"
 #include "Macros/Facade.hh"
+#include "StaticConfig/TaskRegistry.hh"
 #include "TaskController/Facade.hh"
 #include "TaskController/Interfaces/RegistryHooks.hh"
 #include "TaskController/Interfaces/TaskRuntimeSnapshot.hh"
@@ -10,6 +11,7 @@
 #include "TaskControllerRegistry/detail/Metrics.hh"
 #include "Types/Error.hh"
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <span>
@@ -54,8 +56,8 @@ class Registry : public HasLifecycle<Registry> {
     }
 
     ReturnCode reap() {
-        return _directory.withAll([](const SourceKey &, SourceEntry &entry)
-                                      -> ReturnCode {
+        return _directory.withAll([](const SourceKey &,
+                                     SourceEntry &entry) -> ReturnCode {
             if (entry.hooks.reapHook == nullptr) {
                 return OK();
             }
@@ -77,8 +79,8 @@ class Registry : public HasLifecycle<Registry> {
             seenHandles{};
         size_t seenHandleCount = 0;
         return _directory.forEachTaskSnapshot(
-            [&fun, &seenHandles,
-             &seenHandleCount](const TaskController::TaskRuntimeSnapshot &snap) {
+            [&fun, &seenHandles, &seenHandleCount](
+                const TaskController::TaskRuntimeSnapshot &snap) {
                 if (snap.nativeHandle != 0) {
                     for (size_t i = 0; i < seenHandleCount; ++i) {
                         if (seenHandles[i] == snap.nativeHandle) {
@@ -142,8 +144,6 @@ class Registry : public HasLifecycle<Registry> {
 
     Directory _directory;
     Metrics _metrics;
-
-    using DefaultError = CoreError;
 };
 
 inline constexpr LifecycleContract<Registry> _registry_lifecycle;

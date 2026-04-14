@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Platform/PlatformSelect.hh"
+#include "Platform/PlatformSelect.hh" // IWYU pragma: export
 
 #if defined(PLATFORM_ESP32)
 #include "platform/PlatformESP32.hh"

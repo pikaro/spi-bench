@@ -74,6 +74,8 @@ class ByteArena : public HasMutex<Derived> {
             FAIL_IF_ERR_FWD(_storeRecord(spanIdx, slot, span, stored, data),
                             "Failed to store record for stored item");
             slot.timestampMs = ::platform::get_time();
+            _log_d("%s: stored %zu bytes at offset %zu", Derived::name,
+                   data.size(), slot.offset);
             return OK();
         };
         FAIL_IF_ERR_FWD(
@@ -116,6 +118,8 @@ class ByteArena : public HasMutex<Derived> {
         auto lambda = [this, &stored]() -> ReturnCode {
             for (auto &slot : _slots) {
                 if (slot.occupied && slot.stored == stored) {
+                    _log_d("%s: releasing record at offset %zu", Derived::name,
+                           slot.offset);
                     return _releaseSlot(slot);
                 }
             }
@@ -240,6 +244,4 @@ class ByteArena : public HasMutex<Derived> {
     std::array<Slot, Config::slotCount> _slots;
     std::array<Span, Config::spanCount> _spans;
     size_t _spanCount = 1;
-
-    using DefaultError = CoreError;
 };

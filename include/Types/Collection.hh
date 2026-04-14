@@ -6,6 +6,7 @@
 #include "Types/Basic.hh"
 #include "Types/Error.hh"
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -34,7 +35,7 @@ template <size_t N> struct NameKey {
         if (str == nullptr) [[unlikely]] {
             ABORT("NameKey cannot be created from null pointer");
         }
-        size_t len = strnlen(str, N + 1);
+        size_t len = bounded_strlen(str, N + 1);
         if (len == N + 1) [[unlikely]] {
             size_t actualLen = strlen(str);
             ABORT("NameKey length overflow: %s (%zu > %zu)", str, actualLen, N);
@@ -62,7 +63,10 @@ template <size_t N> struct NameKey {
 
 template <typename Key>
 [[nodiscard]] inline size_t collection_key_hash(const Key &key) {
-    if constexpr (requires { key.name; key.len; }) {
+    if constexpr (requires {
+                      key.name;
+                      key.len;
+                  }) {
         return hash(key.name.data(), key.len);
     } else if constexpr (std::is_pointer_v<Key>) {
         auto value = reinterpret_cast<uintptr_t>(key);
@@ -78,8 +82,7 @@ template <typename Key>
 }
 
 template <typename Key>
-[[nodiscard]] inline bool collection_key_equal(const Key &lhs,
-                                               const Key &rhs) {
+[[nodiscard]] inline bool collection_key_equal(const Key &lhs, const Key &rhs) {
     return lhs == rhs;
 }
 
@@ -260,8 +263,8 @@ template <typename Key, typename Entry, size_t N> struct SlottedMap {
     }
 
     template <typename Fn>
-        requires(std::is_invocable_r_v<ReturnCode, Fn, const Key &,
-                                       const Entry &>)
+        requires(
+            std::is_invocable_r_v<ReturnCode, Fn, const Key &, const Entry &>)
     ReturnCode forEach(Fn &&fn) const {
         for (size_t i = 0; i < _size; ++i) {
             auto ret = std::invoke(fn, _slots[i].key, _slots[i].entry);
@@ -287,7 +290,7 @@ template <typename Key, typename Entry, size_t N> struct SlottedMap {
     // TODO: Benchmark load factor
     static constexpr size_t IndexSize = (N * 2) + 1;
 
-    [[nodiscard]] ssize_t _findIndex(const Key &key) const {
+    [[nodiscard]] ptrdiff_t _findIndex(const Key &key) const {
         auto start = collection_key_hash(key) % IndexSize;
         for (size_t probe = 0; probe < IndexSize; ++probe) {
             auto pos = (start + probe) % IndexSize;
@@ -300,7 +303,7 @@ template <typename Key, typename Entry, size_t N> struct SlottedMap {
             if (indexSlot.state == IndexState::Occupied) {
                 auto slotIndex = static_cast<size_t>(indexSlot.slotIndex);
                 if (collection_key_equal(_slots[slotIndex].key, key)) {
-                    return static_cast<ssize_t>(slotIndex);
+                    return static_cast<ptrdiff_t>(slotIndex);
                 }
             }
         }
@@ -309,7 +312,7 @@ template <typename Key, typename Entry, size_t N> struct SlottedMap {
 
     ReturnCode _indexInsert(const Key &key, SlotIndex slotIndex) {
         auto start = collection_key_hash(key) % IndexSize;
-        ssize_t firstTombstone = -1;
+        ptrdiff_t firstTombstone = -1;
 
         for (size_t probe = 0; probe < IndexSize; ++probe) {
             auto pos = (start + probe) % IndexSize;
@@ -326,7 +329,7 @@ template <typename Key, typename Entry, size_t N> struct SlottedMap {
 
             if (indexSlot.state == IndexState::Tombstone) {
                 if (firstTombstone < 0) {
-                    firstTombstone = static_cast<ssize_t>(pos);
+                    firstTombstone = static_cast<ptrdiff_t>(pos);
                 }
                 continue;
             }
@@ -376,6 +379,4 @@ template <typename Key, typename Entry, size_t N> struct SlottedMap {
     std::array<Slot, N> _slots{};
     std::array<IndexSlot, IndexSize> _index{};
     SlotIndex _size = 0;
-
-    using DefaultError = CoreError;
 };

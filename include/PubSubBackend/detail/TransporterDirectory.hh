@@ -1,8 +1,7 @@
 #pragma once
 
-#include "Common.hh"
-
 #include "Generic/Directory.hh"
+#include "Macros/Facade.hh"
 #include "PubSubBackend/detail/Transporter.hh"
 #include "PubSubBackend/detail/Types.hh"
 #include "Types/Error.hh"
@@ -15,7 +14,7 @@ namespace Totem::PubSubBackend::detail {
 struct TransporterEntry {
     TransportId transportId = 0;
     Transporter transporter{};
-    TopicMask topicMask = 0;
+    TopicMask topicMask = static_cast<TopicMask>(Spec::Topic::PubSub);
     std::string_view name;
 };
 
@@ -31,10 +30,8 @@ class TransporterDirectory : public TransporterDirectoryImpl {
     using EntryKey = typename Base::EntryKey;
 
     std::expected<EntryKey, ReturnCode> add(TransportId transportId,
-                                            const char *transporterName,
+                                            std::string_view transporterName,
                                             Transporter transporter) {
-        FAIL_IF_NULL(transporterName, std::unexpected(ERR(InvalidArgument)),
-                     "%s: Runner name cannot be null", this->ownerName());
         FAIL_IF_NOT(transporter.validate(),
                     std::unexpected(ERR(InvalidArgument)),
                     "Invalid PubSub transport: %s", transporterName);
@@ -48,19 +45,16 @@ class TransporterDirectory : public TransporterDirectoryImpl {
             .topicMask = 0,
             .name = transporterName,
         };
+        _log_i("%s: add transport " SV_FMT " (%u)", this->ownerName(),
+               SV_ARG(entry.name), entry.transportId);
         return _addImpl(transportId, entry);
-    }
-
-    std::expected<EntryKey, ReturnCode> add(TransportId transportId,
-                                            std::string_view transporterName,
-                                            Transporter transporter) {
-        FAIL_IF(transporterName.empty(), std::unexpected(ERR(InvalidArgument)),
-                "%s: Transporter name cannot be empty", this->ownerName());
-        return add(transportId, transporterName.data(), transporter);
     }
 
     ReturnCode subscribeTransport(TransportId transportId,
                                   TopicMask topicMask) {
+        _log_i("%s: subscribe transport %u to topic mask 0x%02x",
+               this->ownerName(), transportId,
+               static_cast<unsigned>(topicMask));
         return _withEntryId(transportId, [&topicMask](const EntryKey &,
                                                       TransporterEntry &entry) {
             entry.topicMask |= topicMask;
@@ -70,6 +64,9 @@ class TransporterDirectory : public TransporterDirectoryImpl {
 
     ReturnCode unsubscribeTransport(TransportId transportId,
                                     TopicMask topicMask) {
+        _log_i("%s: unsubscribe transport %u from topic mask 0x%02x",
+               this->ownerName(), transportId,
+               static_cast<unsigned>(topicMask));
         return _withEntryId(transportId, [&topicMask](const EntryKey &,
                                                       TransporterEntry &entry) {
             entry.topicMask &= ~topicMask;
@@ -99,8 +96,6 @@ class TransporterDirectory : public TransporterDirectoryImpl {
         };
         return this->withAll(fnRef, std::move(filter));
     }
-
-    using DefaultError = CoreError;
 };
 
 } // namespace Totem::PubSubBackend::detail

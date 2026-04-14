@@ -34,6 +34,8 @@ class LocalBufferedTransport : public LocalTransport {
     }
 
     ReturnCode ackSend(const Header &header) {
+        _log_d("%s: external ack for " MAGIC_PUBSUB_SV_FMT, name,
+               MAGIC_PUBSUB_SV_ARG(header));
         FAIL_IF_ERR(_egressBuffer.release(header), ERR(OperationFailed),
                     "Failed to release frame from egress buffer for "
                     "LocalBufferedTransport for " MAGIC_PUBSUB_SV_FMT,
@@ -51,6 +53,8 @@ class LocalBufferedTransport : public LocalTransport {
     }
 
     ReturnCode _send(const Header &header, std::span<const std::byte> frame) {
+        _log_d("%s: buffered send of %zu bytes for " MAGIC_PUBSUB_SV_FMT, name,
+               frame.size(), MAGIC_PUBSUB_SV_ARG(header));
         FAIL_IF_ERR_FWD(LocalTransport::_send(header, frame),
                         "Failed to send frame over LocalTransport");
         FAIL_IF_ERR_FWD(_egressBuffer.store(header, frame),
@@ -60,8 +64,6 @@ class LocalBufferedTransport : public LocalTransport {
     }
 
     detail::EgressBuffer<LocalTransportEgressByteArenaConfig> _egressBuffer;
-
-    using DefaultError = CoreError;
 };
 
 } // namespace Totem::PubSubBackend::Transports

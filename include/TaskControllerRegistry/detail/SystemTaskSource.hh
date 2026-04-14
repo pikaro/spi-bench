@@ -3,6 +3,7 @@
 #include "Macros/Facade.hh"
 #include "PlatformSelect.hh"
 #include "StaticConfig/TaskRegistry.hh"
+#include "Support/Basic.hh"
 #include "TaskController/Interfaces/TaskRuntimeSnapshot.hh"
 #include "TaskControllerRegistry/Interfaces/TaskSourceFeatures.hh"
 #include "TaskControllerRegistry/Interfaces/TaskSourceHooks.hh"
@@ -29,15 +30,16 @@ class SystemTaskSource {
             .kind = TaskSourceKind::PlatformSystem,
             .capabilities = TaskSourceCapability::None,
         };
-        ABORT_IF_ERR(
-            _registry.registerSource(reinterpret_cast<uintptr_t>(this),
-                                     TaskSourceHooks::bind(*this), info),
-            "Failed to register system task source");
+        ABORT_IF_ERR(_registry.registerSource(reinterpret_cast<uintptr_t>(this),
+                                              TaskSourceHooks::bind(*this),
+                                              info),
+                     "Failed to register system task source");
     }
 
     ~SystemTaskSource() {
-        ABORT_IF_ERR(_registry.deregisterSource(reinterpret_cast<uintptr_t>(this)),
-                     "Failed to deregister system task source");
+        ABORT_IF_ERR(
+            _registry.deregisterSource(reinterpret_cast<uintptr_t>(this)),
+            "Failed to deregister system task source");
     }
 
     DELETE_COPY(SystemTaskSource)
@@ -80,8 +82,8 @@ class SystemTaskSource {
                 continue;
             }
 
-            auto taskNameLen =
-                strnlen(taskStatus.pcTaskName, ::platform::MaxTaskNameLen);
+            auto taskNameLen = bounded_strlen(taskStatus.pcTaskName,
+                                              ::platform::MaxTaskNameLen);
             auto snapshot = TaskController::TaskRuntimeSnapshot{
                 .timestamp = timestamp,
                 .timestampDelta = timestampDelta,
@@ -147,8 +149,6 @@ class SystemTaskSource {
     std::array<RuntimeSample, TaskRegistryConfig::observedTaskCountMax>
         _runtimeSamples{};
     uint32_t _lastTimestampMs = 0;
-
-    using DefaultError = CoreError;
 };
 
 } // namespace Totem::TaskControllerRegistry::detail

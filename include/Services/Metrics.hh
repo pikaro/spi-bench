@@ -1,7 +1,5 @@
 #pragma once
 
-#include "Common.hh"
-
 #include "MetricsBackend/Facade.hh" // IWYU pragma: export
 
 class Metrics {
@@ -18,7 +16,4 @@ class Metrics {
     static Totem::MetricsBackend::Recorder &recorder() {
         return backend().recorder();
     }
-
-  private:
-    using DefaultError = CoreError;
 };

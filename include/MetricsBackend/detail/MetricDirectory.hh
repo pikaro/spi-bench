@@ -5,6 +5,7 @@
 #include "StaticConfig/Metrics.hh"
 #include "Types/Error.hh"
 #include "Types/Metrics.hh"
+#include <cstdint>
 #include <cstring>
 #include <expected>
 

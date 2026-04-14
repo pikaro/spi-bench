@@ -4,11 +4,8 @@
 #include "PubSubBackend/Interfaces/Envelope.hh"
 #include "PubSubBackend/Interfaces/Wire.hh"
 #include "PubSubBackend/detail/Codec.hh"
+#include "PubSubBackend/detail/Types.hh"
 #include "Types/Error.hh"
-#ifdef BIT_MASK
-#undef BIT_MASK
-#endif
-#include "inc/CRC.h"
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -16,16 +13,25 @@
 #include <span>
 #include <utility>
 
+#pragma push_macro("BIT_MASK")
+#undef BIT_MASK
+#include "inc/CRC.h"
+#pragma pop_macro("BIT_MASK")
+
 namespace Totem::PubSubBackend::detail {
 
 class SerDe {
     using Reader = wire::Reader;
+    using Topic = typename Spec::Topic;
+    using NodeId = typename Spec::NodeId;
 
   public:
     static std::expected<size_t, ReturnCode>
     serialize(const Envelope &envelope, std::span<std::byte> out) {
         size_t totalSize =
             headerSize + envelope.header.payloadSize + overheadSize;
+        _log_d("SerDe: serialize " MAGIC_PUBSUB_SV_FMT " into %zu bytes",
+               MAGIC_PUBSUB_SV_ARG(envelope.header), totalSize);
         FAIL_IF(out.size() < totalSize,
                 std::unexpected(ERR(CoreError, Overflow)),
                 "Output buffer is too small for serialized frame");
@@ -61,6 +67,7 @@ class SerDe {
     static std::expected<std::pair<Header, std::span<const std::byte>>,
                          ReturnCode>
     deserializeRaw(std::span<const std::byte> frame) {
+        _log_d("SerDe: deserialize raw frame of %zu bytes", frame.size());
         FAIL_IF(frame.size() < headerSize + overheadSize,
                 std::unexpected(ERR(CoreError, InvalidData)),
                 "Frame size is too small to contain header and CRC");
@@ -85,6 +92,8 @@ class SerDe {
         FAIL_IF(payloadSpan.size() != header.payloadSize,
                 std::unexpected(ERR(CoreError, InvalidData)),
                 "Payload size in frame does not match payloadSize in header");
+        _log_d("SerDe: deserialized " MAGIC_PUBSUB_SV_FMT,
+               MAGIC_PUBSUB_SV_ARG(header));
         return std::make_pair(header, payloadSpan);
     }
 

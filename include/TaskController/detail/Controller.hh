@@ -1,9 +1,8 @@
 #pragma once
 
-#include "Common.hh"
-
 #include "Base/HasLifecycle.hh"
 #include "Directory.hh"
+#include "Macros/Facade.hh"
 #include "Runner.hh"
 #include "TaskController/Interfaces/Config.hh"
 #include "TaskController/Interfaces/RegistryHooks.hh"
@@ -12,6 +11,7 @@
 #include "TaskController/detail/PlatformSelect.hh"
 #include "TaskControllerRegistry/Interfaces/TaskSourceFeatures.hh"
 #include "TaskControllerRegistry/Interfaces/TaskSourceHooks.hh"
+#include "Types/Error.hh"
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -307,8 +307,6 @@ class Controller : public HasLifecycle<Controller, Config> {
     std::atomic<bool> _permitRegistration{false};
     RegistryHooks _registryHooks;
     const char *const _ownerName;
-
-    using DefaultError = CoreError;
 };
 
 inline constexpr LifecycleContract<Controller, Config> _controller_lifecycle;

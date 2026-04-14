@@ -43,8 +43,6 @@ struct Metrics {
 
     Totem::MetricsBackend::GroupHandle group;
     Totem::MetricsBackend::CounterHandle taskCount;
-
-    using DefaultError = CoreError;
 };
 
 } // namespace Totem::TaskControllerRegistry::detail

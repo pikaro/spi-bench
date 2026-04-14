@@ -146,8 +146,6 @@ class LoggingService {
     static inline LoggerBackend _backend = LoggerBackend::null();
     static inline std::atomic_flag _recordBusy = ATOMIC_FLAG_INIT;
     static inline LogRecord _scratchRecord{};
-
-    using DefaultError = CoreError;
 };
 
 } // namespace Totem::LoggerSupport::detail

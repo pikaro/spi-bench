@@ -25,9 +25,6 @@ class Dispatcher {
 
         return command.handler(args, command.ctx);
     }
-
-  private:
-    using DefaultError = CoreError;
 };
 
 } // namespace Totem::CommandBackend::detail

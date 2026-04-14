@@ -11,6 +11,7 @@
 #include <cstring>
 #include <expected>
 #include <span>
+#include <utility>
 
 namespace Totem::PubSubBackend::Transports {
 
@@ -65,6 +66,7 @@ class LocalTransport : public BaseTransport {
                          "Link already established for other LocalTransport");
         link = &other;
         other.link = this;
+        _log_i("%s linked to %s", name, other.name);
         return OK();
     }
 
@@ -79,6 +81,8 @@ class LocalTransport : public BaseTransport {
                      std::span<const std::byte> frame) {
         FAIL_IF_NULL(link, ERR(InvalidState),
                      "No link established for LocalTransport");
+        _log_d("%s: forwarding %zu-byte frame over local link", name,
+               frame.size());
         FAIL_IF_ERR_FWD(link->_receiveThroughLink(frame),
                         "Failed to send frame over LocalTransport");
         return {};
@@ -110,6 +114,8 @@ class LocalTransport : public BaseTransport {
                 std::unexpected(ERR(InvalidArgument)),
                 "Output buffer too small for received frame");
         std::memcpy(out.data(), rxFrame.data.data(), rxFrame.size);
+        _log_d("%s: dequeued %zu-byte frame from local RX queue", name,
+               rxFrame.size);
         return rxFrame.size;
     }
 
@@ -121,6 +127,8 @@ class LocalTransport : public BaseTransport {
                 "Frame size exceeds maximum for LocalTransport");
         std::memcpy(rxFrame.data.data(), frame.data(), frame.size());
         rxFrame.size = frame.size();
+        _log_d("%s: enqueue %zu-byte frame into local RX queue", name,
+               frame.size());
         FAIL_IF_ERR_FWD(
             Totem::Queue::Platform::send(_rxFrameQueue, &rxFrame, 0),
             "Failed to send frame to rxFrame queue");
@@ -135,6 +143,7 @@ class LocalTransport : public BaseTransport {
         FAIL_IF_UNEXPECTED_FWD(queueHandle, std::move(queueResult),
                                "Failed to create rxFrame queue");
         _rxFrameQueue = queueHandle;
+        _log_i("%s: created RX queue", name);
         return OK();
     }
 
@@ -144,7 +153,6 @@ class LocalTransport : public BaseTransport {
     Totem::Queue::Platform::Storage<RxFrame,
                                     detail::Spec::Limits::maxMessageQueueSize>
         _rxFrameQueueStorage{};
-    using DefaultError = CoreError;
 };
 
 } // namespace Totem::PubSubBackend::Transports

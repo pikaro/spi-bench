@@ -1,10 +1,12 @@
 #pragma once
 
+#include "Base/HasCommands.hh"
 #include "Base/HasLifecycle.hh"
 #include "Base/HasTaskController.hh"
 #include "Macros/Facade.hh"
 #include "Output/Interfaces/Config.hh"
 #include "Output/Interfaces/Sink.hh"
+#include "Output/detail/Commands.hh"
 #include "RingBuffer/Facade.hh"
 #include "StaticConfig/Logging.hh"
 #include "TaskController/Facade.hh"
@@ -18,7 +20,8 @@
 namespace Totem::Output::detail {
 
 class Aggregator : public HasLifecycle<Aggregator, AggregatorConfig>,
-                   HasTaskController<Aggregator, AggregatorConfig> {
+                   HasTaskController<Aggregator, AggregatorConfig>,
+                   public HasCommands<Aggregator, Commands<Aggregator>> {
     friend class HasLifecycle<Aggregator, AggregatorConfig>;
     friend struct LifecycleContract<Aggregator, AggregatorConfig>;
 
@@ -59,7 +62,11 @@ class Aggregator : public HasLifecycle<Aggregator, AggregatorConfig>,
 
   private:
     ReturnCode _onBegin() {
+        FAIL_IF_ERR_FWD(_registerCommands(),
+                        "Failed to register commands for %s", name);
+
         auto taskHooks = TaskController::TaskHooks::bind(*this);
+        _logLevel = config().defaultLogLevel;
 
         FAIL_IF_ERR_FWD(_beginTaskController(config().task),
                         "Failed to begin task controller for %s", name);
@@ -83,15 +90,25 @@ class Aggregator : public HasLifecycle<Aggregator, AggregatorConfig>,
     }
 
     ReturnCode _onEnd() {
-        FAIL_IF_ERR_FWD(_endTaskController(),
-                        "Failed to end task controller for %s", name);
-        FAIL_IF_ERR_FWD(RingBuffer::Buffer::destroy(_ringBuffer),
-                        "Failed to destroy ring buffer for %s", name);
-        return OK();
+        auto ret = OK();
+        if (auto err = _deregisterCommands(); !err.ok()) {
+            ret = err;
+            _log_e("Failed to deregister commands for %s", name);
+        }
+        if (auto err = _endTaskController(); !err.ok()) {
+            ret = err;
+            _log_e("Failed to end task controller for %s", name);
+        }
+        if (auto err = RingBuffer::Buffer::destroy(_ringBuffer); !err.ok()) {
+            ret = err;
+            _log_e("Failed to destroy ring buffer for %s", name);
+        }
+        return ret;
     }
 
     ReturnCode _onTaskStep() {
-        while (true) {
+        size_t drained = 0;
+        while (drained < config().ringBufferSize) {
             auto result = _receiveRecord();
             if (!result.ok()) {
                 if (result == ERR(Timeout)) {
@@ -99,6 +116,7 @@ class Aggregator : public HasLifecycle<Aggregator, AggregatorConfig>,
                 }
                 FAIL_IF_ERR_FWD(result, "Failed to receive record in %s", name);
             }
+            ++drained;
         }
         return OK();
     }
@@ -136,8 +154,6 @@ class Aggregator : public HasLifecycle<Aggregator, AggregatorConfig>,
     ::platform::RingBufferHandle _ringBuffer;
     LogLevel _logLevel = LogLevel::Info;
     std::array<Sink, LoggingConfig::maxSinks> _sinks{};
-
-    using DefaultError = CoreError;
 };
 
 inline constexpr LifecycleContract<Aggregator, AggregatorConfig>

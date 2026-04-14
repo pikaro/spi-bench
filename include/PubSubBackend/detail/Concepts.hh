@@ -2,6 +2,7 @@
 
 #include "PubSubBackend/detail/Types.hh"
 #include "Traits/Bitmask.hh"
+#include "Types.hh"
 #include <concepts>
 #include <cstdint>
 #include <type_traits>

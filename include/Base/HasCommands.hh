@@ -50,7 +50,6 @@ template <class Derived, typename CommandSet> class HasCommands {
     }
 
   private:
-    using DefaultError = CoreError;
     uint8_t _registeredCommandCount = 0;
     std::array<Totem::CommandBackend::detail::Store::CommandNameKey,
                CommandConfig::maxEntriesPerClass>

@@ -2,6 +2,7 @@
 
 #include "Generic/Directory.hh"
 #include "StaticConfig/Command.hh"
+#include "Types/Collection.hh"
 #include "Types/Command.hh"
 #include "Types/Error.hh"
 #include <cstring>
@@ -9,9 +10,8 @@
 
 namespace Totem::CommandBackend::detail {
 
-using DirectoryImpl =
-    GettableDirectory<NameKey<CommandConfig::maxNameLength>, CommandDesc,
-                      CommandConfig::maxEntries>;
+using DirectoryImpl = GettableDirectory<NameKey<CommandConfig::maxNameLength>,
+                                        CommandDesc, CommandConfig::maxEntries>;
 
 class Directory : public DirectoryImpl {
   public:
@@ -23,8 +23,8 @@ class Directory : public DirectoryImpl {
         });
     }
 
-    std::expected<EntryKey, ReturnCode>
-    add(const EntryKey &commandNameKey, const CommandDesc &metricDesc) {
+    std::expected<EntryKey, ReturnCode> add(const EntryKey &commandNameKey,
+                                            const CommandDesc &metricDesc) {
         return _addImpl(commandNameKey, metricDesc);
     }
 };

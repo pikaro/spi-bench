@@ -39,6 +39,8 @@ inline bool in_isr() { return xPortInIsrContext() != pdFALSE; }
 
 using Spinlock = portMUX_TYPE;
 
+inline Spinlock create_spinlock() { return portMUX_INITIALIZER_UNLOCKED; }
+
 inline void start_critical_section(Spinlock &lock) {
     portENTER_CRITICAL(&lock);
 }

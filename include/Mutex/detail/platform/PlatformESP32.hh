@@ -1,7 +1,10 @@
 #pragma once
 
-#include "Common.hh"
+#include "Macros/Facade.hh"
+#include "Platform/PlatformSelect.hh"
+#include "Types/Error.hh"
 #include "freertos/idf_additions.h"
+#include "freertos/projdefs.h"
 #include <expected>
 
 namespace Totem::Mutex::detail::platform {

@@ -7,6 +7,7 @@
 #include "PubSubBackend/Interfaces/Envelope.hh"
 #include "PubSubBackend/Interfaces/Subscriber.hh"
 #include "PubSubBackend/Interfaces/Types.hh"
+#include "PubSubBackend/detail/Concepts.hh"
 #include "PubSubBackend/detail/ControlPlane.hh"
 #include "PubSubBackend/detail/Drainer.hh"
 #include "PubSubBackend/detail/IngressBuffer.hh"
@@ -35,12 +36,13 @@ class Node : public HasLifecycle<Node, Config>,
     friend TaskController::TaskHooks;
     friend struct TaskController::TaskHooks::Contract<Node>;
 
+    using Transport = typename Spec::Transport;
+    using NodeId = typename Spec::NodeId;
+
+  public:
     using TransporterKey = TransporterDirectory::EntryKey;
     using SubscriberKey = SubscriberDirectory::EntryKey;
 
-    using Transport = typename Spec::Transport;
-
-  public:
     explicit Node(TaskController::RegistryHooks registryHooks)
         : HasTaskController<Node, Config>(registryHooks) {
         _transporters.enableRegistration();
@@ -58,6 +60,8 @@ class Node : public HasLifecycle<Node, Config>,
         requires requires { sizeof(Transporter::Contract<T>); }
     std::expected<TransporterKey, ReturnCode> registerTransport(T &transport) {
         auto transporter = Transporter::bind(transport);
+        _log_i("%s: registering transport " SV_FMT " (%u)", name,
+               SV_ARG(transport.instanceName()), transport.transportId());
         return _transporters.add(transport.transportId(),
                                  transport.instanceName(), transporter);
     }
@@ -69,6 +73,8 @@ class Node : public HasLifecycle<Node, Config>,
     std::expected<SubscriberKey, ReturnCode>
     subscribe(const char *subscriberName, const Subscriber &subscriber,
               Topic topic) {
+        _log_i("%s: subscribing %s to topic " SV_FMT, name, subscriberName,
+               MAGIC_SV_ARG(Topic, topic));
         FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
             subscriberNameKey,
             _subscribers.add(subscriberName, subscriber,
@@ -88,6 +94,9 @@ class Node : public HasLifecycle<Node, Config>,
         FAIL_IF_UNEXPECTED_FWD(topic, topicResult,
                                "Failed to get topic for subscriber in %s",
                                _subscribers.ownerName());
+        _log_i("%s: unsubscribing subscriber key %u from topic " SV_FMT, name,
+               static_cast<unsigned>(subscriberKey),
+               MAGIC_SV_ARG(Topic, topic));
         FAIL_IF_ERR_FWD(
             _subscriptionManager.deregisterSubscription(topic),
             "Failed to deregister subscription for topic " SV_FMT,
@@ -96,6 +105,8 @@ class Node : public HasLifecycle<Node, Config>,
     }
 
     ReturnCode publish(const Envelope &envelope) {
+        _log_d("%s: enqueue publish for " MAGIC_PUBSUB_SV_FMT, name,
+               MAGIC_PUBSUB_SV_ARG(envelope.header));
         FAIL_IF_ERR_FWD(Totem::Queue::Platform::send(_publishQueue, &envelope),
                         "Failed to enqueue publish envelope for topic " SV_FMT,
                         MAGIC_SV_ARG(Topic, envelope.header.topic));
@@ -112,6 +123,12 @@ class Node : public HasLifecycle<Node, Config>,
         auto *self = static_cast<Node *>(node);
         return self->_drainer.ack(static_cast<Spec::Transport>(transportId),
                                   envelope);
+    }
+
+    static ReturnCode ack(void *node, Spec::Transport transport,
+                          const Envelope &envelope) {
+        auto *self = static_cast<Node *>(node);
+        return self->_drainer.ack(transport, envelope);
     }
 
     [[nodiscard]] static NodeId nodeId() {
@@ -205,13 +222,12 @@ class Node : public HasLifecycle<Node, Config>,
     }};
 
     IngressBuffer _ingress;
-
-    using DefaultError = CoreError;
 };
 
 inline constexpr LifecycleContract<Node, Config> _node_lifecycle_contract;
 inline constexpr TaskControllerContract<Node> _node_task_controller_contract;
 inline constexpr TaskController::TaskHooks::Contract<Node>
     _node_task_hooks_contract;
+inline constexpr Contract _spec_contract;
 
 } // namespace Totem::PubSubBackend::detail

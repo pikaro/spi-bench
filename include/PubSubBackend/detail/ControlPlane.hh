@@ -12,6 +12,7 @@ namespace Totem::PubSubBackend::detail {
 
 class ControlPlane {
     using Topic = typename Spec::Topic;
+    using NodeId = typename Spec::NodeId;
 
   public:
     explicit ControlPlane(SubscriptionManager &subscriptionManager)
@@ -25,6 +26,10 @@ class ControlPlane {
         }
 
         auto topic = static_cast<Topic>(envelope.header.topic);
+        _log_d("ControlPlane: handling topic " SV_FMT
+               " for " MAGIC_PUBSUB_SV_FMT,
+               SV_ARG(magic_enum::enum_name(topic)),
+               MAGIC_PUBSUB_SV_ARG(envelope.header));
         if (topic == Topic::PubSub) {
             return _subscriptionManager.handlePubSubEvent(envelope,
                                                           ingressTransport);
@@ -42,8 +47,6 @@ class ControlPlane {
 
   private:
     SubscriptionManager &_subscriptionManager;
-
-    using DefaultError = CoreError;
 };
 
 } // namespace Totem::PubSubBackend::detail

@@ -56,7 +56,7 @@ constexpr const char *logMessageColor(LogLevel level) {
     switch (level) {
     case LogLevel::Verbose:
     case LogLevel::Debug:
-        return Colors::black;
+        return Colors::brightBlack;
     case LogLevel::Info:
     case LogLevel::Warning:
         return Colors::brightWhite;
@@ -100,7 +100,7 @@ class UartOutput : public HasLifecycle<UartOutput, UartConfig> {
         }
 
         int num = std::snprintf(buf.data(), buf.size(), logFmt, lvColor,
-                                logLevelToString(record.level), rst, tsColor,
+                                log_level_to_string(record.level), rst, tsColor,
                                 record.ts, rst, tagColor, record.tag.data(),
                                 rst, msgColor, record.msg.data(), rst);
 
@@ -134,8 +134,6 @@ class UartOutput : public HasLifecycle<UartOutput, UartConfig> {
         3 +              // Angle bracket close, colon, and space
         logMaxLength +
         (LoggingConfig::useColor ? (4 * 2 * 5) : 0); // Message max size
-
-    using DefaultError = CoreError;
 };
 
 inline constexpr LifecycleContract<UartOutput, UartConfig>

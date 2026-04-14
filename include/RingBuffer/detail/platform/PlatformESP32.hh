@@ -1,7 +1,10 @@
 #pragma once
 
-#include "Common.hh"
+#include "Macros/Facade.hh"
+#include "Platform/PlatformSelect.hh"
 #include "RingBuffer/detail/Config.hh"
+#include "Types/Error.hh"
+#include "freertos/projdefs.h"
 #include "freertos/ringbuf.h"
 #include <cstddef>
 #include <expected>

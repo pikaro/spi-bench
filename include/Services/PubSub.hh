@@ -3,8 +3,12 @@
 #include "Data.hh"
 #include "Macros/Facade.hh"
 #include "PubSubBackend/Facade.hh" // IWYU pragma: export
+#include "PubSubBackend/Interfaces/Envelope.hh"
+#include "PubSubBackend/Interfaces/Subscriber.hh"
+#include "PubSubBackend/Interfaces/Types.hh"
 #include "Types/Error.hh"
 #include <cstring>
+#include <expected>
 
 class PubSubService {
     using Node = Totem::PubSubBackend::Node;
@@ -21,15 +25,26 @@ class PubSubService {
         return *backend;
     }
 
-    // static ReturnCode publish(const FrameView &frameView) {
-    //     return node().publish(frameView);
-    // }
-    //
-    // static std::expected<Frame, ReturnCode>
-    // makeFrame(Topic topic, std::span<const std::byte> bytes) {
-    //     return Frame::make(node().nodeId(), topic, bytes);
-    // }
+    static std::expected<Node::SubscriberKey, ReturnCode>
+    subscribe(const char *subscriberName,
+              const Totem::PubSubBackend::Subscriber &subscriber, Topic topic) {
+        return node().subscribe(subscriberName, subscriber, topic);
+    }
 
-  private:
-    using DefaultError = CoreError;
+    static ReturnCode unsubscribe(const Node::SubscriberKey &subscriberKey) {
+        return node().unsubscribe(subscriberKey);
+    }
+
+    static ReturnCode publish(const Totem::PubSubBackend::Envelope &envelope) {
+        return node().publish(envelope);
+    }
+
+    static ReturnCode ack(NodeData::PubSub::Transport transport,
+                          const Totem::PubSubBackend::Envelope &envelope) {
+        return Node::ack(backend, transport, envelope);
+    }
+
+    [[nodiscard]] static Totem::PubSubBackend::MessageId nextMessageId() {
+        return node().nextMessageId();
+    }
 };

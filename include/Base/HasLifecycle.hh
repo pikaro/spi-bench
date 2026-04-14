@@ -10,8 +10,7 @@
 template <class Derived, typename ConfT = NoConfig> class HasLifecycle {
   public:
     ReturnCode begin(const ConfT &cfg = {}) {
-        FAIL_IF_NOT(cfg.validate(), ERR(CoreError, InvalidArgument),
-                    "Invalid config");
+        FAIL_IF_NOT(cfg.validate(), ERR(InvalidArgument), "Invalid config");
         _log_i("Beginning boot of %s", Derived::name);
         auto ret = _life.begin(derived(), cfg);
         FAIL_IF_ERR(ret, ret, "Failed to begin lifecycle of %s", Derived::name);
@@ -45,8 +44,6 @@ template <class Derived, typename ConfT = NoConfig> class HasLifecycle {
 
     ReturnCode _beginOwner() { return derived()._onBegin(); }
     ReturnCode _endOwner() { return derived()._onEnd(); }
-
-    using DefaultError = LifecycleError;
 };
 
 template <class T, typename ConfT = NoConfig> struct LifecycleContract {

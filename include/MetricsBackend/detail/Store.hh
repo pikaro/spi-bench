@@ -8,6 +8,7 @@
 #include "Types/Error.hh"
 #include "Types/Metrics.hh"
 #include <array>
+#include <cstddef>
 #include <expected>
 #include <optional>
 
@@ -62,7 +63,8 @@ class Store {
             [&groupKey](const MetricKey &, const Metric &metric) {
                 return metric.desc.group == groupKey;
             });
-        FAIL_IF_ERR(ret, std::unexpected(ret), "Failed to get metrics for group");
+        FAIL_IF_ERR(ret, std::unexpected(ret),
+                    "Failed to get metrics for group");
         return out;
     }
 
@@ -94,8 +96,6 @@ class Store {
     MetricDirectory _metricDirectory;
     MetricGroupKey _nextMetricGroupKey = 1;
     MetricKey _nextMetricKey = 1;
-
-    using DefaultError = CoreError;
 };
 
 } // namespace Totem::MetricsBackend::detail

@@ -69,27 +69,6 @@ class LocalTransport : public BaseTransport {
     }
 
   protected:
-    ReturnCode _onBegin() {
-        auto rxFrameQueueResult =
-            Totem::Queue::Platform::create(_rxFrameQueueStorage);
-        FAIL_IF_ASSIGN_UNEXPECTED_FWD(
-            _rxFrameQueue, rxFrameQueueResult,
-            "Failed to create rxFrame queue: " ERR_FMT,
-            ERR_ARG(rxFrameQueueResult.error()));
-        return Base::_onBegin();
-    }
-
-    ReturnCode _onEnd() {
-        auto ret = OK();
-        if (_rxFrameQueue != nullptr) {
-            FAIL_IF_ERR_FWD(Totem::Queue::Platform::destroy(_rxFrameQueue),
-                            "Failed to destroy rxFrame queue");
-            _rxFrameQueue = {};
-        }
-        ret.combine(Base::_onEnd());
-        return ret;
-    }
-
     static ReturnCode _sendCallback(void *localTransport, const Header &header,
                                     std::span<const std::byte> frame) {
         auto *self = static_cast<LocalTransport *>(localTransport);
@@ -114,6 +93,8 @@ class LocalTransport : public BaseTransport {
     std::expected<size_t, ReturnCode> _receive(std::span<std::byte> out) {
         FAIL_IF_NULL(link, std::unexpected(ERR(InvalidState)),
                      "No link established for LocalTransport");
+        FAIL_IF_ERR_FWD_UNEXPECTED(_ensureRxFrameQueue(),
+                                   "Failed to ensure rxFrame queue");
         RxFrame rxFrame;
         auto receiveRet =
             Totem::Queue::Platform::receive(_rxFrameQueue, &rxFrame, 0);
@@ -133,6 +114,8 @@ class LocalTransport : public BaseTransport {
     }
 
     ReturnCode _receiveThroughLink(std::span<const std::byte> frame) {
+        FAIL_IF_ERR_FWD(_ensureRxFrameQueue(),
+                        "Failed to ensure rxFrame queue for linked receive");
         RxFrame rxFrame;
         FAIL_IF(frame.size() > rxFrame.data.size(), ERR(InvalidArgument),
                 "Frame size exceeds maximum for LocalTransport");
@@ -141,6 +124,17 @@ class LocalTransport : public BaseTransport {
         FAIL_IF_ERR_FWD(
             Totem::Queue::Platform::send(_rxFrameQueue, &rxFrame, 0),
             "Failed to send frame to rxFrame queue");
+        return OK();
+    }
+
+    ReturnCode _ensureRxFrameQueue() {
+        if (_rxFrameQueue != nullptr) {
+            return OK();
+        }
+        auto queueResult = Totem::Queue::Platform::create(_rxFrameQueueStorage);
+        FAIL_IF_UNEXPECTED_FWD(queueHandle, std::move(queueResult),
+                               "Failed to create rxFrame queue");
+        _rxFrameQueue = queueHandle;
         return OK();
     }
 

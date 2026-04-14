@@ -2,7 +2,6 @@
 
 #include "Data/PubSub.hh"
 #include "Macros/Facade.hh"
-#include "Macros/internal/Markers.hh"
 #include "PubSubBackend/Interfaces/Envelope.hh"
 #include "TestMessage.hh"
 #include "Types/Error.hh"
@@ -14,16 +13,22 @@
 
 class Foo {
   public:
+    explicit Foo(const char *name) : name(name) {}
+    const char *name;
+
     static ReturnCode callback(void *ctx,
                                const Totem::PubSubBackend::Envelope &envelope) {
         auto *self = static_cast<Foo *>(ctx);
         return self->handleMessage(envelope);
     }
 
-    ReturnCode handleMessage(const Totem::PubSubBackend::Envelope &envelope) {
-        _shutUpClang = true;
+    ReturnCode
+    handleMessage(const Totem::PubSubBackend::Envelope &envelope) const {
         FAIL_IF_UNEXPECTED_FWD(message, envelope.getPayloadAs<Message>(),
                                "Failed to decode message payload");
+        _log_i("%s received message on topic %s", name,
+               magic_enum::enum_name(static_cast<Totem::Data::PubSub::Topic>(
+                   envelope.header.topic)));
         _log_i("Flag: %s", message.flag ? "true" : "false");
         _log_i("Int value: %d", message.intVal);
         _log_i("Uint32 value: %u", message.uint32Val);
@@ -39,8 +44,6 @@ class Foo {
     }
 
   private:
-    bool _shutUpClang = false;
-
     using DefaultError = CoreError;
 };
 
@@ -67,14 +70,13 @@ struct Event {
 inline Event make_test_event() {
     Event event{};
     event.message = make_test_message();
-    constexpr auto topics =
-        std::array<Totem::Data::PubSub::Topic, 5>{
-            Totem::Data::PubSub::Topic::Heartbeat,
-            Totem::Data::PubSub::Topic::Sensor,
-            Totem::Data::PubSub::Topic::FftFrame,
-            Totem::Data::PubSub::Topic::Metrics,
-            Totem::Data::PubSub::Topic::Power,
-        };
+    constexpr auto topics = std::array<Totem::Data::PubSub::Topic, 5>{
+        Totem::Data::PubSub::Topic::Heartbeat,
+        Totem::Data::PubSub::Topic::Sensor,
+        Totem::Data::PubSub::Topic::FftFrame,
+        Totem::Data::PubSub::Topic::Metrics,
+        Totem::Data::PubSub::Topic::Power,
+    };
     event.topic = topics[static_cast<size_t>(std::rand()) % topics.size()];
     return event;
 }

@@ -58,9 +58,12 @@ Totem::PubSubBackend::Transports::LocalBufferedTransport testPubSub2({
         },
 });
 
-Foo foo1;
-Foo foo2;
-Foo foo3;
+Foo foo1{"Foo1"};
+Foo foo2{"Foo2"};
+Foo foo3{"Foo3"};
+Foo foo4{"Foo4"};
+Foo foo5{"Foo5"};
+Foo foo6{"Foo6"};
 
 void setup() {
     ABORT_IF_ERR_BEGIN(::platform::Uart::init());
@@ -96,46 +99,46 @@ void setup() {
     (void)testHandle2;
 
     ABORT_IF_UNEXPECTED(
-        sub1, pubSubNode1.subscribe(
-                  "foo1node1fft",
-                  {.subscriber = &foo1, .callback = Foo::callback},
-                  NodeData::PubSub::Topic::FftFrame),
+        sub1,
+        pubSubNode1.subscribe("foo1node1fft",
+                              {.subscriber = &foo1, .callback = Foo::callback},
+                              NodeData::PubSub::Topic::FftFrame),
         "Failed to subscribe foo1 on node1 to FftFrame");
     ABORT_IF_UNEXPECTED(
-        sub2, pubSubNode2.subscribe(
-                  "foo1node2fft",
-                  {.subscriber = &foo1, .callback = Foo::callback},
-                  NodeData::PubSub::Topic::FftFrame),
+        sub2,
+        pubSubNode2.subscribe("foo1node2fft",
+                              {.subscriber = &foo1, .callback = Foo::callback},
+                              NodeData::PubSub::Topic::FftFrame),
         "Failed to subscribe foo1 on node2 to FftFrame");
     ABORT_IF_UNEXPECTED(
-        sub3, pubSubNode2.subscribe(
-                  "foo2node2metrics",
-                  {.subscriber = &foo2, .callback = Foo::callback},
-                  NodeData::PubSub::Topic::Metrics),
+        sub3,
+        pubSubNode2.subscribe("foo2node2metrics",
+                              {.subscriber = &foo2, .callback = Foo::callback},
+                              NodeData::PubSub::Topic::Metrics),
         "Failed to subscribe foo2 on node2 to Metrics");
     ABORT_IF_UNEXPECTED(
-        sub4, pubSubNode2.subscribe(
-                  "foo2node2sensor",
-                  {.subscriber = &foo2, .callback = Foo::callback},
-                  NodeData::PubSub::Topic::Sensor),
+        sub4,
+        pubSubNode2.subscribe("foo3node2sensor",
+                              {.subscriber = &foo3, .callback = Foo::callback},
+                              NodeData::PubSub::Topic::Sensor),
         "Failed to subscribe foo2 on node2 to Sensor");
     ABORT_IF_UNEXPECTED(
-        sub5, pubSubNode2.subscribe(
-                  "foo1node2heartbeat",
-                  {.subscriber = &foo1, .callback = Foo::callback},
-                  NodeData::PubSub::Topic::Heartbeat),
+        sub5,
+        pubSubNode2.subscribe("foo4node2heartbeat",
+                              {.subscriber = &foo4, .callback = Foo::callback},
+                              NodeData::PubSub::Topic::Heartbeat),
         "Failed to subscribe foo1 on node2 to Heartbeat");
     ABORT_IF_UNEXPECTED(
-        sub6, pubSubNode2.subscribe(
-                  "foo2node2heartbeat",
-                  {.subscriber = &foo2, .callback = Foo::callback},
-                  NodeData::PubSub::Topic::Heartbeat),
+        sub6,
+        pubSubNode2.subscribe("foo5node2heartbeat",
+                              {.subscriber = &foo5, .callback = Foo::callback},
+                              NodeData::PubSub::Topic::Heartbeat),
         "Failed to subscribe foo2 on node2 to Heartbeat");
     ABORT_IF_UNEXPECTED(
-        sub7, pubSubNode2.subscribe(
-                  "foo3node2heartbeat",
-                  {.subscriber = &foo3, .callback = Foo::callback},
-                  NodeData::PubSub::Topic::Heartbeat),
+        sub7,
+        pubSubNode2.subscribe("foo6node2heartbeat",
+                              {.subscriber = &foo6, .callback = Foo::callback},
+                              NodeData::PubSub::Topic::Heartbeat),
         "Failed to subscribe foo3 on node2 to Heartbeat");
 
     (void)sub1;

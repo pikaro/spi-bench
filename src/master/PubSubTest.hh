@@ -26,15 +26,15 @@ class Foo {
     handleMessage(const Totem::PubSubBackend::Envelope &envelope) const {
         FAIL_IF_UNEXPECTED_FWD(message, envelope.getPayloadAs<Message>(),
                                "Failed to decode message payload");
-        _log_i("%s received message on topic %s", name,
-               magic_enum::enum_name(static_cast<Totem::Data::PubSub::Topic>(
-                   envelope.header.topic)));
+        _log_i("%s received message on topic " SV_FMT, name,
+               MAGIC_SV_ARG(Totem::Data::PubSub::Topic,
+                            envelope.header.topic));
         _log_i("Flag: %s", message.flag ? "true" : "false");
         _log_i("Int value: %d", message.intVal);
         _log_i("Uint32 value: %u", message.uint32Val);
         _log_i("Uint16 value: %u", message.uint16Val);
         _log_i("Uint8 value: %u", message.uint8Val);
-        _log_i("String value: %s", message.strVal);
+        _log_i("String value: %s", message.strVal.data());
         _log_i("Byte array value:");
         for (size_t i = 0; i < message.byteArrayVal.size(); ++i) {
             _log_i("  [%zu]: %02x", i,

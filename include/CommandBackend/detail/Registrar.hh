@@ -1,8 +1,8 @@
 #pragma once
 
+#include "CommandBackend/Interfaces/CommandDesc.hh"
 #include "CommandBackend/detail/Store.hh"
 #include "Macros/Facade.hh"
-#include "Types/Command.hh"
 #include "Types/Error.hh"
 #include <expected>
 
@@ -19,7 +19,7 @@ class Registrar {
             cmd.validate(),
             "Invalid command description for command %s:", cmd.name);
         FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
-            nameKey, _store.add(cmd.name, cmd),
+            nameKey, _store.add(cmd.name.data(), cmd),
             "Failed to add command %s to store:", cmd.name);
         return nameKey;
     }

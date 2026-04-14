@@ -1,16 +1,15 @@
 #pragma once
 
+#include "CommandBackend/Interfaces/CommandDesc.hh"
 #include "Macros/Facade.hh"
 #include "Services/Commands.hh"
-#include "Types/Command.hh"
 #include "Types/Error.hh"
 
 inline CommandDesc helloCmd = {
     .name = "hello",
     .description = "Prints Hello, World!",
     .args = {},
-    .minArgs = 0,
-    .handler = [](CommandDesc::Tokens, void *) -> ReturnCode {
+    .handler = [](CommandDesc::ParsedArgs /*unused*/, void *) -> ReturnCode {
         _log_i("Hello, World!");
         return OK(CoreError);
     },

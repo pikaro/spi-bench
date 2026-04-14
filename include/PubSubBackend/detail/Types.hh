@@ -4,6 +4,7 @@
 #include "PubSubBackend/Interfaces/Envelope.hh"
 #include "PubSubBackend/Interfaces/Types.hh"
 #include "Types/Error.hh"
+#include "Types/Logging.hh"
 #include <cstdint>
 
 namespace Totem::PubSubBackend::detail {
@@ -30,5 +31,7 @@ using FrameHandle = StoredFrame *;
 
 using PollIntoCallback = ReturnCode (*)(void *ctx, const Envelope &envelope);
 using PublishCallback = ReturnCode (*)(void *ctx, const Envelope &envelope);
+
+inline constexpr LogComponent logComponent = LogComponent::PubSub;
 
 } // namespace Totem::PubSubBackend::detail

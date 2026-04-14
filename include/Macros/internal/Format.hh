@@ -10,12 +10,22 @@
     INTERNAL_GET_MACRO_2(__VA_ARGS__, INTERNAL_SV_ARG_PAD,                     \
                          INTERNAL_SV_ARG_PLAIN)(__VA_ARGS__)
 
-#define INTERNAL_MAGIC_SV_ARG_CAST(T, sv)                                      \
-    SV_ARG(magic_enum::enum_name(static_cast<T>(sv)))
-#define INTERNAL_MAGIC_SV_ARG_NOCAST(sv) SV_ARG(magic_enum::enum_name(sv))
+#define INTERNAL_MAGIC_SV_ARG_CAST(T, v)                                       \
+    SV_ARG(magic_enum::enum_name(static_cast<T>(v)))
+#define INTERNAL_MAGIC_SV_ARG_NOCAST(v) SV_ARG(magic_enum::enum_name(v))
 #define MAGIC_SV_ARG(...)                                                      \
     INTERNAL_GET_MACRO_2(__VA_ARGS__, INTERNAL_MAGIC_SV_ARG_CAST,              \
                          INTERNAL_MAGIC_SV_ARG_NOCAST)(__VA_ARGS__)
+
+#define MAGIC_CHR_CAST(T, v)                                                   \
+    magic_enum::enum_name(static_cast<T>(v))                                   \
+        .data() // NOLINT(bugprone-suspicious-stringview-data-usage)
+#define MAGIC_CHR_NOCAST(v)                                                    \
+    magic_enum::enum_name(v)                                                   \
+        .data() // NOLINT(bugprone-suspicious-stringview-data-usage)
+#define MAGIC_CHR(...)                                                         \
+    INTERNAL_GET_MACRO_2(__VA_ARGS__, MAGIC_CHR_CAST,                          \
+                         MAGIC_CHR_NOCAST)(__VA_ARGS__)
 
 #define MAGIC_PUBSUB_SV_FMT                                                    \
     "record with topic " SV_FMT " from node " SV_FMT " with message ID %lu"

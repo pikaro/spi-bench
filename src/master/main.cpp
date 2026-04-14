@@ -85,7 +85,7 @@ void setup() {
     ABORT_IF_UNEXPECTED(uartSink, uart.sink(),
                         "Failed to get sink from UART output");
 
-    ABORT_IF_ERR_BEGIN(aggregator.begin({.defaultLogLevel = LogLevel::Debug}));
+    ABORT_IF_ERR_BEGIN(aggregator.begin());
     ABORT_IF_ERR(aggregator.addSink(uartSink),
                  "Failed to add UART sink to aggregator");
 

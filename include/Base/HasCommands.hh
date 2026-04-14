@@ -1,11 +1,11 @@
 #pragma once
 
+#include "CommandBackend/Interfaces/CommandDesc.hh"
 #include "CommandBackend/detail/Store.hh"
 #include "Concepts/Base.hh"
 #include "Macros/Facade.hh"
 #include "Services/Commands.hh"
 #include "StaticConfig/Command.hh"
-#include "Types/Command.hh"
 #include "Types/Error.hh"
 #include <array>
 #include <concepts>

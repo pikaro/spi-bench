@@ -1,11 +1,11 @@
 #pragma once
 
+#include "CommandBackend/Interfaces/CommandDesc.hh"
 #include "CommandBackend/Interfaces/Transport.hh"
 #include "Macros/Facade.hh"
 #include "Platform/Uart.hh"
 #include "StaticConfig/Command.hh"
 #include "StaticConfig/Uart.hh"
-#include "Types/Command.hh"
 #include "Types/Error.hh"
 #include <array>
 #include <cctype>
@@ -112,6 +112,7 @@ class UartTransport {
 
         while (i < _lineLen) {
             while (i < _lineLen &&
+                   // Skip leading spaces
                    std::isspace(static_cast<unsigned char>(_line[i])) != 0) {
                 ++i;
             }
@@ -123,6 +124,7 @@ class UartTransport {
             const size_t start = i;
 
             while (i < _lineLen &&
+                   // Consume non-space characters
                    std::isspace(static_cast<unsigned char>(_line[i])) == 0) {
                 ++i;
             }
@@ -134,7 +136,11 @@ class UartTransport {
 
             _tokens[_tokenCount++] =
                 CommandDesc::Token{&_line[start], i - start};
+
+            _log_d("Parsed token: " SV_FMT, SV_ARG(_tokens[_tokenCount - 1]));
         }
+
+        _log_d("Total tokens parsed: %zu", _tokenCount);
 
         FAIL_IF(_tokenCount == 0,
                 std::unexpected(ERR(CommandError, SyntaxError)),

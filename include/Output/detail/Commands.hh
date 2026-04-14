@@ -1,33 +1,52 @@
 #pragma once
 
+#include "CommandBackend/Facade.hh"
+#include "CommandBackend/Interfaces/CommandDesc.hh"
 #include "Macros/Facade.hh"
-#include "Types/Command.hh"
 #include "Types/Error.hh"
 #include <array>
 #include <magic_enum/magic_enum.hpp>
+#include <optional>
 #include <span>
 
 namespace Totem::Output::detail {
 
 template <typename Owner> struct Commands {
-    static ReturnCode handle_set_log_level(CommandDesc::Tokens args,
+
+    static ReturnCode handle_set_log_level(CommandDesc::ParsedArgs args,
                                            void *ctx) {
         auto *aggregator = static_cast<Owner *>(ctx);
-        FAIL_IF(args.size() != 1, ERR(CommandError, BadArgumentCount),
-                "set_log_level command requires exactly 1 argument");
-        FAIL_IF_UNEXPECTED(logLevel, log_level_from_string(args[0]),
-                           ERR(CommandError, BadArgument),
-                           "Invalid log level string: " SV_FMT,
-                           SV_ARG(args[0]));
-        return aggregator->setLogLevel(logLevel);
+
+        auto level = args.get<LogLevel>(0);
+        FAIL_IF(!level.ok, ERR(CommandError, BadArgument),
+                "Missing or invalid log level argument for log command in %s",
+                Owner::name);
+
+        auto componentResult = args.get<LogComponent>(1);
+
+        FAIL_IF(!componentResult.ok &&
+                    componentResult.error != CommandDesc::ArgError::Missing,
+                ERR(CommandError, BadArgument),
+                "Invalid log component argument for log command in %s",
+                Owner::name);
+
+        std::optional<LogComponent> component;
+        if (componentResult.ok) {
+            component = componentResult.value;
+        }
+
+        return aggregator->setLogLevel(level.value, component);
     }
 
     CommandDesc logLevelCmd = {
         .needsContext = true,
         .name = "log",
         .description = "Set log level for output",
-        .args = {},
-        .minArgs = 0,
+        .args =
+            {
+                CommandBackend::arg<LogLevel>("level", false),
+                CommandBackend::arg<LogComponent>("component", true),
+            },
         .handler = handle_set_log_level,
         .subcommands = {},
     };

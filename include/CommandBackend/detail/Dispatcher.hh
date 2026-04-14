@@ -1,7 +1,7 @@
 #pragma once
 
+#include "CommandBackend/Interfaces/CommandDesc.hh"
 #include "Macros/Facade.hh"
-#include "Types/Command.hh"
 #include "Types/Error.hh"
 #include <cstring>
 
@@ -11,10 +11,18 @@ class Dispatcher {
   public:
     static ReturnCode dispatch(const CommandDesc &command,
                                CommandDesc::Tokens args) {
-        if (args.size() < command.minArgs) {
-            _log_e("Command %s requires at least %zu arguments, but got %zu",
-                   command.name, command.minArgs, args.size());
-            return ERR(InvalidArgument);
+        size_t requiredArgs = 0;
+        for (const auto &arg : command.args) {
+            if (arg.name.empty() || arg.optional) {
+                break;
+            }
+            ++requiredArgs;
+        }
+
+        if (args.size() < requiredArgs) {
+            FAIL(ERR(CommandError, BadArgumentCount),
+                 "Command %s requires at least %zu arguments, but got %zu",
+                 command.name, requiredArgs, args.size());
         }
 
         for (const auto &subcommand : command.subcommands) {
@@ -23,7 +31,9 @@ class Dispatcher {
             }
         }
 
-        return command.handler(args, command.ctx);
+        auto parser = CommandDesc::ParsedArgs{.desc = command, .tokens = args};
+
+        return command.handler(parser, command.ctx);
     }
 };
 

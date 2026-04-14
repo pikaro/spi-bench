@@ -2,6 +2,7 @@
 
 #include "Base/HasLifecycle.hh"
 #include "Base/HasTaskController.hh"
+#include "CommandBackend/Interfaces/CommandDesc.hh"
 #include "CommandBackend/Interfaces/Transport.hh"
 #include "CommandBackend/detail/Config.hh"
 #include "CommandBackend/detail/Dispatcher.hh"
@@ -11,7 +12,6 @@
 #include "StaticConfig/Command.hh"
 #include "TaskController/Interfaces/RegistryHooks.hh"
 #include "TaskController/Interfaces/TaskHooks.hh"
-#include "Types/Command.hh"
 #include "Types/Error.hh"
 #include <array>
 
@@ -73,11 +73,10 @@ class Controller : public HasLifecycle<Controller, Config>,
             return ERR(InvalidArgument);
         }
 
-        const char *commandName = commandLine[0].data();
         FAIL_IF_UNEXPECTED_FWD(
             commandEntry,
-            _store.get(Store::CommandNameKey::fromCharPtr(commandName)),
-            "Command %s not found in store", commandName);
+            _store.get(Store::CommandNameKey::fromStringView(commandLine[0])),
+            "Command " SV_FMT " not found in store", SV_ARG(commandLine[0]));
 
         return Dispatcher::dispatch(commandEntry, commandLine.subspan(1));
     }
@@ -106,10 +105,10 @@ class Controller : public HasLifecycle<Controller, Config>,
                 _log_w("Command not found for input from transport %s",
                        transport.name);
                 continue;
-                FAIL_IF_ERR_FWD(dispatchResult,
-                                "Failed to dispatch command from transport %s",
-                                transport.name);
             }
+            FAIL_IF_ERR_FWD(dispatchResult,
+                            "Failed to dispatch command from transport %s",
+                            transport.name);
         }
         return OK();
     }

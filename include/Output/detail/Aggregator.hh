@@ -16,6 +16,8 @@
 #include "Types/Logging.hh"
 #include <array>
 #include <cstddef>
+#include <cstdint>
+#include <optional>
 
 namespace Totem::Output::detail {
 
@@ -37,8 +39,47 @@ class Aggregator : public HasLifecycle<Aggregator, AggregatorConfig>,
 
     static constexpr const char *name = "Aggregator";
 
-    ReturnCode setLogLevel(LogLevel level) {
-        _logLevel = level;
+    [[nodiscard]] bool
+    loggingFor(LogLevel level,
+               std::optional<LogComponent> component = std::nullopt) const {
+        if (!component) {
+            return level >= _logLevel;
+        }
+        if (static_cast<uint8_t>(*component) >= _componentLogLevels.size()) {
+            _log_e("Invalid log component %u in %s",
+                   static_cast<uint8_t>(*component), name);
+            return true;
+        }
+        auto levelNum = static_cast<uint8_t>(level);
+        auto componentLevel = static_cast<uint8_t>(
+            _componentLogLevels[static_cast<size_t>(*component)].value_or(
+                _logLevel));
+        return levelNum >= componentLevel;
+    }
+
+    ReturnCode
+    setLogLevel(LogLevel level,
+                std::optional<LogComponent> component = std::nullopt) {
+        if (component) {
+            if (static_cast<uint8_t>(*component) >=
+                _componentLogLevels.size()) {
+                return ERR(InvalidArgument);
+            }
+            _componentLogLevels[static_cast<size_t>(*component)] = level;
+            _log_i("Set log level for component " SV_FMT " to " SV_FMT,
+                   MAGIC_SV_ARG(*component), MAGIC_SV_ARG(level));
+        } else {
+            _logLevel = level;
+            _log_i("Set default log level to " SV_FMT, MAGIC_SV_ARG(level));
+        }
+        return OK();
+    }
+
+    ReturnCode setComponentLogLevelDefault(LogComponent component) {
+        if (static_cast<uint8_t>(component) >= _componentLogLevels.size()) {
+            return ERR(InvalidArgument);
+        }
+        _componentLogLevels[static_cast<size_t>(component)] = std::nullopt;
         return OK();
     }
 
@@ -135,15 +176,15 @@ class Aggregator : public HasLifecycle<Aggregator, AggregatorConfig>,
         const auto *data = result.value().first;
         FAIL_IF_NULL(data, ERR(InvalidData),
                      "Received null data from ring buffer in %s", name);
+
         ReturnCode writeResult = OK();
         for (const auto &sink : _sinks) {
-            if (data->level >= _logLevel) {
-                auto ret = sink.write(*data);
-                if (!ret.ok()) {
-                    writeResult = ret;
-                }
+            auto ret = sink.write(*data);
+            if (!ret.ok()) {
+                writeResult = ret;
             }
         }
+
         auto returnResult =
             RingBuffer::Buffer::returnItem(_ringBuffer, (void *)data);
         FAIL_IF_ERR_FWD(returnResult,
@@ -153,6 +194,8 @@ class Aggregator : public HasLifecycle<Aggregator, AggregatorConfig>,
 
     ::platform::RingBufferHandle _ringBuffer;
     LogLevel _logLevel = LogLevel::Info;
+    std::array<std::optional<LogLevel>, magic_enum::enum_count<LogComponent>()>
+        _componentLogLevels{std::nullopt};
     std::array<Sink, LoggingConfig::maxSinks> _sinks{};
 };
 

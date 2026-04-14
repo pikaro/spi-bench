@@ -55,6 +55,7 @@ enum class CommandError : uint8_t {
     TooLong,
     BadArgument,
     BadArgumentCount,
+    NotFound,
 };
 
 template <typename Enum> constexpr const char *error_name(uint8_t value) {

@@ -1,13 +1,10 @@
 #pragma once
 
-#include "Macros/internal/Error.hh"
-#include "Types/Error.hh"
+#include "Types/Basic.hh"
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <expected>
-#include <string_view>
 
 inline constexpr size_t logMaxLength = 256;
 inline constexpr size_t logTagLength = 4;
@@ -34,56 +31,42 @@ constexpr const char *log_level_to_string(LogLevel level) {
     case LogLevel::Error:
         return "ERR";
     default:
-        return "UN?";
+        return "???";
     }
 }
 
-constexpr std::expected<LogLevel, ReturnCode>
-log_level_from_string(const char *str) {
-    if (str == nullptr) {
-        return std::unexpected(ERR(CoreError, InvalidArgument));
+enum class LogComponent : uint8_t {
+    System = 0,
+    PubSub,
+};
+
+constexpr const char *log_component_to_string(LogComponent component) {
+    switch (component) {
+    case LogComponent::System:
+        return "sys";
+    case LogComponent::PubSub:
+        return "psb";
+    default:
+        return "???";
     }
-    if (strcmp(str, "verbose") == 0) {
-        return LogLevel::Verbose;
-    }
-    if (strcmp(str, "debug") == 0) {
-        return LogLevel::Debug;
-    }
-    if (strcmp(str, "info") == 0) {
-        return LogLevel::Info;
-    }
-    if (strcmp(str, "warning") == 0) {
-        return LogLevel::Warning;
-    }
-    if (strcmp(str, "error") == 0) {
-        return LogLevel::Error;
-    }
-    return std::unexpected(ERR(CoreError, NotFound));
 }
 
-constexpr std::expected<LogLevel, ReturnCode>
-log_level_from_string(std::string_view str) {
-    if (str == "verbose") {
-        return LogLevel::Verbose;
+constexpr Color log_component_to_color(LogComponent component) {
+    switch (component) {
+    case LogComponent::System:
+        return Color::Blue;
+    case LogComponent::PubSub:
+        return Color::Green;
+    default:
+        return Color::White;
     }
-    if (str == "debug") {
-        return LogLevel::Debug;
-    }
-    if (str == "info") {
-        return LogLevel::Info;
-    }
-    if (str == "warning") {
-        return LogLevel::Warning;
-    }
-    if (str == "error") {
-        return LogLevel::Error;
-    }
-    return std::unexpected(ERR(CoreError, NotFound));
 }
+
+inline constexpr LogComponent logComponent = LogComponent::System;
 
 struct LogRecord {
     uint32_t ts;
-    std::array<char, logTagLength> tag;
+    LogComponent component;
     LogLevel level;
     std::array<char, logMaxLength> msg;
 };

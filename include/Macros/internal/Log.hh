@@ -1,6 +1,5 @@
 #pragma once
 
-#include "Base/Namespaces.hh"         // IWYU pragma: export
 #include "Platform/PlatformSelect.hh" // IWYU pragma: export
 #include "Services/Logging.hh"        // IWYU pragma: export
 #include "Types/Logging.hh"           // IWYU pragma: export
@@ -49,12 +48,12 @@ constexpr std::string_view logFunctionName(std::string_view function) {
         auto loc = std::source_location::current();                            \
         auto _logFile =                                                        \
             Totem::LoggerSupport::detail::logFileName(loc.file_name());        \
-        auto _logFunction =                                                    \
-            Totem::LoggerSupport::detail::logFunctionName(loc.function_name());\
+        auto _logFunction = Totem::LoggerSupport::detail::logFunctionName(     \
+            loc.function_name());                                              \
         (void)LoggingService::logf(                                            \
-            LogLevel::Error, TAG, "[%.*s:%d:%.*s] " msg,                       \
+            LogLevel::Error, logComponent, "[%.*s:%d:%.*s] " msg,              \
             static_cast<int>(_logFile.size()), _logFile.data(), loc.line(),    \
-            static_cast<int>(_logFunction.size()), _logFunction.data(),         \
+            static_cast<int>(_logFunction.size()), _logFunction.data(),        \
             ##__VA_ARGS__);                                                    \
     } while (0)
 
@@ -65,26 +64,15 @@ constexpr std::string_view logFunctionName(std::string_view function) {
     } while (0)
 
 #define _log_v(format, ...)                                                    \
-    INTERNAL_LOG_IMPL(LogLevel::Verbose, TAG, format, ##__VA_ARGS__)
+    INTERNAL_LOG_IMPL(LogLevel::Verbose, logComponent, format, ##__VA_ARGS__)
 #define _log_d(format, ...)                                                    \
-    INTERNAL_LOG_IMPL(LogLevel::Debug, TAG, format, ##__VA_ARGS__)
+    INTERNAL_LOG_IMPL(LogLevel::Debug, logComponent, format, ##__VA_ARGS__)
 #define _log_i(format, ...)                                                    \
-    INTERNAL_LOG_IMPL(LogLevel::Info, TAG, format, ##__VA_ARGS__)
+    INTERNAL_LOG_IMPL(LogLevel::Info, logComponent, format, ##__VA_ARGS__)
 #define _log_w(format, ...)                                                    \
-    INTERNAL_LOG_IMPL(LogLevel::Warning, TAG, format, ##__VA_ARGS__)
+    INTERNAL_LOG_IMPL(LogLevel::Warning, logComponent, format, ##__VA_ARGS__)
 #define _log_e(format, ...)                                                    \
-    INTERNAL_LOG_IMPL(LogLevel::Error, TAG, format, ##__VA_ARGS__)
-
-#define _cls_log_v(format, ...)                                                \
-    INTERNAL_LOG_IMPL(LogLevel::Verbose, _logTag, format, ##__VA_ARGS__)
-#define _cls_log_d(format, ...)                                                \
-    INTERNAL_LOG_IMPL(LogLevel::Debug, _logTag, format, ##__VA_ARGS__)
-#define _cls_log_i(format, ...)                                                \
-    INTERNAL_LOG_IMPL(LogLevel::Info, _logTag, format, ##__VA_ARGS__)
-#define _cls_log_w(format, ...)                                                \
-    INTERNAL_LOG_IMPL(LogLevel::Warning, _logTag, format, ##__VA_ARGS__)
-#define _cls_log_e(format, ...)                                                \
-    INTERNAL_LOG_IMPL(LogLevel::Error, _logTag, format, ##__VA_ARGS__)
+    INTERNAL_LOG_IMPL(LogLevel::Error, logComponent, format, ##__VA_ARGS__)
 
 #define _log_lv(level, format, ...)                                            \
     esp_log_level(level, tag, format, ##__va_args__)

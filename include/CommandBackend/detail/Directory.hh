@@ -1,9 +1,9 @@
 #pragma once
 
+#include "CommandBackend/Interfaces/CommandDesc.hh"
 #include "Generic/Directory.hh"
 #include "StaticConfig/Command.hh"
 #include "Types/Collection.hh"
-#include "Types/Command.hh"
 #include "Types/Error.hh"
 #include <cstring>
 #include <expected>

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CommandBackend/Interfaces/CommandDesc.hh"
 #include "Macros/Facade.hh"
 #include "Monitoring/Interfaces/Sink.hh"
 #include "Monitoring/detail/Types.hh"
@@ -7,7 +8,6 @@
 #include "StaticConfig/TaskRegistry.hh"
 #include "Support/Basic.hh"
 #include "TaskController/Interfaces/TaskRuntimeSnapshot.hh"
-#include "Types/Command.hh"
 #include "Types/Error.hh"
 #include <array>
 #include <cstddef>
@@ -96,7 +96,7 @@ inline static ReturnCode dump_monitoring_snaphot(const MonitoringFrame &frame) {
 }
 
 template <typename Owner> struct Commands {
-    static ReturnCode handle_monitoring(CommandDesc::Tokens /*unused*/,
+    static ReturnCode handle_monitoring(CommandDesc::ParsedArgs /*unused*/,
                                         void *ctx) {
         auto *monitoring = static_cast<Owner *>(ctx);
         return monitoring->snapshot(Sink{
@@ -113,7 +113,6 @@ template <typename Owner> struct Commands {
         .name = "monitor",
         .description = "Output monitoring data and stats",
         .args = {},
-        .minArgs = 0,
         .handler = handle_monitoring,
         .subcommands = {},
     };

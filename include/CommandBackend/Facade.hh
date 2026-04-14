@@ -2,10 +2,12 @@
 
 #include "CommandBackend/Transports/UartTransport.hh"
 #include "CommandBackend/detail/Controller.hh"
+#include "CommandBackend/detail/Parser.hh"
 #include "CommandBackend/detail/Registrar.hh"
 
 namespace Totem::CommandBackend {
 
+using detail::arg;
 using detail::Controller;
 using detail::Registrar;
 

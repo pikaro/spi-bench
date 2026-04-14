@@ -1,7 +1,7 @@
 #pragma once
 
+#include "CommandBackend/Interfaces/CommandDesc.hh"
 #include "Concepts/Base.hh"
-#include "Types/Command.hh"
 #include "Types/Error.hh"
 #include <concepts>
 #include <expected>

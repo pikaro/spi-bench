@@ -6,6 +6,7 @@
 #include "Output/Interfaces/Sink.hh"
 #include "Platform/Uart.hh"
 #include "StaticConfig/Logging.hh"
+#include "Types/Basic.hh"
 #include "Types/Error.hh"
 #include "Types/Logging.hh"
 #include <array>
@@ -15,55 +16,78 @@
 
 namespace Totem::Output::detail::Outputs {
 
-struct Colors {
-    static constexpr const char *reset = "\x1b[0m";
-    static constexpr const char *black = "\x1b[30m";
-    static constexpr const char *red = "\x1b[31m";
-    static constexpr const char *green = "\x1b[32m";
-    static constexpr const char *yellow = "\x1b[33m";
-    static constexpr const char *blue = "\x1b[34m";
-    static constexpr const char *magenta = "\x1b[35m";
-    static constexpr const char *cyan = "\x1b[36m";
-    static constexpr const char *white = "\x1b[37m";
-    static constexpr const char *brightBlack = "\x1b[90m";
-    static constexpr const char *brightRed = "\x1b[91m";
-    static constexpr const char *brightGreen = "\x1b[92m";
-    static constexpr const char *brightYellow = "\x1b[93m";
-    static constexpr const char *brightBlue = "\x1b[94m";
-    static constexpr const char *brightMagenta = "\x1b[95m";
-    static constexpr const char *brightCyan = "\x1b[96m";
-    static constexpr const char *brightWhite = "\x1b[97m";
-};
-
-constexpr const char *logLevelColor(LogLevel level) {
+constexpr Color log_level_color(LogLevel level) {
     switch (level) {
     case LogLevel::Verbose:
-        return Colors::brightBlack;
+        return Color::BrightBlack;
     case LogLevel::Debug:
-        return Colors::blue;
+        return Color::Blue;
     case LogLevel::Info:
-        return Colors::green;
+        return Color::Green;
     case LogLevel::Warning:
-        return Colors::yellow;
+        return Color::Yellow;
     case LogLevel::Error:
-        return Colors::red;
+        return Color::Red;
     default:
-        return Colors::brightMagenta;
+        return Color::BrightMagenta;
     }
 }
 
-constexpr const char *logMessageColor(LogLevel level) {
+constexpr Color log_message_color(LogLevel level) {
     switch (level) {
     case LogLevel::Verbose:
     case LogLevel::Debug:
-        return Colors::brightBlack;
+        return Color::BrightBlack;
     case LogLevel::Info:
     case LogLevel::Warning:
-        return Colors::brightWhite;
+        return Color::BrightWhite;
     case LogLevel::Error:
-        return Colors::red;
+        return Color::Red;
     default:
-        return Colors::brightMagenta;
+        return Color::BrightMagenta;
+    }
+}
+
+constexpr const char *log_color_to_string(Color color) {
+    switch (color) {
+    case Color::None:
+        return "";
+    case Color::Reset:
+        return "\033[0m";
+    case Color::Black:
+        return "\033[30m";
+    case Color::Red:
+        return "\033[31m";
+    case Color::Green:
+        return "\033[32m";
+    case Color::Yellow:
+        return "\033[33m";
+    case Color::Blue:
+        return "\033[34m";
+    case Color::Magenta:
+        return "\033[35m";
+    case Color::Cyan:
+        return "\033[36m";
+    case Color::White:
+        return "\033[37m";
+    case Color::BrightBlack:
+        return "\033[90m";
+    case Color::BrightRed:
+        return "\033[91m";
+    case Color::BrightGreen:
+        return "\033[92m";
+    case Color::BrightYellow:
+        return "\033[93m";
+    case Color::BrightBlue:
+        return "\033[94m";
+    case Color::BrightMagenta:
+        return "\033[95m";
+    case Color::BrightCyan:
+        return "\033[96m";
+    case Color::BrightWhite:
+        return "\033[97m";
+    default:
+        return "";
     }
 }
 
@@ -85,24 +109,31 @@ class UartOutput : public HasLifecycle<UartOutput, UartConfig> {
         static constexpr char logFmt[] =
             "%s%s%s (%s%" PRIu32 "%s) <%s%s%s>: %s%s%s\n";
 
-        const char *rst = "";
-        const char *tsColor = "";
-        const char *tagColor = "";
-        const char *lvColor = "";
-        const char *msgColor = "";
+        Color rst = Color::None;
+        Color tsColor = Color::None;
+        Color tagColor = Color::None;
+        Color lvColor = Color::None;
+        Color msgColor = Color::None;
 
         if (LoggingConfig::useColor) {
-            rst = Colors::reset;
-            tsColor = Colors::brightBlack;
-            tagColor = Colors::brightBlue;
-            lvColor = logLevelColor(record.level);
-            msgColor = logMessageColor(record.level);
+            rst = Color::Reset;
+            tsColor = Color::BrightBlack;
+            tagColor = log_component_to_color(record.component);
+            lvColor = log_level_color(record.level);
+            msgColor = log_message_color(record.level);
         }
 
-        int num = std::snprintf(buf.data(), buf.size(), logFmt, lvColor,
-                                log_level_to_string(record.level), rst, tsColor,
-                                record.ts, rst, tagColor, record.tag.data(),
-                                rst, msgColor, record.msg.data(), rst);
+        const auto *rstS = log_color_to_string(rst);
+        const auto *tsColorS = log_color_to_string(tsColor);
+        const auto *tagColorS = log_color_to_string(tagColor);
+        const auto *lvColorS = log_color_to_string(lvColor);
+        const auto *msgColorS = log_color_to_string(msgColor);
+
+        int num = std::snprintf(buf.data(), buf.size(), logFmt, lvColorS,
+                                log_level_to_string(record.level), rstS,
+                                tsColorS, record.ts, rstS, tagColorS,
+                                log_component_to_string(record.component), rstS,
+                                msgColorS, record.msg.data(), rstS);
 
         if (num < 0) {
             return ERR(CoreError, OperationFailed);

@@ -1,6 +1,5 @@
 #pragma once
 
-#include "Base/Namespaces.hh" // IWYU pragma: export
 #include "Macros/Facade.hh"
 #include "Support/Basic.hh"
 #include "Types/Basic.hh"

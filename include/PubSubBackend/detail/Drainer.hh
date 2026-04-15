@@ -65,8 +65,7 @@ class Drainer {
                         _log_d("Drainer: final ack for " MAGIC_PUBSUB_SV_FMT,
                                MAGIC_PUBSUB_SV_ARG(envelope.header));
                         if (frame.envelope.release != nullptr) {
-                            ret.combine(frame.envelope.release(
-                                frame.envelope.owner, envelope));
+                            ret.combine(frame.envelope.ack());
                         }
                         frame = StoredFrame{};
                     }
@@ -113,17 +112,23 @@ class Drainer {
     }
 
     ReturnCode _publishFromTransports() {
-        return _transporters.withAllConst(
-            [&](const TransporterKey &,
-                const TransporterEntry &entry) -> ReturnCode {
-                auto ctx = PublishContext{
-                    .self = this, .ingressTransport = entry.transportId};
-                return entry.transporter.pollInto(&ctx, &_publishCallback);
-            });
+        FAIL_IF_UNEXPECTED_FWD(
+            snapshot, _transporters.snapshot(),
+            "Failed to snapshot PubSub transporters for polling");
+        auto ret = OK();
+        for (size_t i = 0; i < snapshot.count; ++i) {
+            const auto &entry = snapshot.entries[i];
+            auto ctx = PublishContext{.self = this,
+                                      .ingressTransport = entry.transportId};
+            ret.combine(entry.transporter.pollInto(&ctx, &_publishCallback));
+        }
+        return ret;
     }
 
     std::expected<FrameHandle, ReturnCode>
-    _storeFrame(const Envelope &envelope) {
+    _storeFrame(const Envelope &envelope,
+                std::optional<TransportId> ingressTransport =
+                    std::nullopt) {
         StoredFrame frame;
         frame.envelope = envelope;
         TransportMask mask = 0;
@@ -131,6 +136,10 @@ class Drainer {
         (void)_transporters.withAll(
             [&](const TransporterKey &,
                 const TransporterEntry &entry) -> ReturnCode {
+                if (ingressTransport.has_value() &&
+                    entry.transportId == *ingressTransport) {
+                    return OK();
+                }
                 if ((entry.topicMask & envelope.header.topic) != 0) {
                     mask |= entry.transportId;
                     ++pendingCount;
@@ -170,13 +179,13 @@ class Drainer {
                ingressTransport.has_value() ? " from transport ingress" : "");
         ret.combine(_controlPlane.handle(item, ingressTransport));
         ret.combine(_publisher.publishToSubscribers(item));
-        auto storeResult = _storeFrame(item);
+        auto storeResult = _storeFrame(item, ingressTransport);
         if (!storeResult) {
             if (storeResult.error() == ERR(NotFound)) {
                 _log_d("Drainer: releasing " MAGIC_PUBSUB_SV_FMT
                        " without transport fanout",
                        MAGIC_PUBSUB_SV_ARG(item.header));
-                FAIL_IF_ERR_FWD(item.release(item.owner, item),
+                FAIL_IF_ERR_FWD(item.ack(),
                                 "Failed to release message for topic " SV_FMT
                                 " with no subscribers or transports",
                                 MAGIC_SV_ARG(Spec::Topic, item.header.topic));

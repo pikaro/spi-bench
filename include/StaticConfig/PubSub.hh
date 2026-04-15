@@ -9,7 +9,7 @@ struct PubSubConfig {
     static constexpr size_t maxTransports = 8;
     static constexpr size_t maxTransportNameLength = 16;
 
-    static constexpr size_t maxPayloadSize = 32;
+    static constexpr size_t maxPayloadSize = 64;
     static constexpr size_t maxMessageQueueSize = 16;
     static constexpr size_t maxInFlightMessages = 16;
 

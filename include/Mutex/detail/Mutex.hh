@@ -71,9 +71,9 @@ template <class F, class... Args> struct MutexExecSpec {
         IsMutexReturn<R, 8>,
         "MutexExecSpec return must be tiny, trivial, default-constructible");
 
-    std::optional<uint32_t> timeoutMs;
+    std::optional<uint32_t> timeoutMs = std::nullopt;
     const char *name;
-    R failValue;
+    R failValue{};
     Fn fun;
     std::tuple<std::decay_t<Args>...> args;
     MutexHandle mutex;
@@ -97,9 +97,9 @@ struct MutexExecSpecConst {
     static_assert(IsMutexReturn<R, 8>, "MutexExecSpecConst return must be "
                                        "tiny, trivial, default-constructible");
 
-    std::optional<uint32_t> timeoutMs;
+    std::optional<uint32_t> timeoutMs = std::nullopt;
     const char *name;
-    R failValue;
+    R failValue{};
     Fn fun;
     std::tuple<std::decay_t<Args>...> args;
     MutexHandle mutex;
@@ -140,9 +140,15 @@ typename MutexExecSpec<F, Args...>::R
 execute_mutex_exec_spec(MutexExecSpec<F, Args...> &&req) {
     FAIL_IF_NULL(req.mutex, req.failValue, "MutexRequest %s", req.name);
     MutexGuard guard(req.mutex, ::platform::ms_to_ticks(
-                                    req.timeoutMs.value_or(MS_MAX_DELAY)));
+                                    req.timeoutMs.value_or(MS_MAX_DELAY)),
+                     false);
     if (!guard.locked()) {
-        _log_e("Failed to acquire mutex %s", req.name);
+        _log_e("Failed to acquire mutex %s from task %s (holder=%s)%s",
+               req.name, Platform::current_task_name(),
+               Platform::mutex_holder_name(req.mutex),
+               Platform::held_by_current_task(req.mutex)
+                   ? " [recursive acquisition]"
+                   : "");
         return std::move(req.failValue);
     }
     return std::apply(std::move(req.fun), std::move(req.args));
@@ -153,9 +159,15 @@ typename MutexExecSpec<F, Args...>::R
 execute_mutex_exec_spec_const(MutexExecSpecConst<F, Args...> &&req) {
     FAIL_IF_NULL(req.mutex, req.failValue, "MutexRequest %s", req.name);
     MutexGuard guard(req.mutex, ::platform::ms_to_ticks(
-                                    req.timeoutMs.value_or(MS_MAX_DELAY)));
+                                    req.timeoutMs.value_or(MS_MAX_DELAY)),
+                     false);
     if (!guard.locked()) {
-        _log_e("Failed to acquire mutex %s", req.name);
+        _log_e("Failed to acquire mutex %s from task %s (holder=%s)%s",
+               req.name, Platform::current_task_name(),
+               Platform::mutex_holder_name(req.mutex),
+               Platform::held_by_current_task(req.mutex)
+                   ? " [recursive acquisition]"
+                   : "");
         return std::move(req.failValue);
     }
     return std::apply(std::move(req.fun), std::move(req.args));

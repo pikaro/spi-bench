@@ -85,7 +85,7 @@ class LocalTransport : public BaseTransport {
                frame.size());
         FAIL_IF_ERR_FWD(link->_receiveThroughLink(frame),
                         "Failed to send frame over LocalTransport");
-        return {};
+        return OK();
     }
 
     static std::expected<size_t, ReturnCode>

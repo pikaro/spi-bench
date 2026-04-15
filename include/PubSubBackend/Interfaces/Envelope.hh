@@ -57,6 +57,8 @@ struct Envelope {
     const void *typeTag = nullptr;
     ReleaseCallback release = nullptr;
 
+    ReturnCode ack() const { return release(owner, *this); }
+
     template <typename T> [[nodiscard]] bool hasTyped() const {
         return getPayloadPtr != nullptr && typeTag != nullptr &&
                &PayloadTypeTag<T> == typeTag;
@@ -108,6 +110,10 @@ struct Envelope {
     template <class T>
         requires detail::is_wire_message_v<T>
     static std::expected<Envelope, ReturnCode> make(const EnvelopeDef &def) {
+        constexpr auto payloadSize = detail::Codec<T>::encodedSize();
+        static_assert(
+            payloadSize <= NodeData::PubSub::Limits::maxPayloadSize,
+            "Wire message payload exceeds PubSub::Limits::maxPayloadSize");
         FAIL_IF_NOT(
             def.valid(), std::unexpected(ERR(InvalidArgument)),
             "Invalid EnvelopeDef for topic " SV_FMT,
@@ -119,8 +125,7 @@ struct Envelope {
                     .messageId = def.messageId,
                     .topic = static_cast<TopicId>(def.topic),
                     .source = static_cast<NodeId>(NodeData::PubSub::nodeId),
-                    .payloadSize =
-                        static_cast<uint16_t>(detail::Codec<T>::encodedSize()),
+                    .payloadSize = static_cast<uint16_t>(payloadSize),
                 },
             .owner = def.owner,
             .getPayload = def.getPayload,

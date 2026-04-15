@@ -178,18 +178,27 @@ class Node : public HasLifecycle<Node, Config>,
     }
 
     ReturnCode _onTaskStep() {
+        FAIL_IF_UNEXPECTED_FWD(
+            transporters, _transporters.snapshot(),
+            "Failed to snapshot PubSub transporters");
         FAIL_IF_ERR_FWD(
-            _transporters.withAll(
-                [](const TransporterKey &, const TransporterEntry &entry) {
-                    return entry.transporter.receive();
-                }),
+            [&transporters]() {
+                auto ret = OK();
+                for (size_t i = 0; i < transporters.count; ++i) {
+                    ret.combine(transporters.entries[i].transporter.receive());
+                }
+                return ret;
+            }(),
             "Failed to receive PubSub transporter input");
         FAIL_IF_ERR_FWD(_drainer.drain(), "Failed to drain PubSub messages");
         FAIL_IF_ERR_FWD(
-            _transporters.withAll(
-                [](const TransporterKey &, const TransporterEntry &entry) {
-                    return entry.transporter.send();
-                }),
+            [&transporters]() {
+                auto ret = OK();
+                for (size_t i = 0; i < transporters.count; ++i) {
+                    ret.combine(transporters.entries[i].transporter.send());
+                }
+                return ret;
+            }(),
             "Failed to work PubSub transporters");
         return OK();
     }

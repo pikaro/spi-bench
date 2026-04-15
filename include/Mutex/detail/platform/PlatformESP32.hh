@@ -5,6 +5,8 @@
 #include "Types/Error.hh"
 #include "freertos/idf_additions.h"
 #include "freertos/projdefs.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
 #include <expected>
 
 namespace Totem::Mutex::detail::platform {
@@ -31,7 +33,7 @@ struct Platform {
         if (xSemaphoreTake(handle, timeout) == pdTRUE) {
             return OK(CoreError);
         }
-        return ERR(CoreError, OperationFailed);
+        return ERR(CoreError, Timeout);
     }
 
     static ReturnCode give_mutex(MutexHandle handle) {
@@ -39,6 +41,20 @@ struct Platform {
             return OK(CoreError);
         }
         return ERR(CoreError, OperationFailed);
+    }
+
+    [[nodiscard]] static const char *current_task_name() {
+        return pcTaskGetName(nullptr);
+    }
+
+    [[nodiscard]] static const char *mutex_holder_name(MutexHandle handle) {
+        auto holder = xSemaphoreGetMutexHolder(handle);
+        return holder != nullptr ? pcTaskGetName(holder) : "<none>";
+    }
+
+    [[nodiscard]] static bool held_by_current_task(MutexHandle handle) {
+        auto holder = xSemaphoreGetMutexHolder(handle);
+        return holder != nullptr && holder == xTaskGetCurrentTaskHandle();
     }
 };
 

@@ -25,6 +25,11 @@ class TransporterDirectory : public TransporterDirectoryImpl {
     using Base = TransporterDirectoryImpl;
 
   public:
+    struct Snapshot {
+        std::array<TransporterEntry, Spec::Limits::maxTransports> entries{};
+        size_t count = 0;
+    };
+
     explicit TransporterDirectory(const char *ownerName) : Base(ownerName) {}
 
     using EntryKey = typename Base::EntryKey;
@@ -42,11 +47,12 @@ class TransporterDirectory : public TransporterDirectoryImpl {
         auto entry = TransporterEntry{
             .transportId = transportId,
             .transporter = transporter,
-            .topicMask = 0,
+            .topicMask = static_cast<TopicMask>(Spec::Topic::PubSub),
             .name = transporterName,
         };
-        _log_i("%s: add transport " SV_FMT " (%u)", this->ownerName(),
-               SV_ARG(entry.name), entry.transportId);
+        _log_i("%s: add transport " SV_FMT " (%u) with topic mask 0x%02x",
+               this->ownerName(), SV_ARG(entry.name), entry.transportId,
+               static_cast<unsigned>(entry.topicMask));
         return _addImpl(transportId, entry);
     }
 
@@ -80,6 +86,35 @@ class TransporterDirectory : public TransporterDirectoryImpl {
             [transportId](const EntryKey &, const TransporterEntry &entry) {
                 return entry.transportId == transportId;
             });
+    }
+
+    template <typename Filter>
+        requires(std::is_invocable_r_v<bool, Filter, const EntryKey &,
+                                       const TransporterEntry &>)
+    [[nodiscard]] std::expected<Snapshot, ReturnCode>
+    snapshot(Filter &&filter) const {
+        Snapshot out{};
+        FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
+            keys, this->snapshotKeys(std::forward<Filter>(filter)),
+            "Failed to snapshot transport keys for %s", this->ownerName());
+
+        for (size_t i = 0; i < keys.count; ++i) {
+            FAIL_IF_ERR_FWD_UNEXPECTED(
+                this->withEntryConst(
+                    keys.keys[i], [&](const TransporterEntry &entry) {
+                        out.entries[out.count++] = entry;
+                        return OK();
+                    }),
+                "Failed to snapshot transport entry %u for %s",
+                static_cast<unsigned>(keys.keys[i]), this->ownerName());
+        }
+
+        return out;
+    }
+
+    [[nodiscard]] std::expected<Snapshot, ReturnCode> snapshot() const {
+        return snapshot(
+            [](const EntryKey &, const TransporterEntry &) { return true; });
     }
 
   private:

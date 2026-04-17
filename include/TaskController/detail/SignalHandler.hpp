@@ -1,11 +1,11 @@
 #pragma once
 
-#include "Macros/Facade.hh"
-#include "TaskController/Interfaces/Config.hh"
-#include "TaskController/Interfaces/TaskHooks.hh"
-#include "TaskController/detail/PlatformSelect.hh"
-#include "Types/Error.hh"
-#include "Types/Signal.hh"
+#include "Macros/Facade.hpp"
+#include "TaskController/Interfaces/Config.hpp"
+#include "TaskController/Interfaces/TaskHooks.hpp"
+#include "TaskController/detail/PlatformSelect.hpp"
+#include "Types/Error.hpp"
+#include "Types/Signal.hpp"
 #include <cstdint>
 
 namespace Totem::TaskController::detail {

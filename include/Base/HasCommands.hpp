@@ -1,12 +1,12 @@
 #pragma once
 
-#include "CommandBackend/Interfaces/CommandDesc.hh"
-#include "CommandBackend/detail/Store.hh"
-#include "Concepts/Base.hh"
-#include "Macros/Facade.hh"
-#include "Services/Commands.hh"
-#include "StaticConfig/Command.hh"
-#include "Types/Error.hh"
+#include "CommandBackend/Interfaces/CommandDesc.hpp"
+#include "CommandBackend/detail/Store.hpp"
+#include "Concepts/Base.hpp"
+#include "Macros/Facade.hpp"
+#include "Services/Commands.hpp"
+#include "StaticConfig/Command.hpp"
+#include "Types/Error.hpp"
 #include <array>
 #include <concepts>
 #include <cstdint>

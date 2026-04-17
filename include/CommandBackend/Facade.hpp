@@ -1,9 +1,9 @@
 #pragma once
 
-#include "CommandBackend/Transports/UartTransport.hh"
-#include "CommandBackend/detail/Controller.hh"
-#include "CommandBackend/detail/Parser.hh"
-#include "CommandBackend/detail/Registrar.hh"
+#include "CommandBackend/Transports/UartTransport.hpp"
+#include "CommandBackend/detail/Controller.hpp"
+#include "CommandBackend/detail/Parser.hpp"
+#include "CommandBackend/detail/Registrar.hpp"
 
 namespace Totem::CommandBackend {
 

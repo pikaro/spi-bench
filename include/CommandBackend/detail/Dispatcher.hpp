@@ -1,16 +1,16 @@
 #pragma once
 
-#include "CommandBackend/Interfaces/CommandDesc.hh"
-#include "CommandBackend/detail/Types.hh" // IWYU pragma: keep
-#include "Macros/Facade.hh"
-#include "Types/Error.hh"
+#include "CommandBackend/Interfaces/CommandDesc.hpp"
+#include "CommandBackend/detail/Types.hpp" // IWYU pragma: keep
+#include "Macros/Facade.hpp"
+#include "Types/Error.hpp"
 #include <cstring>
 
 namespace Totem::CommandBackend::detail {
 
 class Dispatcher {
   public:
-    static ReturnCode dispatch(const CommandDesc &command,
+    static ReturnCode dispatch(const CommandDesc &command, void *ctx,
                                CommandDesc::Tokens args) {
         size_t requiredArgs = 0;
         for (const auto &arg : command.args) {
@@ -28,13 +28,13 @@ class Dispatcher {
 
         for (const auto &subcommand : command.subcommands) {
             if (args.size() > 0 && args[0] == subcommand.name) {
-                return dispatch(subcommand, args.subspan(1));
+                return dispatch(subcommand, ctx, args.subspan(1));
             }
         }
 
         auto parser = CommandDesc::ParsedArgs{.desc = command, .tokens = args};
 
-        return command.handler(parser, command.ctx);
+        return command.handler(parser, ctx);
     }
 };
 

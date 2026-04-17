@@ -1,11 +1,11 @@
 #pragma once
 
-#include "Generic/ByteArena.hh"
-#include "Macros/Facade.hh"
-#include "PubSubBackend/Interfaces/Envelope.hh"
-#include "PubSubBackend/detail/SerDe.hh"
-#include "PubSubBackend/detail/Types.hh"
-#include "Types/Error.hh"
+#include "Generic/ByteArena.hpp"
+#include "Macros/Facade.hpp"
+#include "PubSubBackend/Interfaces/Envelope.hpp"
+#include "PubSubBackend/detail/SerDe.hpp"
+#include "PubSubBackend/detail/Types.hpp"
+#include "Types/Error.hpp"
 #include <cstddef>
 #include <cstdio>
 #include <cstring>

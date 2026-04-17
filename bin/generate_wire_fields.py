@@ -18,7 +18,7 @@ WIRE_ANNOTATION = "wire"
 WIRE_TOKEN = "WIRE_MSG"
 RECORD_KINDS = {"CXXRecordDecl", "ClassTemplateSpecializationDecl"}
 PIO_PACKAGES_DIR = pathlib.Path.home() / ".platformio" / "packages"
-HEADER_SUFFIXES = {".h", ".hh", ".hpp", ".hxx"}
+HEADER_SUFFIXES = {".h", ".hpp", ".hpp", ".hxx"}
 
 
 @dataclass(frozen=True)
@@ -90,7 +90,7 @@ def resolve_clang_driver(source_file: str) -> str:
             ".cpp",
             ".cxx",
             ".hpp",
-            ".hh",
+            ".hpp",
             ".hxx",
         }
         else "clang"
@@ -329,7 +329,7 @@ def collect_wire_structs(
 
 
 def sanitize_filename(qualified_name: str) -> str:
-    return qualified_name.strip(":").replace("::", "__") + ".hh"
+    return qualified_name.strip(":").replace("::", "__") + ".hpp"
 
 
 def render_support() -> str:
@@ -352,7 +352,7 @@ def render_struct_header(wire_struct: WireStruct) -> str:
     lines = [
         "#pragma once",
         "",
-        '#include "Generated/Wire/Support.hh"',
+        '#include "Generated/Wire/Support.hpp"',
         f'#include "{wire_struct.include_path}"',
         "#include <tuple>",
         "",
@@ -386,7 +386,7 @@ def render_all(structs: list[WireStruct]) -> str:
         "",
         "// IWYU pragma: begin_exports",
         "",
-        '#include "Generated/Wire/Support.hh"',
+        '#include "Generated/Wire/Support.hpp"',
     ]
     for wire_struct in structs:
         lines.append(
@@ -420,8 +420,8 @@ def main() -> int:
         collect_wire_structs(ast, [], wire_structs)
 
     structs = sorted(wire_structs.values(), key=lambda s: s.qualified_name)
-    write_file(out_dir / "Support.hh", render_support())
-    write_file(out_dir / "All.hh", render_all(structs))
+    write_file(out_dir / "Support.hpp", render_support())
+    write_file(out_dir / "All.hpp", render_all(structs))
     for wire_struct in structs:
         write_file(
             out_dir / sanitize_filename(wire_struct.qualified_name),

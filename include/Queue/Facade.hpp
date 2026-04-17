@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Queue/detail/PlatformSelect.hh"
+#include "Queue/detail/PlatformSelect.hpp"
 #include <type_traits>
 
 namespace Totem::Queue {

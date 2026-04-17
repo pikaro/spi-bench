@@ -1,6 +1,6 @@
 #pragma once
 
-#include "MetricsBackend/Facade.hh" // IWYU pragma: export
+#include "MetricsBackend/Facade.hpp" // IWYU pragma: export
 
 class Metrics {
   public:

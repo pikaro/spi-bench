@@ -1,7 +1,7 @@
 #pragma once
 
-#include "TaskController/Interfaces/TaskRuntimeSnapshot.hh"
-#include "Types/Error.hh"
+#include "TaskController/Interfaces/TaskRuntimeSnapshot.hpp"
+#include "Types/Error.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <span>

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "TaskController/detail/PlatformSelect.hh"
+#include "TaskController/detail/PlatformSelect.hpp"
 #include <cstdint>
 
 namespace Totem::TaskController::detail {

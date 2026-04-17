@@ -1,9 +1,9 @@
 #pragma once
 
-#include "Concepts/Performance.hh"
-#include "Macros/Facade.hh"
-#include "Mutex/detail/MutexGuard.hh"
-#include "PlatformSelect.hh"
+#include "Concepts/Performance.hpp"
+#include "Macros/Facade.hpp"
+#include "Mutex/detail/MutexGuard.hpp"
+#include "PlatformSelect.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <optional>

@@ -1,8 +1,8 @@
 #pragma once
 
-#include "Concepts/Base.hh"
-#include "TaskControllerRegistry/Interfaces/TaskSourceHooks.hh"
-#include "Types/Error.hh"
+#include "Concepts/Base.hpp"
+#include "TaskControllerRegistry/Interfaces/TaskSourceHooks.hpp"
+#include "Types/Error.hpp"
 #include <concepts>
 #include <cstdint>
 

@@ -1,11 +1,11 @@
 #pragma once
 
-#include "Base/HasMutex.hh"
-#include "Macros/Facade.hh"
-#include "PubSubBackend/Interfaces/Envelope.hh"
-#include "PubSubBackend/detail/Codec.hh"
-#include "PubSubBackend/detail/Types.hh"
-#include "Types/Error.hh"
+#include "Base/HasMutex.hpp"
+#include "Macros/Facade.hpp"
+#include "PubSubBackend/Interfaces/Envelope.hpp"
+#include "PubSubBackend/detail/Codec.hpp"
+#include "PubSubBackend/detail/Types.hpp"
+#include "Types/Error.hpp"
 #include <array>
 #include <cstddef>
 #include <cstring>

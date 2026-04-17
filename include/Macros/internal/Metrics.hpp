@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Macros/internal/Fail.hh"
+#include "Macros/internal/Fail.hpp"
 
 #define REGISTER_METRICS_GROUP(cls, group)                                     \
     ABORT_IF_UNEXPECTED(group,                                                 \
@@ -8,8 +8,8 @@
                         "Failed to register metrics group for " #cls);
 
 #define REGISTER_METRIC(cls, metric, type, group)                              \
-    ABORT_IF_UNEXPECTED(                                                       \
-        metric,                                                                \
-        ::Metrics::registrar().CONCAT(add, type)(                              \
-            MetricDesc::withGroup(CONCAT(metric, Def), group.key())),          \
-        "Failed to register " #metric " " #type " metric for " #cls);
+    ABORT_IF_UNEXPECTED(metric,                                                \
+                        ::Metrics::registrar().CONCAT(add, type)(              \
+                            group.key(), CONCAT(metric, Def)),                 \
+                        "Failed to register " #metric " " #type                \
+                        " metric for " #cls);

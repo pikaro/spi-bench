@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Traits/Bitmask.hh"
-#include "Types/Logging.hh"
+#include "Traits/Bitmask.hpp"
+#include "Types/Logging.hpp"
 #include <cstdint>
 #include <type_traits>
 

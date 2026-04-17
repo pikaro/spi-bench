@@ -1,10 +1,10 @@
 #pragma once
 
-#include "Macros/Facade.hh"
-#include "Platform/PlatformSelect.hh"
-#include "StaticConfig/Uart.hh"
-#include "TaskController/Interfaces/Config.hh"
-#include "Types/Logging.hh"
+#include "Macros/Facade.hpp"
+#include "Platform/PlatformSelect.hpp"
+#include "StaticConfig/Uart.hpp"
+#include "TaskController/Interfaces/Config.hpp"
+#include "Types/Logging.hpp"
 #include <algorithm>
 #include <array>
 #include <cstddef>

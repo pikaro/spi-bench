@@ -7,4 +7,16 @@ fi
 
 ENV="${1}"
 
-~/.platformio/packages/tool-xtensa-esp-elf-gdb/bin/xtensa-esp-elf-gdb-no-python ".pio/build/${ENV}/firmware.elf" "$@"
+shift
+
+case "$ENV" in
+master)
+    GDB=~/.platformio/packages/tool-xtensa-esp-elf-gdb/bin/xtensa-esp-elf-gdb-no-python
+    ;;
+*)
+    echo "Unknown environment"
+    exit 1
+    ;;
+esac
+
+"${GDB}" ".pio/build/${ENV}/firmware.elf" "$@"

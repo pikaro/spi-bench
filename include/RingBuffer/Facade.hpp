@@ -1,7 +1,7 @@
 #pragma once
 
-#include "RingBuffer/detail/Config.hh"
-#include "RingBuffer/detail/PlatformSelect.hh"
+#include "RingBuffer/detail/Config.hpp"
+#include "RingBuffer/detail/PlatformSelect.hpp"
 
 namespace Totem::RingBuffer {
 

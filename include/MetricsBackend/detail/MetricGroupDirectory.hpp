@@ -1,11 +1,11 @@
 #pragma once
 
-#include "Generic/Directory.hh"
-#include "Macros/Facade.hh"
-#include "MetricsBackend/detail/Types.hh"
-#include "StaticConfig/Metrics.hh"
-#include "Types/Error.hh"
-#include "Types/Metrics.hh"
+#include "Generic/Directory.hpp"
+#include "Macros/Facade.hpp"
+#include "MetricsBackend/detail/Types.hpp"
+#include "StaticConfig/Metrics.hpp"
+#include "Types/Error.hpp"
+#include "Types/Metrics.hpp"
 #include <cstdint>
 #include <cstring>
 #include <expected>
@@ -30,7 +30,7 @@ class MetricGroupDirectory : public MetricGroupDirectoryImpl {
 
     std::expected<EntryKey, ReturnCode>
     add(EntryKey metricGroupNameKey, const MetricGroupDesc &metricGroupDesc) {
-        return _addImpl(metricGroupNameKey, {.desc = metricGroupDesc});
+        return _addImpl(metricGroupNameKey, {.desc = &metricGroupDesc});
     }
 
     ReturnCode addMetricToGroup(const EntryKey &groupKey) {

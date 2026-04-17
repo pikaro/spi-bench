@@ -1,11 +1,11 @@
 #pragma once
 
-#include "Concepts/Base.hh"
-#include "Macros/internal/Error.hh"
-#include "Macros/internal/Format.hh"
-#include "Platform/PlatformSelect.hh"
-#include "Types/Error.hh"
-#include "Types/Logging.hh"
+#include "Concepts/Base.hpp"
+#include "Macros/internal/Error.hpp"
+#include "Macros/internal/Format.hpp"
+#include "Platform/PlatformSelect.hpp"
+#include "Types/Error.hpp"
+#include "Types/Logging.hpp"
 #include "esp_log.h"
 #include <atomic>
 #include <concepts>

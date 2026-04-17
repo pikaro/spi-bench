@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Platform/PlatformSelect.hh"
+#include "Platform/PlatformSelect.hpp"
 
 namespace Totem::Mutex::detail {
 

@@ -1,19 +1,19 @@
 #pragma once
 
-#include "Base/HasLifecycle.hh"
-#include "Base/HasTaskController.hh"
-#include "CommandBackend/Interfaces/CommandDesc.hh"
-#include "CommandBackend/Interfaces/Transport.hh"
-#include "CommandBackend/detail/Config.hh"
-#include "CommandBackend/detail/Dispatcher.hh"
-#include "CommandBackend/detail/Registrar.hh"
-#include "CommandBackend/detail/Store.hh"
-#include "CommandBackend/detail/Types.hh" // IWYU pragma: keep
-#include "Macros/Facade.hh"
-#include "StaticConfig/Command.hh"
-#include "TaskController/Interfaces/RegistryHooks.hh"
-#include "TaskController/Interfaces/TaskHooks.hh"
-#include "Types/Error.hh"
+#include "Base/HasLifecycle.hpp"
+#include "Base/HasTaskController.hpp"
+#include "CommandBackend/Interfaces/CommandDesc.hpp"
+#include "CommandBackend/Interfaces/Transport.hpp"
+#include "CommandBackend/detail/Config.hpp"
+#include "CommandBackend/detail/Dispatcher.hpp"
+#include "CommandBackend/detail/Registrar.hpp"
+#include "CommandBackend/detail/Store.hpp"
+#include "CommandBackend/detail/Types.hpp" // IWYU pragma: keep
+#include "Macros/Facade.hpp"
+#include "StaticConfig/Command.hpp"
+#include "TaskController/Interfaces/RegistryHooks.hpp"
+#include "TaskController/Interfaces/TaskHooks.hpp"
+#include "Types/Error.hpp"
 #include <array>
 
 namespace Totem::CommandBackend::detail {
@@ -81,7 +81,8 @@ class Controller : public HasLifecycle<Controller, Config>,
             _store.get(Store::CommandNameKey::fromStringView(commandLine[0])),
             "Command " SV_FMT " not found in store", SV_ARG(commandLine[0]));
 
-        return Dispatcher::dispatch(commandEntry, commandLine.subspan(1));
+        return Dispatcher::dispatch(commandEntry.second, commandEntry.first,
+                                    commandLine.subspan(1));
     }
 
     ReturnCode _onTaskStep() {

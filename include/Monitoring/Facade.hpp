@@ -1,6 +1,6 @@
 #pragma once
 
-#include "detail/Monitoring.hh"
+#include "detail/Monitoring.hpp"
 
 namespace Totem::Monitoring {
 

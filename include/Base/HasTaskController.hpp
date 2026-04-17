@@ -1,11 +1,11 @@
 #pragma once
 
-#include "Base/HasLifecycle.hh"
-#include "Concepts/Base.hh"
-#include "TaskController/Facade.hh"
-#include "TaskController/Interfaces/Config.hh"
-#include "TaskController/Interfaces/RegistryHooks.hh"
-#include "Types/Error.hh"
+#include "Base/HasLifecycle.hpp"
+#include "Concepts/Base.hpp"
+#include "TaskController/Facade.hpp"
+#include "TaskController/Interfaces/Config.hpp"
+#include "TaskController/Interfaces/RegistryHooks.hpp"
+#include "Types/Error.hpp"
 
 template <class Derived, typename ConfT = NoConfig> class HasTaskController {
   protected:

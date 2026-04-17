@@ -1,10 +1,10 @@
 #pragma once
 
-#include "Data/PubSub.hh"
-#include "Macros/Facade.hh"
-#include "PubSubBackend/Interfaces/Envelope.hh"
-#include "TestMessage.hh"
-#include "Types/Error.hh"
+#include "Data/PubSub.hpp"
+#include "Macros/Facade.hpp"
+#include "PubSubBackend/Interfaces/Envelope.hpp"
+#include "TestMessage.hpp"
+#include "Types/Error.hpp"
 #include <array>
 #include <cstddef>
 #include <cstdint>

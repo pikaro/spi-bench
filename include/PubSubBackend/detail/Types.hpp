@@ -1,10 +1,10 @@
 #pragma once
 
-#include "Data.hh"
-#include "PubSubBackend/Interfaces/Envelope.hh"
-#include "PubSubBackend/Interfaces/Types.hh"
-#include "Types/Error.hh"
-#include "Types/Logging.hh"
+#include "Data.hpp"
+#include "PubSubBackend/Interfaces/Envelope.hpp"
+#include "PubSubBackend/Interfaces/Types.hpp"
+#include "Types/Error.hpp"
+#include "Types/Logging.hpp"
 #include <cstdint>
 
 namespace Totem::PubSubBackend::detail {

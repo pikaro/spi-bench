@@ -1,16 +1,16 @@
 #pragma once
 
-#include "Macros/Facade.hh"
-#include "Mutex/Facade.hh"
-#include "Platform/PlatformSelect.hh"
-#include "TaskController/Interfaces/Config.hh"
-#include "TaskController/Interfaces/TaskHooks.hh"
-#include "TaskController/Interfaces/TaskRuntimeSnapshot.hh"
-#include "TaskController/detail/Loop.hh"
-#include "TaskController/detail/PlatformSelect.hh"
-#include "TaskController/detail/StateManager.hh"
-#include "Types/Error.hh"
-#include "Types/Signal.hh"
+#include "Macros/Facade.hpp"
+#include "Mutex/Facade.hpp"
+#include "Platform/PlatformSelect.hpp"
+#include "TaskController/Interfaces/Config.hpp"
+#include "TaskController/Interfaces/TaskHooks.hpp"
+#include "TaskController/Interfaces/TaskRuntimeSnapshot.hpp"
+#include "TaskController/detail/Loop.hpp"
+#include "TaskController/detail/PlatformSelect.hpp"
+#include "TaskController/detail/StateManager.hpp"
+#include "Types/Error.hpp"
+#include "Types/Signal.hpp"
 #include <atomic>
 #include <cstdint>
 #include <expected>

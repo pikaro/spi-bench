@@ -1,11 +1,11 @@
 #pragma once
 
-#include "CommandBackend/Interfaces/CommandDesc.hh"
-#include "Macros/Facade.hh"
-#include "MetricsBackend/Interfaces/Sink.hh"
-#include "StaticConfig/Metrics.hh"
-#include "Types/Error.hh"
-#include "Types/Logging.hh"
+#include "CommandBackend/Interfaces/CommandDesc.hpp"
+#include "Macros/Facade.hpp"
+#include "MetricsBackend/Interfaces/Sink.hpp"
+#include "StaticConfig/Metrics.hpp"
+#include "Types/Error.hpp"
+#include "Types/Logging.hpp"
 #include <array>
 #include <cinttypes>
 #include <cstdint>
@@ -56,7 +56,7 @@ dump_metric_snapshot(const MetricsBackend::MetricFrame &snap) {
             printedMetrics++;
         }
 
-        _log(snap.group.desc.logLevel, "%s", buf.data());
+        _log(snap.group.desc->logLevel, "%s", buf.data());
     }
 
     return OK(CoreError);

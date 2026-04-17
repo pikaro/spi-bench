@@ -1,11 +1,11 @@
 #pragma once
 
 #include "FreeRTOSConfig.h"
-#include "Macros/Facade.hh"
-#include "Monitoring/Interfaces/Sink.hh"
-#include "Monitoring/detail/Types.hh"
-#include "Support/Basic.hh"
-#include "Types/Error.hh"
+#include "Macros/Facade.hpp"
+#include "Monitoring/Interfaces/Sink.hpp"
+#include "Monitoring/detail/Types.hpp"
+#include "Support/Basic.hpp"
+#include "Types/Error.hpp"
 #include "esp_heap_caps.h"
 #include "freertos/idf_additions.h"
 #include "freertos/portable.h"

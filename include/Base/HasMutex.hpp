@@ -1,8 +1,8 @@
 #pragma once
 
-#include "Concepts/Base.hh"
-#include "Macros/Facade.hh"
-#include "Mutex/Facade.hh"
+#include "Concepts/Base.hpp"
+#include "Macros/Facade.hpp"
+#include "Mutex/Facade.hpp"
 #include <cstdint>
 #include <type_traits>
 

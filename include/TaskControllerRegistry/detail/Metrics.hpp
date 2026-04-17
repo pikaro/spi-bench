@@ -1,10 +1,10 @@
 #pragma once
 
-#include "Macros/Facade.hh"
-#include "Services/Metrics.hh"
-#include "Types/Error.hh"
-#include "Types/Logging.hh"
-#include "Types/Metrics.hh"
+#include "Macros/Facade.hpp"
+#include "Services/Metrics.hpp"
+#include "Types/Error.hpp"
+#include "Types/Logging.hpp"
+#include "Types/Metrics.hpp"
 #include <cstddef>
 
 namespace Totem::TaskControllerRegistry::detail {

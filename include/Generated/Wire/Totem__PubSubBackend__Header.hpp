@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Generated/Wire/Support.hh"
-#include "PubSubBackend/Interfaces/Wire.hh"
+#include "Generated/Wire/Support.hpp"
+#include "PubSubBackend/Interfaces/Wire.hpp"
 #include <tuple>
 
 namespace Totem::Generated::Wire {

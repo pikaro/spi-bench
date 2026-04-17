@@ -1,9 +1,9 @@
 #pragma once
 
-#include "MetricsBackend/detail/Types.hh"
-#include "detail/Backend.hh"
-#include "detail/Recorder.hh"
-#include "detail/Registrar.hh"
+#include "MetricsBackend/detail/Types.hpp"
+#include "detail/Backend.hpp"
+#include "detail/Recorder.hpp"
+#include "detail/Registrar.hpp"
 
 namespace Totem::MetricsBackend {
 

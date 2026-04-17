@@ -1,9 +1,9 @@
 #pragma once
 
-#include "Base/HasMutex.hh"
-#include "Macros/Facade.hh"
-#include "Types/Collection.hh"
-#include "Types/Error.hh"
+#include "Base/HasMutex.hpp"
+#include "Macros/Facade.hpp"
+#include "Types/Collection.hpp"
+#include "Types/Error.hpp"
 #include <array>
 #include <atomic>
 #include <concepts>

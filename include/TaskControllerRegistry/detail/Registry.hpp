@@ -1,15 +1,15 @@
 #pragma once
 
-#include "Base/HasLifecycle.hh"
-#include "Macros/Facade.hh"
-#include "StaticConfig/TaskRegistry.hh"
-#include "TaskController/Facade.hh"
-#include "TaskController/Interfaces/RegistryHooks.hh"
-#include "TaskController/Interfaces/TaskRuntimeSnapshot.hh"
-#include "TaskControllerRegistry/Interfaces/TaskSourceHooks.hh"
-#include "TaskControllerRegistry/detail/Directory.hh"
-#include "TaskControllerRegistry/detail/Metrics.hh"
-#include "Types/Error.hh"
+#include "Base/HasLifecycle.hpp"
+#include "Macros/Facade.hpp"
+#include "StaticConfig/TaskRegistry.hpp"
+#include "TaskController/Facade.hpp"
+#include "TaskController/Interfaces/RegistryHooks.hpp"
+#include "TaskController/Interfaces/TaskRuntimeSnapshot.hpp"
+#include "TaskControllerRegistry/Interfaces/TaskSourceHooks.hpp"
+#include "TaskControllerRegistry/detail/Directory.hpp"
+#include "TaskControllerRegistry/detail/Metrics.hpp"
+#include "Types/Error.hpp"
 #include <array>
 #include <cstddef>
 #include <cstdint>

@@ -1,14 +1,14 @@
 #pragma once
 
-#include "CommandBackend/Interfaces/CommandDesc.hh"
-#include "Macros/Facade.hh"
-#include "Monitoring/Interfaces/Sink.hh"
-#include "Monitoring/detail/Types.hh"
-#include "StaticConfig/TaskController.hh"
-#include "StaticConfig/TaskRegistry.hh"
-#include "Support/Basic.hh"
-#include "TaskController/Interfaces/TaskRuntimeSnapshot.hh"
-#include "Types/Error.hh"
+#include "CommandBackend/Interfaces/CommandDesc.hpp"
+#include "Macros/Facade.hpp"
+#include "Monitoring/Interfaces/Sink.hpp"
+#include "Monitoring/detail/Types.hpp"
+#include "StaticConfig/TaskController.hpp"
+#include "StaticConfig/TaskRegistry.hpp"
+#include "Support/Basic.hpp"
+#include "TaskController/Interfaces/TaskRuntimeSnapshot.hpp"
+#include "Types/Error.hpp"
 #include <array>
 #include <cstddef>
 #include <magic_enum/magic_enum.hpp>

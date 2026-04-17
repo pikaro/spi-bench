@@ -1,9 +1,9 @@
 #pragma once
 
-#include "Macros/Facade.hh"
-#include "StaticConfig/Metrics.hh" // IWYU pragma: export
-#include "Types/Error.hh"
-#include "Types/Logging.hh"
+#include "Macros/Facade.hpp"
+#include "StaticConfig/Metrics.hpp" // IWYU pragma: export
+#include "Types/Error.hpp"
+#include "Types/Logging.hpp"
 #include <cstdint>
 #include <string_view>
 
@@ -67,7 +67,6 @@ struct MetricDesc {
     using MetricGroupKey = uintptr_t;
 
     const char *name;
-    MetricGroupKey group = 0;
     MetricType type = MetricType::Counter;
     MetricUnit unit = MetricUnit::None;
     bool clearOnRead = false;
@@ -92,11 +91,5 @@ struct MetricDesc {
             }
         }
         return OK();
-    }
-
-    static constexpr MetricDesc withGroup(MetricDesc desc,
-                                          MetricGroupKey group) {
-        desc.group = group;
-        return desc;
     }
 };

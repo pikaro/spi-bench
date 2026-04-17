@@ -1,10 +1,10 @@
 #pragma once
 
 #include "FreeRTOSConfig.h"
-#include "Macros/Facade.hh"
-#include "Platform/PlatformSelect.hh"
-#include "TaskController/Interfaces/TaskRuntimeSnapshot.hh"
-#include "Types/Error.hh"
+#include "Macros/Facade.hpp"
+#include "Platform/PlatformSelect.hpp"
+#include "TaskController/Interfaces/TaskRuntimeSnapshot.hpp"
+#include "Types/Error.hpp"
 #include "freertos/idf_additions.h"
 #include "sdkconfig.h"
 #include <cstddef>

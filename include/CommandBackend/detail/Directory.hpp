@@ -1,18 +1,23 @@
 #pragma once
 
-#include "CommandBackend/Interfaces/CommandDesc.hh"
-#include "CommandBackend/detail/Types.hh"
-#include "Generic/Directory.hh"
-#include "StaticConfig/Command.hh"
-#include "Types/Collection.hh"
-#include "Types/Error.hh"
+#include "CommandBackend/Interfaces/CommandDesc.hpp"
+#include "CommandBackend/detail/Types.hpp"
+#include "Generic/Directory.hpp"
+#include "StaticConfig/Command.hpp"
+#include "Types/Collection.hpp"
+#include "Types/Error.hpp"
 #include <cstring>
 #include <expected>
 
 namespace Totem::CommandBackend::detail {
 
+struct CommandSlot {
+    const CommandDesc *desc;
+    void *ctx;
+};
+
 using DirectoryImpl = GettableDirectory<NameKey<CommandConfig::maxNameLength>,
-                                        CommandDesc, CommandConfig::maxEntries>;
+                                        CommandSlot, CommandConfig::maxEntries>;
 
 class Directory : public DirectoryImpl {
   public:
@@ -27,8 +32,9 @@ class Directory : public DirectoryImpl {
     }
 
     std::expected<EntryKey, ReturnCode> add(const EntryKey &commandNameKey,
+                                            void *ctx,
                                             const CommandDesc &metricDesc) {
-        return _addImpl(commandNameKey, metricDesc);
+        return _addImpl(commandNameKey, {.desc = &metricDesc, .ctx = ctx});
     }
 };
 

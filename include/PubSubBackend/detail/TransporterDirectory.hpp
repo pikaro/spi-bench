@@ -1,10 +1,10 @@
 #pragma once
 
-#include "Generic/Directory.hh"
-#include "Macros/Facade.hh"
-#include "PubSubBackend/detail/Transporter.hh"
-#include "PubSubBackend/detail/Types.hh"
-#include "Types/Error.hh"
+#include "Generic/Directory.hpp"
+#include "Macros/Facade.hpp"
+#include "PubSubBackend/detail/Transporter.hpp"
+#include "PubSubBackend/detail/Types.hpp"
+#include "Types/Error.hpp"
 #include <array>
 #include <cstring>
 #include <expected>

@@ -1,9 +1,9 @@
 #pragma once
 
-#include "Generated/Wire/All.hh" // IWYU pragma: keep
+#include "Generated/Wire/All.hpp" // IWYU pragma: keep
 
-#include "Generated/Wire/Support.hh"
-#include "Types/Error.hh"
+#include "Generated/Wire/Support.hpp"
+#include "Types/Error.hpp"
 #include <array>
 #include <cstddef>
 #include <cstdint>

@@ -1,14 +1,14 @@
 #pragma once
 
-#include "Base/HasCommands.hh"
-#include "Base/HasLifecycle.hh"
-#include "Macros/Facade.hh"
-#include "MetricsBackend/Interfaces/Sink.hh"
-#include "MetricsBackend/detail/Commands.hh"
-#include "MetricsBackend/detail/Recorder.hh"
-#include "MetricsBackend/detail/Registrar.hh"
-#include "MetricsBackend/detail/Store.hh"
-#include "Types/Error.hh"
+#include "Base/HasCommands.hpp"
+#include "Base/HasLifecycle.hpp"
+#include "Macros/Facade.hpp"
+#include "MetricsBackend/Interfaces/Sink.hpp"
+#include "MetricsBackend/detail/Commands.hpp"
+#include "MetricsBackend/detail/Recorder.hpp"
+#include "MetricsBackend/detail/Registrar.hpp"
+#include "MetricsBackend/detail/Store.hpp"
+#include "Types/Error.hpp"
 #include <cstddef>
 
 namespace Totem::MetricsBackend::detail {

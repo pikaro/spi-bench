@@ -1,14 +1,14 @@
 #pragma once
 
-#include "Macros/Facade.hh"
-#include "PlatformSelect.hh"
-#include "StaticConfig/TaskRegistry.hh"
-#include "Support/Basic.hh"
-#include "TaskController/Interfaces/TaskRuntimeSnapshot.hh"
-#include "TaskControllerRegistry/Interfaces/TaskSourceFeatures.hh"
-#include "TaskControllerRegistry/Interfaces/TaskSourceHooks.hh"
-#include "TaskControllerRegistry/detail/Registry.hh"
-#include "Types/Error.hh"
+#include "Macros/Facade.hpp"
+#include "PlatformSelect.hpp"
+#include "StaticConfig/TaskRegistry.hpp"
+#include "Support/Basic.hpp"
+#include "TaskController/Interfaces/TaskRuntimeSnapshot.hpp"
+#include "TaskControllerRegistry/Interfaces/TaskSourceFeatures.hpp"
+#include "TaskControllerRegistry/Interfaces/TaskSourceHooks.hpp"
+#include "TaskControllerRegistry/detail/Registry.hpp"
+#include "Types/Error.hpp"
 #include <array>
 #include <cstdint>
 #include <cstring>

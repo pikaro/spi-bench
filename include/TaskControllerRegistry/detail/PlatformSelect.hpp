@@ -2,12 +2,12 @@
 
 // IWYU pragma: begin_exports
 
-#include "Platform/PlatformSelect.hh"
+#include "Platform/PlatformSelect.hpp"
 
 #if defined(PLATFORM_ESP32)
-#include "platform/PlatformESP32.hh"
+#include "platform/PlatformESP32.hpp"
 #elif defined(PLATFORM_TEST)
-#include "platform/PlatformTest.hh"
+#include "platform/PlatformTest.hpp"
 #else
 #error "No supported TaskController platform selected"
 #endif

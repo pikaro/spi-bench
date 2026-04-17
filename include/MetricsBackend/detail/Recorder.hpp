@@ -1,9 +1,10 @@
 #pragma once
 
-#include "Macros/Facade.hh"
-#include "MetricsBackend/detail/Types.hh"
-#include "Store.hh"
-#include "Types/Error.hh"
+#include "Macros/Facade.hpp"
+#include "MetricsBackend/detail/MetricDirectory.hpp"
+#include "MetricsBackend/detail/Types.hpp"
+#include "Store.hpp"
+#include "Types/Error.hpp"
 #include <cstdint>
 
 namespace Totem::MetricsBackend::detail {
@@ -14,7 +15,7 @@ class Recorder {
 
     ReturnCode increment(CounterHandle handle, uint32_t value = 1) {
         return _store.withMetric(handle.key(),
-                                 [value](Metric &metric) -> ReturnCode {
+                                 [value](MetricSlot &metric) -> ReturnCode {
                                      metric.value += value;
                                      return OK();
                                  });
@@ -22,7 +23,7 @@ class Recorder {
 
     ReturnCode decrement(CounterHandle handle, uint32_t value = 1) {
         return _store.withMetric(handle.key(),
-                                 [value](Metric &metric) -> ReturnCode {
+                                 [value](MetricSlot &metric) -> ReturnCode {
                                      metric.value -= value;
                                      return OK();
                                  });
@@ -30,7 +31,7 @@ class Recorder {
 
     ReturnCode set(GaugeHandle handle, uint32_t value) {
         return _store.withMetric(handle.key(),
-                                 [value](Metric &metric) -> ReturnCode {
+                                 [value](MetricSlot &metric) -> ReturnCode {
                                      metric.value = value;
                                      return OK();
                                  });

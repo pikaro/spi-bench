@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Data/Nodes.hh" // IWYU pragma: export
-#include "Data/PubSub.hh"
+#include "Data/Nodes.hpp" // IWYU pragma: export
+#include "Data/PubSub.hpp"
 
 namespace Totem::Data {
 

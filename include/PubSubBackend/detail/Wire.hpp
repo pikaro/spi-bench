@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Macros/internal/Markers.hh"
-#include "PubSubBackend/Interfaces/Types.hh"
+#include "Macros/internal/Markers.hpp"
+#include "PubSubBackend/Interfaces/Types.hpp"
 #include <cstdint>
 
 namespace Totem::PubSubBackend::detail {

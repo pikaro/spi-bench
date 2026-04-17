@@ -1,7 +1,7 @@
 #pragma once
 
-#include "CommandBackend/Interfaces/CommandDesc.hh"
-#include "CommandBackend/detail/Types.hh" // IWYU pragma: keep
+#include "CommandBackend/Interfaces/CommandDesc.hpp"
+#include "CommandBackend/detail/Types.hpp" // IWYU pragma: keep
 #include "magic_enum/magic_enum.hpp"
 #include <cstdint>
 #include <string_view>

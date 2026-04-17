@@ -1,8 +1,8 @@
 #pragma once
 
-#include "Macros/Facade.hh"
-#include "StaticConfig/Uart.hh"
-#include "Types/Error.hh"
+#include "Macros/Facade.hpp"
+#include "StaticConfig/Uart.hpp"
+#include "Types/Error.hpp"
 #include "driver/uart.h"
 #include "freertos/projdefs.h"
 #include "hal/uart_types.h"

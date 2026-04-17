@@ -1,10 +1,10 @@
 #pragma once
 
-#include "CommandBackend/Interfaces/CommandDesc.hh"
-#include "CommandBackend/detail/Store.hh"
-#include "CommandBackend/detail/Types.hh" // IWYU pragma: keep
-#include "Macros/Facade.hh"
-#include "Types/Error.hh"
+#include "CommandBackend/Interfaces/CommandDesc.hpp"
+#include "CommandBackend/detail/Store.hpp"
+#include "CommandBackend/detail/Types.hpp" // IWYU pragma: keep
+#include "Macros/Facade.hpp"
+#include "Types/Error.hpp"
 #include <expected>
 
 namespace Totem::CommandBackend::detail {
@@ -15,12 +15,11 @@ class Registrar {
 
     std::expected<Store::CommandNameKey, ReturnCode>
     registerCommand(CommandDesc &cmd, void *ctx = nullptr) {
-        cmd.ctx = ctx;
         FAIL_IF_ERR_FWD_UNEXPECTED(
             cmd.validate(),
             "Invalid command description for command %s:", cmd.name);
         FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
-            nameKey, _store.add(cmd.name.data(), cmd),
+            nameKey, _store.add(cmd.name.data(), ctx, cmd),
             "Failed to add command %s to store:", cmd.name);
         return nameKey;
     }

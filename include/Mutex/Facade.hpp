@@ -1,9 +1,9 @@
 #pragma once
 
-#include "Mutex/detail/Mutex.hh"
-#include "Mutex/detail/MutexGuard.hh"
-#include "Mutex/detail/ScopedMutexGuard.hh"
-#include "Mutex/detail/ScopedSpinlockGuard.hh"
+#include "Mutex/detail/Mutex.hpp"
+#include "Mutex/detail/MutexGuard.hpp"
+#include "Mutex/detail/ScopedMutexGuard.hpp"
+#include "Mutex/detail/ScopedSpinlockGuard.hpp"
 
 namespace Totem::Mutex {
 

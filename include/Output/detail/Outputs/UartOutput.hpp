@@ -1,14 +1,14 @@
 #pragma once
 
-#include "Base/HasLifecycle.hh"
-#include "Macros/Facade.hh"
-#include "Output/Interfaces/Config.hh"
-#include "Output/Interfaces/Sink.hh"
-#include "Platform/Uart.hh"
-#include "StaticConfig/Logging.hh"
-#include "Types/Basic.hh"
-#include "Types/Error.hh"
-#include "Types/Logging.hh"
+#include "Base/HasLifecycle.hpp"
+#include "Macros/Facade.hpp"
+#include "Output/Interfaces/Config.hpp"
+#include "Output/Interfaces/Sink.hpp"
+#include "Platform/Uart.hpp"
+#include "StaticConfig/Logging.hpp"
+#include "Types/Basic.hpp"
+#include "Types/Error.hpp"
+#include "Types/Logging.hpp"
 #include <array>
 #include <cinttypes>
 #include <cstdio>

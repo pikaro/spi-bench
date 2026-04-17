@@ -1,7 +1,7 @@
 #pragma once
 
-#include "TaskControllerRegistry/detail/SystemTaskSource.hh"
-#include "TaskControllerRegistry/detail/Registry.hh"
+#include "TaskControllerRegistry/detail/SystemTaskSource.hpp"
+#include "TaskControllerRegistry/detail/Registry.hpp"
 
 namespace Totem::TaskControllerRegistry {
 

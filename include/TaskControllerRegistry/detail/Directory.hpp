@@ -1,14 +1,14 @@
 #pragma once
 
-#include "Generic/Directory.hh"
-#include "Macros/Facade.hh"
-#include "StaticConfig/TaskRegistry.hh"
-#include "TaskController/Facade.hh"
-#include "TaskController/Interfaces/TaskRuntimeSnapshot.hh"
-#include "TaskControllerRegistry/Interfaces/TaskSourceFeatures.hh"
-#include "TaskControllerRegistry/Interfaces/TaskSourceHooks.hh"
-#include "TaskControllerRegistry/detail/Types.hh" // IWYU pragma: keep
-#include "Types/Error.hh"
+#include "Generic/Directory.hpp"
+#include "Macros/Facade.hpp"
+#include "StaticConfig/TaskRegistry.hpp"
+#include "TaskController/Facade.hpp"
+#include "TaskController/Interfaces/TaskRuntimeSnapshot.hpp"
+#include "TaskControllerRegistry/Interfaces/TaskSourceFeatures.hpp"
+#include "TaskControllerRegistry/Interfaces/TaskSourceHooks.hpp"
+#include "TaskControllerRegistry/detail/Types.hpp" // IWYU pragma: keep
+#include "Types/Error.hpp"
 #include <cstdint>
 #include <cstring>
 #include <expected>

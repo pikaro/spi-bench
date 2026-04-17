@@ -1,11 +1,11 @@
 #pragma once
 
-#include "Data.hh"
-#include "Macros/Facade.hh"
-#include "PubSubBackend/Interfaces/Types.hh"
-#include "PubSubBackend/Interfaces/Wire.hh" // IWYU pragma: export
-#include "PubSubBackend/detail/Codec.hh"
-#include "Types/Error.hh"
+#include "Data.hpp"
+#include "Macros/Facade.hpp"
+#include "PubSubBackend/Interfaces/Types.hpp"
+#include "PubSubBackend/Interfaces/Wire.hpp" // IWYU pragma: export
+#include "PubSubBackend/detail/Codec.hpp"
+#include "Types/Error.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <cstring>

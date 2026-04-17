@@ -1,9 +1,9 @@
 #pragma once
 
-#include "CommandBackend/Interfaces/CommandDesc.hh"
-#include "Macros/Facade.hh"
-#include "Services/Commands.hh"
-#include "Types/Error.hh"
+#include "CommandBackend/Interfaces/CommandDesc.hpp"
+#include "Macros/Facade.hpp"
+#include "Services/Commands.hpp"
+#include "Types/Error.hpp"
 
 inline CommandDesc helloCmd = {
     .name = "hello",

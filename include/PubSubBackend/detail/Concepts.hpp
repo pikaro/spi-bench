@@ -1,8 +1,8 @@
 #pragma once
 
-#include "PubSubBackend/detail/Types.hh"
-#include "Traits/Bitmask.hh"
-#include "Types.hh"
+#include "PubSubBackend/detail/Types.hpp"
+#include "Traits/Bitmask.hpp"
+#include "Types.hpp"
 #include <concepts>
 #include <cstdint>
 #include <limits>

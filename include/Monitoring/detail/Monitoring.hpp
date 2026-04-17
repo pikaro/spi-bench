@@ -1,15 +1,15 @@
 #pragma once
 
-#include "Base/HasCommands.hh"
-#include "Base/HasLifecycle.hh"
-#include "Macros/Facade.hh"
-#include "Monitoring/Interfaces/Sink.hh"
-#include "Monitoring/detail/Commands.hh"
-#include "Monitoring/detail/PlatformSelect.hh"
-#include "StaticConfig/TaskRegistry.hh"
-#include "TaskController/Interfaces/TaskRuntimeSnapshot.hh"
-#include "TaskControllerRegistry/Facade.hh"
-#include "Types/Error.hh"
+#include "Base/HasCommands.hpp"
+#include "Base/HasLifecycle.hpp"
+#include "Macros/Facade.hpp"
+#include "Monitoring/Interfaces/Sink.hpp"
+#include "Monitoring/detail/Commands.hpp"
+#include "Monitoring/detail/PlatformSelect.hpp"
+#include "StaticConfig/TaskRegistry.hpp"
+#include "TaskController/Interfaces/TaskRuntimeSnapshot.hpp"
+#include "TaskControllerRegistry/Facade.hpp"
+#include "Types/Error.hpp"
 #include <array>
 #include <cstddef>
 #include <cstdint>

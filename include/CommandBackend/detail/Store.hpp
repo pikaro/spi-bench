@@ -1,10 +1,12 @@
 #pragma once
 
-#include "CommandBackend/Interfaces/CommandDesc.hh"
-#include "CommandBackend/detail/Directory.hh"
-#include "CommandBackend/detail/Types.hh" // IWYU pragma: keep
-#include "Types/Error.hh"
+#include "CommandBackend/Interfaces/CommandDesc.hpp"
+#include "CommandBackend/detail/Directory.hpp"
+#include "CommandBackend/detail/Types.hpp" // IWYU pragma: keep
+#include "Macros/Facade.hpp"
+#include "Types/Error.hpp"
 #include <expected>
+#include <utility>
 
 namespace Totem::CommandBackend::detail {
 
@@ -18,8 +20,8 @@ class Store {
     static constexpr const char *name = "Command::Store";
 
     std::expected<CommandNameKey, ReturnCode>
-    add(const char *commandName, const CommandDesc &commandDesc) {
-        return _directory.add(CommandNameKey::fromCharPtr(commandName),
+    add(const char *commandName, void *ctx, const CommandDesc &commandDesc) {
+        return _directory.add(CommandNameKey::fromCharPtr(commandName), ctx,
                               commandDesc);
     }
 
@@ -27,9 +29,14 @@ class Store {
         return _directory.remove(commandNameKey);
     }
 
-    [[nodiscard]] std::expected<CommandDesc, ReturnCode>
+    [[nodiscard]] std::expected<std::pair<void *, const CommandDesc>,
+                                ReturnCode>
     get(const CommandNameKey &commandNameKey) const {
-        return _directory.getCopy(commandNameKey);
+        FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
+            command, _directory.getCopy(commandNameKey),
+            "Failed to get command from directory for command name " SV_FMT,
+            SV_ARG(commandNameKey.view()));
+        return std::make_pair(command.ctx, *command.desc);
     }
 
   private:

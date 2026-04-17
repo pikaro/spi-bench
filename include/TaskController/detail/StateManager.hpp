@@ -1,6 +1,6 @@
 #pragma once
 
-#include "TaskController/Interfaces/TaskRuntimeSnapshot.hh"
+#include "TaskController/Interfaces/TaskRuntimeSnapshot.hpp"
 #include <atomic>
 
 namespace Totem::TaskController::detail {

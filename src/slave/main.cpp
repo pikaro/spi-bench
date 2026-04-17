@@ -1,6 +1,6 @@
 #include "freertos/idf_additions.h"
 #include "freertos/projdefs.h"
-#include "models.hh"
+#include "models.hpp"
 
 void setup() {}
 

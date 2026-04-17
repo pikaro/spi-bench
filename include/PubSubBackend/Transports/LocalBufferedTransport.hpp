@@ -1,12 +1,12 @@
 #pragma once
 
-#include "LocalTransport.hh"
-#include "Macros/Facade.hh"
-#include "PubSubBackend/Interfaces/Envelope.hh"
-#include "PubSubBackend/Interfaces/Wire.hh"
-#include "PubSubBackend/detail/EgressBuffer.hh"
-#include "PubSubBackend/detail/Types.hh"
-#include "Types/Error.hh"
+#include "LocalTransport.hpp"
+#include "Macros/Facade.hpp"
+#include "PubSubBackend/Interfaces/Envelope.hpp"
+#include "PubSubBackend/Interfaces/Wire.hpp"
+#include "PubSubBackend/detail/EgressBuffer.hpp"
+#include "PubSubBackend/detail/Types.hpp"
+#include "Types/Error.hpp"
 #include <cstddef>
 #include <span>
 

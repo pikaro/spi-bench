@@ -1,9 +1,9 @@
 #pragma once
 
-#include "Macros/Facade.hh"
-#include "Platform/PlatformSelect.hh"
-#include "RingBuffer/detail/Config.hh"
-#include "Types/Error.hh"
+#include "Macros/Facade.hpp"
+#include "Platform/PlatformSelect.hpp"
+#include "RingBuffer/detail/Config.hpp"
+#include "Types/Error.hpp"
 #include "freertos/projdefs.h"
 #include "freertos/ringbuf.h"
 #include <cstddef>

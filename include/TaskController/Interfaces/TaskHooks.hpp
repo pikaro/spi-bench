@@ -1,9 +1,9 @@
 #pragma once
 
-#include "Concepts/Base.hh"
-#include "Macros/Facade.hh"
-#include "Types/Error.hh"
-#include "Types/Signal.hh"
+#include "Concepts/Base.hpp"
+#include "Macros/Facade.hpp"
+#include "Types/Error.hpp"
+#include "Types/Signal.hpp"
 #include <concepts>
 
 namespace Totem::TaskController {

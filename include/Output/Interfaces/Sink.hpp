@@ -1,9 +1,9 @@
 #pragma once
 
-#include "Concepts/Base.hh"
-#include "Macros/Facade.hh"
-#include "Types/Error.hh"
-#include "Types/Logging.hh"
+#include "Concepts/Base.hpp"
+#include "Macros/Facade.hpp"
+#include "Types/Error.hpp"
+#include "Types/Logging.hpp"
 #include <concepts>
 
 namespace Totem::Output::detail {

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Base.hh"
-#include "Types/Error.hh"
+#include "Base.hpp"
+#include "Types/Error.hpp"
 
 using DefaultError = CoreError;
 

@@ -39,6 +39,19 @@ See: /docs/commands.md
 - Use deterministic behavior, simple ownership, and clear data flow over heavy
     abstractions
 
+### Documentation
+
+- Add or update documentation comments for public APIs and for non-obvious
+    functions when intent, preconditions, side effects, or invariants are not
+    immediately clear from the code.
+- Add or update module or file-level documentation when the overall purpose,
+    design, or interactions of the code are not immediately clear from the code
+    itself.
+- Prefer concise documentation that explains why and how to use the function,
+    not what obvious code already shows.
+- Use the industry standard documentation format for the language if not already
+    established in the codebase, otherwise follow the existing style.
+
 ## Boundaries
 
 ### Always
@@ -87,7 +100,13 @@ For every task:
 4. Execute with minimal changes
 5. Test or verify correctness
 6. Repeat steps 3-5 until task is complete
-7. Update /docs/\* with any new discoveries or changes
+7. Add or update comments and function / file documentation as needed
+8. Update /docs/\* with any new discoveries or changes
+9. Report changes implemented and the rationale for them in the final task
+    summary
+10. Report relevant discoveries, insights, open questions or potential issues
+    discovered if they would be helpful for improving code correctness,
+    maintainability, or quality.
 
 ## Memories
 

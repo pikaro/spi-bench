@@ -1,11 +1,11 @@
 #pragma once
 
-#include "Generic/Directory.hh"
-#include "Macros/Facade.hh"
-#include "PubSubBackend/Interfaces/Subscriber.hh"
-#include "PubSubBackend/Interfaces/Types.hh"
-#include "PubSubBackend/detail/Types.hh"
-#include "Types/Error.hh"
+#include "Generic/Directory.hpp"
+#include "Macros/Facade.hpp"
+#include "PubSubBackend/Interfaces/Subscriber.hpp"
+#include "PubSubBackend/Interfaces/Types.hpp"
+#include "PubSubBackend/detail/Types.hpp"
+#include "Types/Error.hpp"
 #include <cstdint>
 #include <cstring>
 #include <expected>

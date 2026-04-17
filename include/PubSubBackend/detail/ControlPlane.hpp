@@ -1,11 +1,11 @@
 #pragma once
 
-#include "Macros/Facade.hh"
-#include "PubSubBackend/Interfaces/Envelope.hh"
-#include "PubSubBackend/Interfaces/Types.hh"
-#include "PubSubBackend/detail/SubscriptionManager.hh"
-#include "PubSubBackend/detail/Types.hh"
-#include "Types/Error.hh"
+#include "Macros/Facade.hpp"
+#include "PubSubBackend/Interfaces/Envelope.hpp"
+#include "PubSubBackend/Interfaces/Types.hpp"
+#include "PubSubBackend/detail/SubscriptionManager.hpp"
+#include "PubSubBackend/detail/Types.hpp"
+#include "Types/Error.hpp"
 #include <optional>
 
 namespace Totem::PubSubBackend::detail {

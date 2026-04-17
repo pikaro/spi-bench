@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Generated/Wire/Support.hh"
-#include "TestMessage.hh"
+#include "Generated/Wire/Support.hpp"
+#include "TestMessage.hpp"
 #include <tuple>
 
 namespace Totem::Generated::Wire {

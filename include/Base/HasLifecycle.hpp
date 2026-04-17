@@ -1,10 +1,10 @@
 #pragma once
 
-#include "Base/Lifecycle.hh"
-#include "Concepts/Base.hh"
-#include "Macros/Facade.hh"
-#include "Types/Error.hh"
-#include "Types/NoConfig.hh"
+#include "Base/Lifecycle.hpp"
+#include "Concepts/Base.hpp"
+#include "Macros/Facade.hpp"
+#include "Types/Error.hpp"
+#include "Types/NoConfig.hpp"
 #include <concepts>
 
 template <class Derived, typename ConfT = NoConfig> class HasLifecycle {

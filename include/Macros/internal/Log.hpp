@@ -1,8 +1,8 @@
 #pragma once
 
-#include "Platform/PlatformSelect.hh" // IWYU pragma: export
-#include "Services/Logging.hh"        // IWYU pragma: export
-#include "Types/Logging.hh"           // IWYU pragma: export
+#include "Platform/PlatformSelect.hpp" // IWYU pragma: export
+#include "Services/Logging.hpp"        // IWYU pragma: export
+#include "Types/Logging.hpp"           // IWYU pragma: export
 #include <array>                      // IWYU pragma: export
 #include <source_location>            // IWYU pragma: export
 #include <string_view>                // IWYU pragma: export

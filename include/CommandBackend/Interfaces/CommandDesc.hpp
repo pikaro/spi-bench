@@ -1,8 +1,8 @@
 #pragma once
 
-#include "Macros/Facade.hh"
-#include "StaticConfig/Command.hh"
-#include "Types/Error.hh"
+#include "Macros/Facade.hpp"
+#include "StaticConfig/Command.hpp"
+#include "Types/Error.hpp"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -31,8 +31,6 @@ struct CommandDesc {
     };
 
     [[nodiscard]] ReturnCode validate() const {
-        FAIL_IF(needsContext && ctx == nullptr, ERR(InvalidArgument),
-                "Command with context must have non-null context pointer");
         FAIL_IF_NULL(handler, ERR(InvalidArgument),
                      "Command handler cannot be null");
         FAIL_IF_NULL(description, ERR(InvalidArgument),
@@ -93,7 +91,6 @@ struct CommandDesc {
     using Handler = ReturnCode (*)(ParsedArgs, void *);
 
     bool needsContext = false;
-    void *ctx = nullptr;
     Token name;
     const char *description;
     std::array<Argument, CommandConfig::maxTokens> args;

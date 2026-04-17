@@ -1,6 +1,6 @@
 #pragma once
 
-#include "TaskController/Interfaces/Config.hh"
+#include "TaskController/Interfaces/Config.hpp"
 namespace Totem::PubSubBackend {
 
 struct Config {

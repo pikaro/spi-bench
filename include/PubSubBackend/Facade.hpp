@@ -1,7 +1,7 @@
 #pragma once
 
-#include "PubSubBackend/detail/Node.hh"
-#include "PubSubBackend/detail/Pool.hh"
+#include "PubSubBackend/detail/Node.hpp"
+#include "PubSubBackend/detail/Pool.hpp"
 
 namespace Totem::PubSubBackend {
 

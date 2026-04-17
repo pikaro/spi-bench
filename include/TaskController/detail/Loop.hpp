@@ -1,14 +1,14 @@
 #pragma once
 
-#include "Macros/Facade.hh"
-#include "TaskController/Interfaces/Config.hh"
-#include "TaskController/Interfaces/TaskHooks.hh"
-#include "TaskController/Interfaces/TaskRuntimeSnapshot.hh"
-#include "TaskController/detail/ScopedWatchdog.hh"
-#include "TaskController/detail/SignalHandler.hh"
-#include "TaskController/detail/StateManager.hh"
-#include "TaskController/detail/StepScheduler.hh"
-#include "Types/Error.hh"
+#include "Macros/Facade.hpp"
+#include "TaskController/Interfaces/Config.hpp"
+#include "TaskController/Interfaces/TaskHooks.hpp"
+#include "TaskController/Interfaces/TaskRuntimeSnapshot.hpp"
+#include "TaskController/detail/ScopedWatchdog.hpp"
+#include "TaskController/detail/SignalHandler.hpp"
+#include "TaskController/detail/StateManager.hpp"
+#include "TaskController/detail/StepScheduler.hpp"
+#include "Types/Error.hpp"
 
 namespace Totem::TaskController::detail {
 

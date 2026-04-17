@@ -18,6 +18,15 @@ Build output notes:
 - Thin wrapper around `pio run`
 - Deletes unnecessary SARIF files after output
 
+## Analyze object sizes
+
+- `bin/objsizes master`: List object sizes for the `master` environment,
+    including the names of the objects required for the `bin/objsize` command
+- `bin/objsize master 'Metrics::backend()::instance'`: List sizes for all
+    members of the `Metrics::backend()::instance` object
+- `bin/gdb master` is a wrapper which starts GDB with the correct target and
+    firmware file for the `master` environment
+
 ## Generated Wire Code
 
 Generate wire support code for the current PlatformIO environment:

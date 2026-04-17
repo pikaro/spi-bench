@@ -1,7 +1,7 @@
 #pragma once
 
-#include "PubSubBackend/Interfaces/Envelope.hh"
-#include "Types/Error.hh"
+#include "PubSubBackend/Interfaces/Envelope.hpp"
+#include "Types/Error.hpp"
 
 namespace Totem::PubSubBackend {
 

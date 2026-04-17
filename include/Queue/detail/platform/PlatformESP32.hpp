@@ -1,8 +1,8 @@
 #pragma once
 
-#include "Macros/Facade.hh"
-#include "Platform/PlatformSelect.hh"
-#include "Types/Error.hh"
+#include "Macros/Facade.hpp"
+#include "Platform/PlatformSelect.hpp"
+#include "Types/Error.hpp"
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
 #include "freertos/projdefs.h"

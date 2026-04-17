@@ -1,8 +1,8 @@
 #pragma once
 
-#include "MetricsBackend/detail/Types.hh"
-#include "StaticConfig/Metrics.hh"
-#include "Types/Error.hh"
+#include "MetricsBackend/detail/Types.hpp"
+#include "StaticConfig/Metrics.hpp"
+#include "Types/Error.hpp"
 #include <array>
 #include <cstdint>
 

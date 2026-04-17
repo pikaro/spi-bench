@@ -1,8 +1,8 @@
 #pragma once
 
-#include "Base/HasLifecycle.hh"
-#include "TaskController/detail/Concepts.hh"
-#include "TaskController/detail/Controller.hh"
+#include "Base/HasLifecycle.hpp"
+#include "TaskController/detail/Concepts.hpp"
+#include "TaskController/detail/Controller.hpp"
 
 namespace Totem::TaskController {
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Types/Error.hh"
+#include "Types/Error.hpp"
 #include <concepts>
 
 template <class T>

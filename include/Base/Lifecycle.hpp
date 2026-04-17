@@ -1,8 +1,8 @@
 #pragma once
 
-#include "Macros/Facade.hh"
-#include "Mutex/Facade.hh"
-#include "Types/Error.hh"
+#include "Macros/Facade.hpp"
+#include "Mutex/Facade.hpp"
+#include "Types/Error.hpp"
 
 template <class Owner, class ConfT> class Lifecycle {
   public:

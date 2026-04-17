@@ -2,19 +2,19 @@
 
 // IWYU pragma: begin_exports
 
-#include "internal/Base.hh"
+#include "internal/Base.hpp"
 
-#include "internal/Binary.hh"
-#include "internal/Class.hh"
-#include "internal/Collection.hh"
-#include "internal/Cpp.hh"
-#include "internal/Error.hh"
-#include "internal/Fail.hh"
-#include "internal/Format.hh"
-#include "internal/Log.hh"
-#include "internal/Markers.hh"
-#include "internal/Metrics.hh"
+#include "internal/Binary.hpp"
+#include "internal/Class.hpp"
+#include "internal/Collection.hpp"
+#include "internal/Cpp.hpp"
+#include "internal/Error.hpp"
+#include "internal/Fail.hpp"
+#include "internal/Format.hpp"
+#include "internal/Log.hpp"
+#include "internal/Markers.hpp"
+#include "internal/Metrics.hpp"
 
-#include "internal/PlatformSelect.hh"
+#include "internal/PlatformSelect.hpp"
 
 // IWYU pragma: end_exports

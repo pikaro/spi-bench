@@ -1,9 +1,9 @@
 #pragma once
 
-#include "Macros/Facade.hh"
-#include "TaskController/Interfaces/TaskRuntimeSnapshot.hh"
-#include "TaskControllerRegistry/Interfaces/TaskSourceFeatures.hh"
-#include "Types/Error.hh"
+#include "Macros/Facade.hpp"
+#include "TaskController/Interfaces/TaskRuntimeSnapshot.hpp"
+#include "TaskControllerRegistry/Interfaces/TaskSourceFeatures.hpp"
+#include "Types/Error.hpp"
 #include <concepts>
 #include <cstdint>
 #include <expected>

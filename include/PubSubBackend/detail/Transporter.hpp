@@ -1,7 +1,7 @@
 #pragma once
 
-#include "PubSubBackend/detail/Types.hh"
-#include "Types/Error.hh"
+#include "PubSubBackend/detail/Types.hpp"
+#include "Types/Error.hpp"
 #include <concepts>
 #include <cstddef>
 #include <limits>

@@ -1,13 +1,13 @@
 #pragma once
 
-#include "Base/HasLifecycle.hh"
-#include "Macros/Facade.hh"
-#include "PubSubBackend/Interfaces/Envelope.hh"
-#include "PubSubBackend/detail/IngressBuffer.hh"
-#include "PubSubBackend/detail/SerDe.hh"
-#include "PubSubBackend/detail/Types.hh"
-#include "Queue/Facade.hh"
-#include "Types/Error.hh"
+#include "Base/HasLifecycle.hpp"
+#include "Macros/Facade.hpp"
+#include "PubSubBackend/Interfaces/Envelope.hpp"
+#include "PubSubBackend/detail/IngressBuffer.hpp"
+#include "PubSubBackend/detail/SerDe.hpp"
+#include "PubSubBackend/detail/Types.hpp"
+#include "Queue/Facade.hpp"
+#include "Types/Error.hpp"
 #include <array>
 #include <cstddef>
 #include <expected>

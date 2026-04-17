@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Output/detail/Aggregator.hh"
-#include "Output/detail/Outputs/UartOutput.hh"
+#include "Output/detail/Aggregator.hpp"
+#include "Output/detail/Outputs/UartOutput.hpp"
 
 namespace Totem::Output {
 

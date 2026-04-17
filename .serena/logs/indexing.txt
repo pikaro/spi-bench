@@ -1,0 +1,4 @@
+include/PubSubBackend/detail/Transporter.hpp
+Error processing request textDocument/documentSymbol with params:
+{'textDocument': {'uri': 'file:///Users/david.reis/src/dre/uc/spi/include/PubSubBackend/detail/Transporter.hpp'}}
+(caused by LanguageServerTerminatedException: Language server stdout read process terminated unexpectedly)

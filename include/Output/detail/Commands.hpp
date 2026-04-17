@@ -1,9 +1,9 @@
 #pragma once
 
-#include "CommandBackend/Facade.hh"
-#include "CommandBackend/Interfaces/CommandDesc.hh"
-#include "Macros/Facade.hh"
-#include "Types/Error.hh"
+#include "CommandBackend/Facade.hpp"
+#include "CommandBackend/Interfaces/CommandDesc.hpp"
+#include "Macros/Facade.hpp"
+#include "Types/Error.hpp"
 #include <array>
 #include <magic_enum/magic_enum.hpp>
 #include <optional>

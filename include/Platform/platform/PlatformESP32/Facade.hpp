@@ -2,7 +2,7 @@
 
 // IWYU pragma: begin_exports
 
-#include "Base.hh"
+#include "Base.hpp"
 
 // WARNING: Do NOT export UART headers here - causes cyclic dependencies with
 // logging macros

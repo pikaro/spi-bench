@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Types/Basic.hh"
+#include "Types/Basic.hpp"
 #include <array>
 #include <cstddef>
 #include <cstdint>

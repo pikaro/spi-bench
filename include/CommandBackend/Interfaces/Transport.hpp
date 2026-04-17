@@ -1,8 +1,8 @@
 #pragma once
 
-#include "CommandBackend/Interfaces/CommandDesc.hh"
-#include "Concepts/Base.hh"
-#include "Types/Error.hh"
+#include "CommandBackend/Interfaces/CommandDesc.hpp"
+#include "Concepts/Base.hpp"
+#include "Types/Error.hpp"
 #include <concepts>
 #include <expected>
 

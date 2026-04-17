@@ -1,9 +1,9 @@
 #pragma once
 
-#include "Macros/Facade.hh"
-#include "Support/Basic.hh"
-#include "Types/Basic.hh"
-#include "Types/Error.hh"
+#include "Macros/Facade.hpp"
+#include "Support/Basic.hpp"
+#include "Types/Basic.hpp"
+#include "Types/Error.hpp"
 #include <array>
 #include <cstddef>
 #include <cstdint>

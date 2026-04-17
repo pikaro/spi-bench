@@ -1,12 +1,12 @@
 #pragma once
 
-#include "Generic/Directory.hh"
-#include "Macros/Facade.hh"
-#include "MetricsBackend/detail/MetricGroupDirectory.hh"
-#include "MetricsBackend/detail/Types.hh"
-#include "StaticConfig/Metrics.hh"
-#include "Types/Error.hh"
-#include "Types/Metrics.hh"
+#include "Generic/Directory.hpp"
+#include "Macros/Facade.hpp"
+#include "MetricsBackend/detail/MetricGroupDirectory.hpp"
+#include "MetricsBackend/detail/Types.hpp"
+#include "StaticConfig/Metrics.hpp"
+#include "Types/Error.hpp"
+#include "Types/Metrics.hpp"
 #include <cinttypes>
 #include <cstdint>
 #include <cstring>
@@ -14,8 +14,14 @@
 
 namespace Totem::MetricsBackend::detail {
 
+struct MetricSlot {
+    const MetricDesc *desc;
+    MetricGroupDirectory::EntryKey group;
+    uint32_t value;
+};
+
 using MetricDirectoryImpl =
-    GettableDirectory<uintptr_t, Metric, MetricConfig::maxMetrics>;
+    GettableDirectory<uintptr_t, MetricSlot, MetricConfig::maxMetrics>;
 
 class MetricDirectory : public MetricDirectoryImpl {
     using MetricGroupKey = MetricGroupDirectory::EntryKey;
@@ -33,15 +39,17 @@ class MetricDirectory : public MetricDirectoryImpl {
     }
 
     std::expected<EntryKey, ReturnCode> add(EntryKey metricKey,
+                                            MetricGroupKey groupKey,
                                             const MetricDesc &metricDesc) {
         FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
-            key, _addImpl(metricKey, {.desc = metricDesc}),
+            key,
+            _addImpl(metricKey,
+                     {.desc = &metricDesc, .group = groupKey, .value = 0}),
             "Failed to add metric with key %" PRIuPTR, metricKey);
-        FAIL_IF_ERR_FWD_UNEXPECTED(
-            _groupDirectory.addMetricToGroup(metricDesc.group),
-            "Failed to add metric with key %" PRIuPTR
-            " to group with key %" PRIuPTR,
-            metricKey, metricDesc.group);
+        FAIL_IF_ERR_FWD_UNEXPECTED(_groupDirectory.addMetricToGroup(groupKey),
+                                   "Failed to add metric with key %" PRIuPTR
+                                   " to group with key %" PRIuPTR,
+                                   metricKey, groupKey);
         return key;
     }
 
@@ -51,11 +59,12 @@ class MetricDirectory : public MetricDirectoryImpl {
     ReturnCode withAllInGroupConst(Fn &&fn,
                                    const MetricGroupKey &groupKey) const {
         return withAllConst(
-            [&](const EntryKey &key, const Metric &metric) {
-                return fn(key, metric);
+            [&](const EntryKey &key, const MetricSlot &metricSlot) {
+                return fn(key,
+                          {.desc = metricSlot.desc, .value = metricSlot.value});
             },
-            [&](const EntryKey & /*unused*/, const Metric &metric) {
-                return metric.desc.group == groupKey;
+            [&](const EntryKey & /*unused*/, const MetricSlot &metric) {
+                return metric.group == groupKey;
             });
     }
 

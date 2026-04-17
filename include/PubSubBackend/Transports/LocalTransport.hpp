@@ -1,11 +1,11 @@
 #pragma once
 
-#include "BaseTransport.hh"
-#include "Macros/Facade.hh"
-#include "PubSubBackend/Interfaces/Wire.hh"
-#include "PubSubBackend/detail/Types.hh"
-#include "Queue/Facade.hh"
-#include "Types/Error.hh"
+#include "BaseTransport.hpp"
+#include "Macros/Facade.hpp"
+#include "PubSubBackend/Interfaces/Wire.hpp"
+#include "PubSubBackend/detail/Types.hpp"
+#include "Queue/Facade.hpp"
+#include "Types/Error.hpp"
 #include <array>
 #include <cstddef>
 #include <cstring>

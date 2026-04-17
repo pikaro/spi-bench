@@ -1,12 +1,12 @@
 #pragma once
 
-#include "Macros/Facade.hh"
-#include "MetricsBackend/Interfaces/Sink.hh"
-#include "MetricsBackend/detail/MetricDirectory.hh"
-#include "MetricsBackend/detail/MetricGroupDirectory.hh"
-#include "MetricsBackend/detail/Types.hh"
-#include "Types/Error.hh"
-#include "Types/Metrics.hh"
+#include "Macros/Facade.hpp"
+#include "MetricsBackend/Interfaces/Sink.hpp"
+#include "MetricsBackend/detail/MetricDirectory.hpp"
+#include "MetricsBackend/detail/MetricGroupDirectory.hpp"
+#include "MetricsBackend/detail/Types.hpp"
+#include "Types/Error.hpp"
+#include "Types/Metrics.hpp"
 #include <cstring>
 #include <expected>
 
@@ -43,15 +43,16 @@ class Store {
     }
 
     std::expected<MetricKey, ReturnCode>
-    addMetric(const char *metricName, const MetricDesc &metricDesc) {
+    addMetric(const char *metricName, MetricGroupKey groupKey,
+              const MetricDesc &metricDesc) {
         FAIL_IF_NULL(metricName, std::unexpected(ERR(InvalidArgument)),
                      "Cannot register metric with null name");
         _log_i("Registering metric %s", metricName);
-        return _metricDirectory.add(_nextMetricKey++, metricDesc);
+        return _metricDirectory.add(_nextMetricKey++, groupKey, metricDesc);
     }
 
     template <typename Fun>
-        requires(std::is_invocable_r_v<ReturnCode, Fun, Metric &>)
+        requires(std::is_invocable_r_v<ReturnCode, Fun, MetricSlot &>)
     ReturnCode withMetric(MetricKey metricKey, Fun fun) {
         return _metricDirectory.withEntry(metricKey, fun);
     }
@@ -60,14 +61,15 @@ class Store {
     getMetricsForGroup(MetricGroupKey groupKey) const {
         GroupMetricSnapshot out{};
         auto ret = _metricDirectory.withAllConst(
-            [&out](const MetricKey &, const Metric &metric) -> ReturnCode {
+            [&out](const MetricKey &, const MetricSlot &metric) -> ReturnCode {
                 FAIL_IF(out.count >= out.metrics.size(), ERR(Overflow),
                         "Metric group snapshot buffer is full");
-                out.metrics[out.count++] = metric;
+                out.metrics[out.count++] = {.desc = metric.desc,
+                                            .value = metric.value};
                 return OK();
             },
-            [groupKey](const MetricKey &, const Metric &metric) {
-                return metric.desc.group == groupKey;
+            [groupKey](const MetricKey &, const MetricSlot &metricSlot) {
+                return metricSlot.group == groupKey;
             });
         FAIL_IF_ERR_FWD_UNEXPECTED(
             ret, "Failed to get metrics for group key %u", groupKey);
@@ -78,7 +80,7 @@ class Store {
     getGroupKeyByName(const char *metricGroupName) const {
         auto ret = _metricGroupDirectory.snapshotKeys(
             [&](const auto & /*unused*/, const auto &entry) {
-                return (std::strcmp(entry.desc.name, metricGroupName) == 0);
+                return (std::strcmp(entry.desc->name, metricGroupName) == 0);
             },
             {.min = 1, .max = 1});
         FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
@@ -109,7 +111,10 @@ class Store {
 
     [[nodiscard]] std::expected<Metric, ReturnCode>
     getMetric(MetricKey metricKey) const {
-        return _metricDirectory.getCopy(metricKey);
+        FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
+            metricSlot, _metricDirectory.getCopy(metricKey),
+            "Failed to get metric for metric key %u", metricKey);
+        return Metric{.desc = metricSlot.desc, .value = metricSlot.value};
     }
 
   private:

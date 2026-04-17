@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Data/Nodes.hh"
-#include "StaticConfig/PubSub.hh"
+#include "Data/Nodes.hpp"
+#include "StaticConfig/PubSub.hpp"
 #include <cstdint>
 
 namespace Totem::Data::PubSub {

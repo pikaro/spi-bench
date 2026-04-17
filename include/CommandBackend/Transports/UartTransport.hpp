@@ -1,12 +1,12 @@
 #pragma once
 
-#include "CommandBackend/Interfaces/CommandDesc.hh"
-#include "CommandBackend/Interfaces/Transport.hh"
-#include "Macros/Facade.hh"
-#include "Platform/Uart.hh"
-#include "StaticConfig/Command.hh"
-#include "StaticConfig/Uart.hh"
-#include "Types/Error.hh"
+#include "CommandBackend/Interfaces/CommandDesc.hpp"
+#include "CommandBackend/Interfaces/Transport.hpp"
+#include "Macros/Facade.hpp"
+#include "Platform/Uart.hpp"
+#include "StaticConfig/Command.hpp"
+#include "StaticConfig/Uart.hpp"
+#include "Types/Error.hpp"
 #include <array>
 #include <cctype>
 #include <cstddef>

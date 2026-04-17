@@ -5,6 +5,7 @@
 #include "PubSubBackend/detail/Transporter.hh"
 #include "PubSubBackend/detail/Types.hh"
 #include "Types/Error.hh"
+#include <array>
 #include <cstring>
 #include <expected>
 #include <string_view>
@@ -30,7 +31,8 @@ class TransporterDirectory : public TransporterDirectoryImpl {
         size_t count = 0;
     };
 
-    explicit TransporterDirectory(const char *ownerName) : Base(ownerName) {}
+    explicit TransporterDirectory(const char *ownerName)
+        : Base(ownerName, Totem::PubSubBackend::detail::logComponent) {}
 
     using EntryKey = typename Base::EntryKey;
 
@@ -100,11 +102,11 @@ class TransporterDirectory : public TransporterDirectoryImpl {
 
         for (size_t i = 0; i < keys.count; ++i) {
             FAIL_IF_ERR_FWD_UNEXPECTED(
-                this->withEntryConst(
-                    keys.keys[i], [&](const TransporterEntry &entry) {
-                        out.entries[out.count++] = entry;
-                        return OK();
-                    }),
+                this->withEntryConst(keys.keys[i],
+                                     [&](const TransporterEntry &entry) {
+                                         out.entries[out.count++] = entry;
+                                         return OK();
+                                     }),
                 "Failed to snapshot transport entry %u for %s",
                 static_cast<unsigned>(keys.keys[i]), this->ownerName());
         }

@@ -31,7 +31,8 @@ using DirectoryImpl =
 
 class Directory : public DirectoryImpl {
   public:
-    explicit Directory(const char *ownerName) : DirectoryImpl(ownerName) {
+    explicit Directory(const char *ownerName, LogComponent component)
+        : DirectoryImpl(ownerName, component) {
         _setHooks({
             .self = this,
             .beforeRemoveHook = beforeRemove,
@@ -55,10 +56,14 @@ class Directory : public DirectoryImpl {
     static ReturnCode beforeRemove(void *directory, std::string_view name,
                                    const RunnerEntry &entry) {
         auto *self = static_cast<Directory *>(directory);
+        return self->beforeRemove(name, entry);
+    }
+
+    ReturnCode beforeRemove(std::string_view name, const RunnerEntry &entry) {
         if (entry.runner->hasEverStarted() && !entry.runner->hasStopped()) {
             _log_w("Attempted to remove runner %s->" SV_FMT
                    " that is still running",
-                   self->ownerName(), SV_ARG(name));
+                   ownerName(), SV_ARG(name));
             return ERR(InvalidState);
         }
         return OK();

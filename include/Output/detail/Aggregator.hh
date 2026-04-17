@@ -7,6 +7,7 @@
 #include "Output/Interfaces/Config.hh"
 #include "Output/Interfaces/Sink.hh"
 #include "Output/detail/Commands.hh"
+#include "Output/detail/Types.hh"
 #include "RingBuffer/Facade.hh"
 #include "StaticConfig/Logging.hh"
 #include "TaskController/Facade.hh"
@@ -28,7 +29,9 @@ class Aggregator : public HasLifecycle<Aggregator, AggregatorConfig>,
     friend struct LifecycleContract<Aggregator, AggregatorConfig>;
 
     friend TaskController::TaskHooks;
+    friend class HasTaskController<Aggregator, AggregatorConfig>;
     friend struct TaskController::TaskHooks::Contract<Aggregator>;
+    friend struct TaskControllerContract<Aggregator>;
 
   public:
     explicit Aggregator(TaskController::RegistryHooks registryHooks)
@@ -197,6 +200,9 @@ class Aggregator : public HasLifecycle<Aggregator, AggregatorConfig>,
     std::array<std::optional<LogLevel>, magic_enum::enum_count<LogComponent>()>
         _componentLogLevels{std::nullopt};
     std::array<Sink, LoggingConfig::maxSinks> _sinks{};
+
+    static const LogComponent logComponent =
+        Totem::Output::detail::logComponent;
 };
 
 inline constexpr LifecycleContract<Aggregator, AggregatorConfig>

@@ -13,6 +13,7 @@
 #include "internal/Format.hh"
 #include "internal/Log.hh"
 #include "internal/Markers.hh"
+#include "internal/Metrics.hh"
 
 #include "internal/PlatformSelect.hh"
 

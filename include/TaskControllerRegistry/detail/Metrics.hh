@@ -5,44 +5,56 @@
 #include "Types/Error.hh"
 #include "Types/Logging.hh"
 #include "Types/Metrics.hh"
+#include <cstddef>
 
 namespace Totem::TaskControllerRegistry::detail {
 
 struct Metrics {
+    static constexpr MetricGroupDesc groupDef = {
+        .name = "taskRegi",
+        .logLevel = LogLevel::Info,
+    };
+
+    static constexpr MetricDesc controllerCountDef = {
+        .name = "ctrlCont",
+        .type = MetricType::Counter,
+        .unit = MetricUnit::None,
+    };
+
+    static constexpr MetricDesc reapedCountDef = {
+        .name = "reaped",
+        .type = MetricType::Counter,
+        .unit = MetricUnit::None,
+    };
+
     static Metrics create() {
-        ABORT_IF_UNEXPECTED(
-            group,
-            ::Metrics::registrar().addGroup({
-                .name = "taskRegi",
-                .logLevel = LogLevel::Debug,
-            }),
-            "Failed to register metrics group for TaskControllerRegistry");
-        ABORT_IF_UNEXPECTED(
-            taskCount,
-            ::Metrics::registrar().addCounter({
-                .name = "tskCount",
-                .group = group.key(),
-                .type = MetricType::Counter,
-                .unit = MetricUnit::Items,
-            }),
-            "Failed to register TaskCount metric for TaskControllerRegistry");
+        REGISTER_METRICS_GROUP("TaskControllerRegistry", group);
+        REGISTER_METRIC("TaskControllerRegistry", controllerCount, Counter,
+                        group);
+        REGISTER_METRIC("TaskControllerRegistry", reapedCount, Counter, group);
 
         return Metrics{
             .group = group,
-            .taskCount = taskCount,
+            .controllerCount = controllerCount,
+            .reapedCount = reapedCount,
         };
     }
 
     ReturnCode addTask() const {
-        return ::Metrics::recorder().increment(taskCount);
+        return ::Metrics::recorder().increment(controllerCount);
     }
 
     ReturnCode removeTask() const {
-        return ::Metrics::recorder().decrement(taskCount);
+        return ::Metrics::recorder().decrement(controllerCount);
+    }
+
+    ReturnCode addReaped(size_t count) const {
+        return ::Metrics::recorder().increment(reapedCount, count);
     }
 
     Totem::MetricsBackend::GroupHandle group;
-    Totem::MetricsBackend::CounterHandle taskCount;
+    Totem::MetricsBackend::CounterHandle controllerCount;
+    Totem::MetricsBackend::CounterHandle reapedCount;
 };
 
 } // namespace Totem::TaskControllerRegistry::detail

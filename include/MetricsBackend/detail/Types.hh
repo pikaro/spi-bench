@@ -1,12 +1,15 @@
 #pragma once
 
 #include "Types/Collection.hh"
+#include "Types/Logging.hh"
 #include "Types/Metrics.hh"
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
 
 namespace Totem::MetricsBackend::detail {
+
+inline constexpr LogComponent logComponent = LogComponent::Metrics;
 
 struct MetricGroup {
     MetricGroupDesc desc{};
@@ -20,6 +23,7 @@ struct Metric {
     uint32_t value = 0;
 
     [[nodiscard]] std::string_view displayName() const { return desc.name; }
+    [[nodiscard]] std::string_view unit() const { return desc.unitString(); }
 };
 
 struct GroupTag {};

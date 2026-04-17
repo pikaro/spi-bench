@@ -3,6 +3,7 @@
 #include "Base/HasMutex.hh"
 #include "Macros/Facade.hh"
 #include "Types/Error.hh"
+#include "Types/Logging.hh"
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -28,8 +29,9 @@ class ByteArena : public HasMutex<Derived> {
     };
 
   public:
-    ByteArena()
-        : _spans{Span{
+    explicit ByteArena(LogComponent logComponent)
+        : logComponent(logComponent),
+          _spans{Span{
               .offset = 0, .size = Config::bufferSize, .occupied = false}} {}
 
     ReturnCode clean() {
@@ -130,6 +132,9 @@ class ByteArena : public HasMutex<Derived> {
             "Failed to release record for stored item");
         return OK();
     }
+
+  protected:
+    LogComponent logComponent;
 
   private:
     [[nodiscard]] bool _hasRecord(const T &stored) const {

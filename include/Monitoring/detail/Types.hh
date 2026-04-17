@@ -1,10 +1,13 @@
 #pragma once
 
 #include "Traits/Bitmask.hh"
+#include "Types/Logging.hh"
 #include <cstdint>
 #include <type_traits>
 
 namespace Totem::Monitoring::detail {
+
+inline constexpr LogComponent logComponent = LogComponent::Monitoring;
 
 enum class MemoryAttr : uint8_t {
     None = 0,

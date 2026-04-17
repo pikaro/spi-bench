@@ -12,7 +12,6 @@
 namespace Totem::Output::detail {
 
 template <typename Owner> struct Commands {
-
     static ReturnCode handle_set_log_level(CommandDesc::ParsedArgs args,
                                            void *ctx) {
         auto *aggregator = static_cast<Owner *>(ctx);
@@ -38,7 +37,7 @@ template <typename Owner> struct Commands {
         return aggregator->setLogLevel(level.value, component);
     }
 
-    CommandDesc logLevelCmd = {
+    static inline CommandDesc logLevelCmd = {
         .needsContext = true,
         .name = "log",
         .description = "Set log level for output",
@@ -51,7 +50,7 @@ template <typename Owner> struct Commands {
         .subcommands = {},
     };
 
-    std::span<CommandDesc *> commands() {
+    static constexpr std::span<CommandDesc *> commands() {
         static auto commands = std::to_array<CommandDesc *>({
             &logLevelCmd,
         });

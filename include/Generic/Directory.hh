@@ -127,9 +127,15 @@ class Directory : HasMutex<Directory<Key, Entry, N, Representation>> {
         size_t count = 0;
     };
 
+    struct MinMax {
+        size_t min = 0;
+        size_t max = N;
+    };
+
     using SlottedMapType = SlottedMap<EntryKey, Entry, N>;
 
-    explicit Directory(const char *ownerName) : _ownerName(ownerName) {}
+    explicit Directory(const char *ownerName, LogComponent logComponent)
+        : _ownerName(ownerName), logComponent(logComponent) {}
 
     [[nodiscard]] const char *ownerName() const { return _ownerName; }
 
@@ -158,8 +164,8 @@ class Directory : HasMutex<Directory<Key, Entry, N, Representation>> {
     ReturnCode withEntry(const EntryKey &entryKey, Fn &&fn) {
         auto keyCref = std::cref(entryKey);
         auto lambda = [this](const EntryKey &key_, auto &&fn_) -> ReturnCode {
-            return _withEntryImpl(_entries, key_,
-                                  std::forward<decltype(fn_)>(fn_));
+            return _withEntryImpl(
+                _entries, key_, std::forward<decltype(fn_)>(fn_), logComponent);
         };
         return this->_locked("Directory::withEntry", ERR(Timeout), lambda,
                              keyCref, std::forward<Fn>(fn));
@@ -179,7 +185,7 @@ class Directory : HasMutex<Directory<Key, Entry, N, Representation>> {
     ReturnCode withAll(Fn &&fn, Filter &&filter) {
         auto lambda = [this](auto &&fn_, auto &&filter_) -> ReturnCode {
             return _withAllImpl(_entries, std::forward<decltype(fn_)>(fn_),
-                                filter_);
+                                filter_, logComponent);
         };
         auto fnRef = std::ref(fn);
         auto filterRef = std::ref(filter);
@@ -202,8 +208,8 @@ class Directory : HasMutex<Directory<Key, Entry, N, Representation>> {
     ReturnCode withEntryConst(const EntryKey &entryKey, Fn &&fn) const {
         auto keyCref = std::cref(entryKey);
         auto lambda = [this](const EntryKey &key_, auto &&fn_) -> ReturnCode {
-            return _withEntryImpl(_entries, key_,
-                                  std::forward<decltype(fn_)>(fn_));
+            return _withEntryImpl(
+                _entries, key_, std::forward<decltype(fn_)>(fn_), logComponent);
         };
         return this->_lockedConst("Directory::withEntryConst", ERR(Timeout),
                                   lambda, keyCref, std::forward<Fn>(fn));
@@ -224,7 +230,7 @@ class Directory : HasMutex<Directory<Key, Entry, N, Representation>> {
     ReturnCode withAllConst(Fn &&fn, Filter &&filter) const {
         auto lambda = [this](auto &&fn_, auto &&filter_) -> ReturnCode {
             return _withAllImpl(_entries, std::forward<decltype(fn_)>(fn_),
-                                filter_);
+                                filter_, logComponent);
         };
         auto fnRef = std::cref(fn);
         auto filterRef = std::cref(filter);
@@ -403,16 +409,16 @@ class Directory : HasMutex<Directory<Key, Entry, N, Representation>> {
     }
 
     [[nodiscard]] std::expected<EntryKeySnapshot, ReturnCode>
-    snapshotKeys() const {
+    snapshotKeys(MinMax minMax = {}) const {
         return snapshotKeys(
-            [](const EntryKey &, const Entry &) { return true; });
+            [](const EntryKey &, const Entry &) { return true; }, minMax);
     }
 
     template <typename Fn>
         requires(
             std::is_invocable_r_v<bool, Fn, const EntryKey &, const Entry &>)
     [[nodiscard]] std::expected<EntryKeySnapshot, ReturnCode>
-    snapshotKeys(Fn &&filter) const {
+    snapshotKeys(Fn &&filter, MinMax minMax = {}) const {
         EntryKeySnapshot out{};
         auto filterWrap = std::forward<Fn>(filter);
         auto lambda = [this, &out](auto &&filter_) -> ReturnCode {
@@ -424,6 +430,14 @@ class Directory : HasMutex<Directory<Key, Entry, N, Representation>> {
         FAIL_IF_ERR(ret, std::unexpected(ret),
                     "Failed to snapshot directory entry keys for %s",
                     _ownerName);
+        FAIL_IF(
+            out.count > minMax.max, std::unexpected(ERR(Overflow)),
+            "Snapshot of directory entry keys for %s exceeds maximum of %zu",
+            _ownerName, minMax.max);
+        FAIL_IF(out.count < minMax.min, std::unexpected(ERR(Underflow)),
+                "Snapshot of directory entry keys for %s has count %zu below "
+                "minimum of %zu",
+                _ownerName, out.count, minMax.min);
         return out;
     }
 
@@ -478,7 +492,7 @@ class Directory : HasMutex<Directory<Key, Entry, N, Representation>> {
 
     template <typename MapT, typename Fn>
     static ReturnCode _withEntryImpl(MapT &entries, const EntryKey &key,
-                                     Fn &&fn) {
+                                     Fn &&fn, LogComponent logComponent) {
         auto ret = entries.get(key);
         FAIL_IF_UNEXPECTED(item, ret, ret.error(),
                            "Directory entry " SV_FMT " not found for withEntry",
@@ -489,7 +503,8 @@ class Directory : HasMutex<Directory<Key, Entry, N, Representation>> {
     template <typename MapT, typename Fn, typename Filter>
         requires(std::is_invocable_r_v<bool, Filter, const EntryKey &,
                                        const Entry &>)
-    static ReturnCode _withAllImpl(MapT &entries, Fn &&fn, Filter &&filter) {
+    static ReturnCode _withAllImpl(MapT &entries, Fn &&fn, Filter &&filter,
+                                   LogComponent logComponent) {
         auto result = OK();
         EntryKeySnapshot snap{};
         _snapshotKeysImpl(snap, entries, std::forward<Filter>(filter));
@@ -529,16 +544,26 @@ class Directory : HasMutex<Directory<Key, Entry, N, Representation>> {
     SlottedMapType _entries;
     const char *_ownerName;
     DirectoryHooks<Entry> _hooks{};
+    LogComponent logComponent;
 };
 
 template <typename Key, typename Entry, size_t N,
           class Representation = DirectoryRepresentation<Key, Entry>>
 class GettableDirectory : public Directory<Key, Entry, N, Representation> {
-  public:
     using Base = Directory<Key, Entry, N, Representation>;
-    using typename Base::EntryKey;
 
-    using Base::Base;
+  public:
+    explicit GettableDirectory(const char *ownerName, LogComponent component)
+        : Base(ownerName, component) {}
+
+    using typename Base::EntryArray;
+    using typename Base::EntryKey;
+    using typename Base::EntryKeySnapshot;
+
+    struct EntrySnapshot {
+        EntryArray entries;
+        size_t count = 0;
+    };
 
     std::expected<Entry, ReturnCode> getCopy(const EntryKey &key) const
         requires(std::copy_constructible<Entry>)
@@ -558,6 +583,36 @@ class GettableDirectory : public Directory<Key, Entry, N, Representation> {
             return std::unexpected(ERR(NotFound));
         }
         return std::move(*out);
+    }
+
+    template <typename Filter>
+        requires(std::is_invocable_r_v<bool, Filter, const EntryKey &,
+                                       const Entry &>)
+    std::expected<EntrySnapshot, ReturnCode> snapshot(Filter filter) const {
+        EntrySnapshot out{};
+
+        const auto &self = *this;
+
+        auto ret = self.withAllConst(
+            [&out](const EntryKey & /*unused*/,
+                   const Entry &entry) -> ReturnCode {
+                if (out.count >= out.entries.size()) {
+                    return ERR(Overflow);
+                }
+                out.entries[out.count++] = entry;
+                return OK();
+            },
+            filter);
+
+        FAIL_IF_ERR_FWD_UNEXPECTED(
+            ret, "Failed to get snapshot of directory entries for %s",
+            this->ownerName());
+
+        return out;
+    }
+
+    std::expected<EntrySnapshot, ReturnCode> snapshot() const {
+        return snapshot([](const EntryKey &, const Entry &) { return true; });
     }
 };
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CommandBackend/Interfaces/CommandDesc.hh"
+#include "CommandBackend/detail/Types.hh" // IWYU pragma: keep
 #include "Macros/Facade.hh"
 #include "Types/Error.hh"
 #include <cstring>

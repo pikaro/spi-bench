@@ -27,7 +27,8 @@ class SubscriberDirectory : public SubscriberDirectoryImpl {
     using Base = SubscriberDirectoryImpl;
 
   public:
-    explicit SubscriberDirectory(const char *ownerName) : Base(ownerName) {}
+    explicit SubscriberDirectory(const char *ownerName)
+        : Base(ownerName, Totem::PubSubBackend::detail::logComponent) {}
 
     using EntryKey = typename Base::EntryKey;
 

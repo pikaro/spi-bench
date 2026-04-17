@@ -8,6 +8,7 @@
 #include "CommandBackend/detail/Dispatcher.hh"
 #include "CommandBackend/detail/Registrar.hh"
 #include "CommandBackend/detail/Store.hh"
+#include "CommandBackend/detail/Types.hh" // IWYU pragma: keep
 #include "Macros/Facade.hh"
 #include "StaticConfig/Command.hh"
 #include "TaskController/Interfaces/RegistryHooks.hh"
@@ -23,6 +24,8 @@ class Controller : public HasLifecycle<Controller, Config>,
     friend struct LifecycleContract<Controller, Config>;
 
     friend TaskController::TaskHooks;
+    friend class HasTaskController<Controller, Config>;
+    friend struct TaskControllerContract<Controller>;
     friend struct TaskController::TaskHooks::Contract<Controller>;
 
   public:
@@ -122,6 +125,9 @@ class Controller : public HasLifecycle<Controller, Config>,
     Store _store;
     Registrar _registrar;
     std::array<Transport, CommandConfig::maxTransports> _transports;
+
+    static const LogComponent logComponent =
+        Totem::CommandBackend::detail::logComponent;
 };
 
 inline constexpr LifecycleContract<Controller, Config> _controller_lifecycle;

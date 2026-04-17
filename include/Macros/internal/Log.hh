@@ -74,5 +74,5 @@ constexpr std::string_view logFunctionName(std::string_view function) {
 #define _log_e(format, ...)                                                    \
     INTERNAL_LOG_IMPL(LogLevel::Error, logComponent, format, ##__VA_ARGS__)
 
-#define _log_lv(level, format, ...)                                            \
-    esp_log_level(level, tag, format, ##__va_args__)
+#define _log(level, format, ...)                                               \
+    INTERNAL_LOG_IMPL(level, logComponent, format, ##__VA_ARGS__)

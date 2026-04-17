@@ -22,12 +22,18 @@ struct IngressByteArenaConfig {
         Spec::Limits::maxIngressRecordAgeMs;
 };
 
-class IngressBuffer
-    : public ByteArena<IngressBuffer, Header, IngressByteArenaConfig> {
+class IngressBuffer;
+
+using ByteArenaImpl = ByteArena<IngressBuffer, Header, IngressByteArenaConfig>;
+
+class IngressBuffer : public ByteArenaImpl {
     using Topic = typename Spec::Topic;
     using NodeId = typename Spec::NodeId;
 
   public:
+    IngressBuffer()
+        : ByteArenaImpl(Totem::PubSubBackend::detail::logComponent) {}
+
     static constexpr const char *name = "PubSub::IngressBuffer";
 
     std::expected<Envelope, ReturnCode>
@@ -100,6 +106,8 @@ class IngressBuffer
     }
 
     ReturnCode release(const Envelope &envelope) {
+        _log_d("%s: release " MAGIC_PUBSUB_SV_FMT, name,
+               MAGIC_PUBSUB_SV_ARG(envelope.header));
         return ByteArena::release(envelope.header);
     }
 

@@ -21,6 +21,7 @@
 #include "TaskController/Interfaces/RegistryHooks.hh"
 #include "TaskController/Interfaces/TaskHooks.hh"
 #include "Types/Error.hh"
+#include "Types/Logging.hh"
 #include "magic_enum/magic_enum.hpp"
 #include <atomic>
 #include <climits>
@@ -34,7 +35,9 @@ class Node : public HasLifecycle<Node, Config>,
     friend struct LifecycleContract<Node, Config>;
 
     friend TaskController::TaskHooks;
+    friend class HasTaskController<Node, Config>;
     friend struct TaskController::TaskHooks::Contract<Node>;
+    friend struct TaskControllerContract<Node>;
 
     using Transport = typename Spec::Transport;
     using NodeId = typename Spec::NodeId;
@@ -178,9 +181,8 @@ class Node : public HasLifecycle<Node, Config>,
     }
 
     ReturnCode _onTaskStep() {
-        FAIL_IF_UNEXPECTED_FWD(
-            transporters, _transporters.snapshot(),
-            "Failed to snapshot PubSub transporters");
+        FAIL_IF_UNEXPECTED_FWD(transporters, _transporters.snapshot(),
+                               "Failed to snapshot PubSub transporters");
         FAIL_IF_ERR_FWD(
             [&transporters]() {
                 auto ret = OK();
@@ -231,6 +233,9 @@ class Node : public HasLifecycle<Node, Config>,
     }};
 
     IngressBuffer _ingress;
+
+    static const LogComponent logComponent =
+        Totem::PubSubBackend::detail::logComponent;
 };
 
 inline constexpr LifecycleContract<Node, Config> _node_lifecycle_contract;

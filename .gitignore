@@ -5,3 +5,11 @@ sdkconfig.*
 !sdkconfig.defaults
 !sdkconfig.*.defaults
 *.sarif
+*.sarif.json
+backtrace
+trace
+log
+*.log
+.venv
+*.pyc
+__pycache__/

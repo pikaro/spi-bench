@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CommandBackend/Interfaces/CommandDesc.hh"
+#include "CommandBackend/detail/Types.hh"
 #include "Generic/Directory.hh"
 #include "StaticConfig/Command.hh"
 #include "Types/Collection.hh"
@@ -17,7 +18,9 @@ class Directory : public DirectoryImpl {
   public:
     using EntryKey = typename DirectoryImpl::EntryKey;
 
-    explicit Directory() : DirectoryImpl("Command::Directory") {
+    explicit Directory()
+        : DirectoryImpl("Command::Directory",
+                        Totem::CommandBackend::detail::logComponent) {
         _setHooks({
             .self = this,
         });

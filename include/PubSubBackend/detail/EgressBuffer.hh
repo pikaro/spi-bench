@@ -20,6 +20,10 @@ class EgressBuffer : public ByteArena<EgressBuffer<Config>, Header, Config> {
     using NodeId = typename Spec::NodeId;
 
   public:
+    EgressBuffer()
+        : ByteArena<EgressBuffer<Config>, Header, Config>(
+              Totem::PubSubBackend::detail::logComponent) {}
+
     static constexpr const char *name = "PubSub::EgressBuffer";
 
     ReturnCode store(const Header &header, std::span<const std::byte> frame) {

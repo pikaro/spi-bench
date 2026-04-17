@@ -11,7 +11,8 @@ template <class Derived, typename ConfT = NoConfig> class HasTaskController {
   protected:
     explicit HasTaskController(
         Totem::TaskController::RegistryHooks registryHooks)
-        : _taskController(Derived::name, registryHooks) {}
+        : _taskController(Derived::name, registryHooks, Derived::logComponent) {
+    }
 
     ReturnCode _beginTaskController(Totem::TaskController::Config taskConfig) {
         return _taskController.begin(taskConfig);
@@ -23,4 +24,7 @@ template <class Derived, typename ConfT = NoConfig> class HasTaskController {
 
 template <class T> struct TaskControllerContract {
     static_assert(IsNamedEntity<T>, "Type must be a named entity");
+    static_assert(
+        requires { T::logComponent; },
+        "Type must have a static logComponent member");
 };

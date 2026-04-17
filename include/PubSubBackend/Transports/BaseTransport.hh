@@ -18,6 +18,8 @@
 
 namespace Totem::PubSubBackend::Transports {
 
+constexpr auto logComponent = PubSubBackend::detail::logComponent;
+
 using SendAckCallback = ReturnCode (*)(void *owner,
                                        detail::TransportId transportId,
                                        const Envelope &envelope);

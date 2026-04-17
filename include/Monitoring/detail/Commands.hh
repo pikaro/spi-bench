@@ -108,7 +108,7 @@ template <typename Owner> struct Commands {
         });
     }
 
-    CommandDesc monitorCmd = {
+    static inline CommandDesc monitorCmd = {
         .needsContext = true,
         .name = "monitor",
         .description = "Output monitoring data and stats",
@@ -117,7 +117,7 @@ template <typename Owner> struct Commands {
         .subcommands = {},
     };
 
-    std::span<CommandDesc *> commands() {
+    static constexpr std::span<CommandDesc *> commands() {
         static auto commands = std::to_array<CommandDesc *>({
             &monitorCmd,
         });

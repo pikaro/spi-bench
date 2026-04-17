@@ -7,7 +7,7 @@
 #include <cstring>
 
 inline constexpr size_t logMaxLength = 256;
-inline constexpr size_t logTagLength = 4;
+inline constexpr size_t logTagLength = 3;
 static constexpr size_t logLevelLength = 3;
 
 enum class LogLevel : uint8_t {
@@ -36,16 +36,33 @@ constexpr const char *log_level_to_string(LogLevel level) {
 }
 
 enum class LogComponent : uint8_t {
-    System = 0,
+    Unknown = 0,
+    System,
+    Monitoring,
+    Metrics,
     PubSub,
+    Command,
+    TaskControllerRegistry,
+    Output,
 };
 
 constexpr const char *log_component_to_string(LogComponent component) {
     switch (component) {
     case LogComponent::System:
         return "sys";
+    case LogComponent::Monitoring:
+        return "mon";
+    case LogComponent::Metrics:
+        return "met";
     case LogComponent::PubSub:
         return "psb";
+    case LogComponent::Command:
+        return "cmd";
+    case LogComponent::TaskControllerRegistry:
+        return "tcr";
+    case LogComponent::Output:
+        return "out";
+    case LogComponent::Unknown:
     default:
         return "???";
     }
@@ -54,9 +71,23 @@ constexpr const char *log_component_to_string(LogComponent component) {
 constexpr Color log_component_to_color(LogComponent component) {
     switch (component) {
     case LogComponent::System:
+    case LogComponent::Output:
         return Color::Blue;
+
+    case LogComponent::Monitoring:
+    case LogComponent::Metrics:
+        return Color::Cyan;
+
     case LogComponent::PubSub:
         return Color::Green;
+
+    case LogComponent::Command:
+        return Color::Yellow;
+
+    case LogComponent::TaskControllerRegistry:
+        return Color::Magenta;
+
+    case LogComponent::Unknown:
     default:
         return Color::White;
     }

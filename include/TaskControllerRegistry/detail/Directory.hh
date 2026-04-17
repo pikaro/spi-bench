@@ -7,6 +7,7 @@
 #include "TaskController/Interfaces/TaskRuntimeSnapshot.hh"
 #include "TaskControllerRegistry/Interfaces/TaskSourceFeatures.hh"
 #include "TaskControllerRegistry/Interfaces/TaskSourceHooks.hh"
+#include "TaskControllerRegistry/detail/Types.hh" // IWYU pragma: keep
 #include "Types/Error.hh"
 #include <cstdint>
 #include <cstring>
@@ -30,7 +31,9 @@ using DirectoryImpl =
 
 class Directory : public DirectoryImpl {
   public:
-    explicit Directory() : DirectoryImpl("TaskControllerRegistry") {
+    explicit Directory()
+        : DirectoryImpl("TaskControllerRegistry",
+                        Totem::TaskControllerRegistry::detail::logComponent) {
         _setHooks({
             .self = this,
             .beforeRemoveHook = beforeRemove,
@@ -57,15 +60,19 @@ class Directory : public DirectoryImpl {
     static ReturnCode beforeRemove(void *directory, std::string_view name,
                                    const SourceEntry &entry) {
         auto *self = static_cast<Directory *>(directory);
+        return self->beforeRemove(name, entry);
+    }
+
+    ReturnCode beforeRemove(std::string_view name, const SourceEntry &entry) {
         auto emptyResult = entry.hooks.empty();
         FAIL_IF(!emptyResult, emptyResult.error(),
                 "Failed to determine if task source %s->" SV_FMT
                 " can be removed",
-                self->ownerName(), SV_ARG(name));
+                ownerName(), SV_ARG(name));
         if (!emptyResult.value()) {
             _log_w("Attempted to remove task source %s->" SV_FMT
                    " that still has registered tasks",
-                   self->ownerName(), SV_ARG(name));
+                   ownerName(), SV_ARG(name));
             return ERR(InvalidState);
         }
         return OK();

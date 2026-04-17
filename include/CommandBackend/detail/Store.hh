@@ -2,6 +2,7 @@
 
 #include "CommandBackend/Interfaces/CommandDesc.hh"
 #include "CommandBackend/detail/Directory.hh"
+#include "CommandBackend/detail/Types.hh" // IWYU pragma: keep
 #include "Types/Error.hh"
 #include <expected>
 

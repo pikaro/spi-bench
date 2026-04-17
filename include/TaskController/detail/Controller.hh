@@ -12,6 +12,7 @@
 #include "TaskControllerRegistry/Interfaces/TaskSourceFeatures.hh"
 #include "TaskControllerRegistry/Interfaces/TaskSourceHooks.hh"
 #include "Types/Error.hh"
+#include "Types/Logging.hh"
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -34,8 +35,9 @@ class Controller : public HasLifecycle<Controller, Config> {
 
     static constexpr const char *name = "TaskController::Controller";
 
-    Controller(const char *ownerName, RegistryHooks registryHooks)
-        : _directory(ownerName), _registryHooks(registryHooks),
+    Controller(const char *ownerName, RegistryHooks registryHooks,
+               LogComponent component)
+        : _directory(ownerName, component), _registryHooks(registryHooks),
           _ownerName(ownerName) {
         ABORT_IF_NOT(_registryHooks.validate(),
                      "Invalid registry hooks for %s of %s", name, _ownerName);

@@ -56,20 +56,32 @@ class Registry : public HasLifecycle<Registry> {
     }
 
     ReturnCode reap() {
-        return _directory.withAll([](const SourceKey &,
-                                     SourceEntry &entry) -> ReturnCode {
+        size_t reapedCount = 0;
+
+        auto ret = _directory.withAll([&reapedCount](
+                                          const SourceKey &,
+                                          SourceEntry &entry) -> ReturnCode {
             if (entry.hooks.reapHook == nullptr) {
                 return OK();
             }
             FAIL_IF_UNEXPECTED_FWD(count, entry.hooks.reap(),
                                    "Failed to reap tasks for source " SV_FMT,
                                    SV_ARG(entry.displayName));
-            if (count > 0) {
-                _log_i("Reaped %u tasks for source " SV_FMT, count,
+
+            if (reapedCount > 0) {
+                reapedCount += count;
+                _log_w("Reaped %u tasks for source " SV_FMT, reapedCount,
                        SV_ARG(entry.displayName));
             }
+
             return OK();
         });
+
+        FAIL_IF_ERR_FWD(ret, "Failed to reap tasks for registry");
+        FAIL_IF_ERR_FWD(
+            _metrics.addReaped(reapedCount),
+            "Failed to update metrics for reaping tasks in registry");
+        return OK();
     }
 
     template <typename Fn>

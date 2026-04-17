@@ -5,6 +5,7 @@
 #include "Types/Error.hh"
 #include "Types/Logging.hh"
 #include <cstdint>
+#include <string_view>
 
 enum class MetricType : uint8_t { Counter, Gauge };
 
@@ -22,7 +23,7 @@ enum class MetricUnit : uint8_t {
     Millivolts,
 };
 
-inline const char *metricUnitToString(MetricUnit unit) {
+constexpr std::string_view metric_unit_to_string(MetricUnit unit) {
     switch (unit) {
     case MetricUnit::None:
         return "";
@@ -77,6 +78,10 @@ struct MetricDesc {
     bool gaugeIsMin = false;
     bool gaugeIsMax = false;
 
+    [[nodiscard]] std::string_view unitString() const {
+        return metric_unit_to_string(unit);
+    }
+
     ReturnCode validate() const {
         if (name == nullptr || name[0] == '\0') {
             return ERR(InvalidArgument);
@@ -87,5 +92,11 @@ struct MetricDesc {
             }
         }
         return OK();
+    }
+
+    static constexpr MetricDesc withGroup(MetricDesc desc,
+                                          MetricGroupKey group) {
+        desc.group = group;
+        return desc;
     }
 };

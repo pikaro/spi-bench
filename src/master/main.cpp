@@ -11,10 +11,12 @@
 #include "PubSubBackend/Transports/LocalBufferedTransport.hh"
 #include "PubSubBackend/Transports/LocalTransport.hh"
 #include "Services/Commands.hh"
+#include "Services/Metrics.hh"
 #include "Services/PubSub.hh"
 #include "Support/CoreCommands.hh"
 #include "TaskControllerRegistry/Facade.hh"
 #include "TestMessage.hh"
+#include "Types/Error.hh"
 #include "master/PubSubTest.hh"
 #include <cstdint>
 #include <utility>
@@ -78,6 +80,8 @@ void setup() {
     ABORT_IF_ERR(commandController.addTransport(uartTransport),
                  "Failed to add UART transport to command controller");
     CommandService::setBackend(commandController);
+
+    ABORT_IF_ERR_BEGIN(Metrics::backend().begin());
 
     ABORT_IF_ERR(register_core_commands(),
                  "Failed to register core commands to command controller");
@@ -204,7 +208,13 @@ void app_main() {
         };
         auto envelopeResult =
             Totem::PubSubBackend::Envelope::make<Message>(envelopeDef);
-        auto result = pubSubNode1.publish(std::move(envelopeResult).value());
+
+        ReturnCode result;
+        if (lastWakeTime % 2 == 0) {
+            result = pubSubNode1.publish(std::move(envelopeResult).value());
+        } else {
+            result = pubSubNode2.publish(std::move(envelopeResult).value());
+        }
 
         if (!result.ok()) {
             _log_e("Failed to publish message: " ERR_FMT, ERR_ARG(result));

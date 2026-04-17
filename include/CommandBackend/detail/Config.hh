@@ -7,7 +7,7 @@ namespace Totem::CommandBackend {
 struct Config {
     Totem::TaskController::Config task{
         .name = "Command",
-        .stackSize = 8192,
+        .stackSize = 16000,
         .intervalMs = 10,
     };
 

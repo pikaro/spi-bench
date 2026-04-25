@@ -1,12 +1,12 @@
 #pragma once
 
 #include "Macros/Facade.hpp"
-#include "MetricsBackend/Interfaces/Sink.hpp"
+#include "MetricsBackend/Interfaces/IFrameSink.hpp"
+#include "MetricsBackend/Interfaces/Types.hpp"
 #include "MetricsBackend/detail/MetricDirectory.hpp"
 #include "MetricsBackend/detail/MetricGroupDirectory.hpp"
-#include "MetricsBackend/detail/Types.hpp"
+#include "MetricsBackend/detail/Types.hpp" // IWYU pragma: keep
 #include "Types/Error.hpp"
-#include "Types/Metrics.hpp"
 #include <cstring>
 #include <expected>
 
@@ -17,11 +17,9 @@ class Store {
     Store() : _metricDirectory(_metricGroupDirectory) { _enableRegistration(); }
     ~Store() { _disableRegistration(); }
 
-    using MetricGroupKey = MetricGroupDirectory::EntryKey;
     using MetricGroupKeySnapshot = MetricGroupDirectory::EntryKeySnapshot;
     using MetricGroupSnapshot = MetricGroupDirectory::EntrySnapshot;
 
-    using MetricKey = MetricDirectory::EntryKey;
     using MetricKeySnapshot = MetricDirectory::EntrySnapshot;
     using MetricSnapshot = MetricDirectory::EntrySnapshot;
 
@@ -69,7 +67,7 @@ class Store {
                 return OK();
             },
             [groupKey](const MetricKey &, const MetricSlot &metricSlot) {
-                return metricSlot.group == groupKey;
+                return metricSlot.groupKey == groupKey;
             });
         FAIL_IF_ERR_FWD_UNEXPECTED(
             ret, "Failed to get metrics for group key %u", groupKey);

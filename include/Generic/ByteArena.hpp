@@ -3,13 +3,14 @@
 #include "Base/HasMutex.hpp"
 #include "Macros/Facade.hpp"
 #include "Types/Error.hpp"
-#include "Types/Logging.hpp"
+#include "LoggingBackend/Interfaces/Types.hpp"
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <expected>
 #include <optional>
 #include <span>
 
@@ -29,6 +30,8 @@ class ByteArena : public HasMutex<Derived> {
     };
 
   public:
+    using StoreResult = std::expected<bool, ReturnCode>;
+
     explicit ByteArena(LogComponent logComponent)
         : logComponent(logComponent),
           _spans{Span{
@@ -59,31 +62,71 @@ class ByteArena : public HasMutex<Derived> {
         return OK();
     }
 
-    ReturnCode store(const T &stored, std::span<const std::byte> data) {
-        FAIL_IF(data.size() > Config::bufferSize, ERR(InvalidArgument),
+    StoreResult store(const T &stored, std::span<const std::byte> data) {
+        FAIL_IF(data.size() > Config::bufferSize,
+                std::unexpected(ERR(InvalidArgument)),
                 "Payload size exceeds maximum allowed size");
-        auto lambda = [this, &stored, &data]() -> ReturnCode {
+        bool wasStored = false;
+        auto lambda = [this, &stored, &data, &wasStored]() -> ReturnCode {
             FAIL_IF(_hasRecord(stored), ERR(AlreadyExists),
                     "Record already exists for stored item");
-            size_t spanIdx;
-            FAIL_IF_NOT_OPT(spanIdx, _findFreeSpan(data.size()), ERR(Overflow),
-                            "No free span available to store new record");
-            auto &span = _spans[spanIdx];
-            size_t slotIdx;
-            FAIL_IF_NOT_OPT(slotIdx, _findFreeSlot(), ERR(Overflow),
-                            "No free slot available to store new record");
-            auto &slot = _slots[slotIdx];
-            FAIL_IF_ERR_FWD(_storeRecord(spanIdx, slot, span, stored, data),
+            while (true) {
+                auto spanIdx = _findFreeSpan(data.size());
+                auto slotIdx = _findFreeSlot();
+                if (spanIdx.has_value() && slotIdx.has_value()) {
+                    auto &span = _spans[*spanIdx];
+                    auto &slot = _slots[*slotIdx];
+                    auto storeRet =
+                        _storeRecord(*spanIdx, slot, span, stored, data);
+                    if (storeRet.ok()) {
+                        slot.timestampMs = ::platform::get_time();
+                        _log_d("%s: stored %zu bytes at offset %zu",
+                               Derived::name, data.size(), slot.offset);
+                        wasStored = true;
+                        return OK();
+                    }
+                    FAIL_IF(storeRet != ERR(Overflow), storeRet,
                             "Failed to store record for stored item");
-            slot.timestampMs = ::platform::get_time();
-            _log_d("%s: stored %zu bytes at offset %zu", Derived::name,
-                   data.size(), slot.offset);
-            return OK();
+                }
+
+                if (!_isCritical(stored)) {
+                    _log_w("%s: dropping noncritical record under arena "
+                           "pressure",
+                           Derived::name);
+                    FAIL_IF_ERR_FWD(_onDropNoncritical(stored),
+                                    "Failed to record noncritical arena drop");
+                    wasStored = false;
+                    return OK();
+                }
+
+                auto evictIdx = _findOldestDroppableSlot();
+                if (!evictIdx.has_value()) {
+                    _log_w("%s: rejecting critical record because no "
+                           "noncritical arena record can be evicted",
+                           Derived::name);
+                    FAIL_IF_ERR_FWD(_onRejectCritical(stored),
+                                    "Failed to record critical arena "
+                                    "rejection");
+                    FAIL(ERR(Overflow), "No space available for critical "
+                                        "record");
+                }
+
+                const auto evicted = _slots[*evictIdx].stored;
+                _log_w("%s: evicting oldest noncritical record at offset %zu "
+                       "to admit critical record",
+                       Derived::name, _slots[*evictIdx].offset);
+                FAIL_IF_ERR_FWD(_releaseSlot(_slots[*evictIdx]),
+                                "Failed to evict noncritical record for "
+                                "critical store");
+                FAIL_IF_ERR_FWD(_onEvictNoncritical(evicted),
+                                "Failed to record noncritical arena "
+                                "eviction");
+            }
         };
-        FAIL_IF_ERR_FWD(
+        FAIL_IF_ERR_FWD_UNEXPECTED(
             this->_locked("ByteArena::store", ERR(OperationFailed), lambda),
             "Failed to store record for stored item");
-        return OK();
+        return wasStored;
     }
 
     static ReturnCode getRaw(void *arena, const T &stored, size_t offset,
@@ -133,6 +176,29 @@ class ByteArena : public HasMutex<Derived> {
         return OK();
     }
 
+    /**
+     * Check whether a record for the given key is currently retained.
+     *
+     * Unlike getRaw(), this is a pure existence query and therefore does not
+     * log a NotFound error when the record has already been released.
+     */
+    [[nodiscard]] bool contains(const T &stored) const {
+        bool found = false;
+        auto lambda = [this, &stored, &found]() -> ReturnCode {
+            found = _hasRecord(stored);
+            return OK();
+        };
+        auto ret =
+            this->_lockedConst("ByteArena::contains", ERR(OperationFailed),
+                               lambda);
+        if (!ret.ok()) {
+            _log_e("Failed to check ByteArena record existence: " ERR_FMT,
+                   ERR_ARG(ret));
+            return false;
+        }
+        return found;
+    }
+
   protected:
     LogComponent logComponent;
 
@@ -173,6 +239,49 @@ class ByteArena : public HasMutex<Derived> {
         }
 
         return idx;
+    }
+
+    [[nodiscard]] std::optional<size_t> _findOldestDroppableSlot() const {
+        std::optional<size_t> idx;
+        for (size_t i = 0; i < _slots.size(); ++i) {
+            const auto &slot = _slots[i];
+            if (!slot.occupied || _isCritical(slot.stored)) {
+                continue;
+            }
+            if (!idx.has_value() ||
+                slot.timestampMs < _slots[*idx].timestampMs) {
+                idx.emplace(i);
+            }
+        }
+        return idx;
+    }
+
+    [[nodiscard]] static bool _isCritical(const T &stored) {
+        if constexpr (requires { Config::isCritical(stored); }) {
+            return Config::isCritical(stored);
+        }
+        return true;
+    }
+
+    static ReturnCode _onEvictNoncritical(const T &stored) {
+        if constexpr (requires { Config::onEvictNoncritical(stored); }) {
+            return Config::onEvictNoncritical(stored);
+        }
+        return OK();
+    }
+
+    static ReturnCode _onDropNoncritical(const T &stored) {
+        if constexpr (requires { Config::onDropNoncritical(stored); }) {
+            return Config::onDropNoncritical(stored);
+        }
+        return OK();
+    }
+
+    static ReturnCode _onRejectCritical(const T &stored) {
+        if constexpr (requires { Config::onRejectCritical(stored); }) {
+            return Config::onRejectCritical(stored);
+        }
+        return OK();
     }
 
     ReturnCode _releaseSlot(Slot &slot) {

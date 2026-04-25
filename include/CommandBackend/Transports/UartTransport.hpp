@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CommandBackend/Interfaces/CommandDesc.hpp"
-#include "CommandBackend/Interfaces/Transport.hpp"
+#include "CommandBackend/Interfaces/ITransport.hpp"
 #include "Macros/Facade.hpp"
 #include "Platform/Uart.hpp"
 #include "StaticConfig/Command.hpp"
@@ -13,18 +13,17 @@
 #include <cstdint>
 #include <cstring>
 #include <expected>
+#include <string_view>
 
 namespace Totem::CommandBackend::detail::Transports {
 
-class UartTransport {
+class UartTransport : public ITransport {
   public:
     static constexpr const char *name = "Transport::Serial";
 
-    std::expected<Transport, ReturnCode> transport() {
-        return Transport::bind(*this);
-    }
+    [[nodiscard]] std::string_view displayName() const override { return name; }
 
-    std::expected<CommandDesc::Tokens, ReturnCode> poll() {
+    std::expected<CommandDesc::Tokens, ReturnCode> poll() override {
         _tokenCount = 0;
 
         auto readResult = platform::Uart::read(_rxChunk);

@@ -2,7 +2,7 @@
 
 #include "CommandBackend/Interfaces/CommandDesc.hpp"
 #include "Macros/Facade.hpp"
-#include "Monitoring/Interfaces/Sink.hpp"
+#include "Monitoring/Interfaces/IFrameSink.hpp"
 #include "Monitoring/detail/Types.hpp"
 #include "StaticConfig/TaskController.hpp"
 #include "StaticConfig/TaskRegistry.hpp"
@@ -99,13 +99,13 @@ template <typename Owner> struct Commands {
     static ReturnCode handle_monitoring(CommandDesc::ParsedArgs /*unused*/,
                                         void *ctx) {
         auto *monitoring = static_cast<Owner *>(ctx);
-        return monitoring->snapshot(Sink{
-            .self = monitoring,
-            .consumeHook =
-                [](void *, const MonitoringFrame &frame) {
-                    return dump_monitoring_snaphot(frame);
-                },
-        });
+        struct DumpSink final : IFrameSink {
+            ReturnCode consume(const MonitoringFrame &frame) override {
+                return dump_monitoring_snaphot(frame);
+            }
+        } sink;
+
+        return monitoring->snapshot(sink);
     }
 
     static inline CommandDesc monitorCmd = {

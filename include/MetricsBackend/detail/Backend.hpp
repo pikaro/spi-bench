@@ -3,18 +3,22 @@
 #include "Base/HasCommands.hpp"
 #include "Base/HasLifecycle.hpp"
 #include "Macros/Facade.hpp"
-#include "MetricsBackend/Interfaces/Sink.hpp"
+#include "MetricsBackend/Interfaces/IFrameSink.hpp"
+#include "MetricsBackend/Interfaces/Types.hpp"
 #include "MetricsBackend/detail/Commands.hpp"
 #include "MetricsBackend/detail/Recorder.hpp"
 #include "MetricsBackend/detail/Registrar.hpp"
 #include "MetricsBackend/detail/Store.hpp"
+#include "MetricsBackend/detail/Types.hpp" // IWYU pragma: keep
+#include "Services/Metrics.hpp"
 #include "Types/Error.hpp"
 #include <cstddef>
 
 namespace Totem::MetricsBackend::detail {
 
 class Backend : public HasLifecycle<Backend>,
-                public HasCommands<Backend, Commands<Backend>> {
+                public HasCommands<Backend, Commands<Backend>>,
+                public IMetrics {
     friend class HasLifecycle<Backend>;
     friend struct LifecycleContract<Backend>;
 
@@ -26,7 +30,8 @@ class Backend : public HasLifecycle<Backend>,
     [[nodiscard]] Registrar &registrar() { return _registrar; }
     [[nodiscard]] Recorder &recorder() { return _recorder; }
 
-    ReturnCode snapshot(const Sink &sink, const char *metricGroupName) {
+    ReturnCode snapshot(IFrameSink &sink,
+                        const char *metricGroupName) override {
         if (metricGroupName == nullptr) {
             FAIL(ERR(InvalidArgument), "Metric group name cannot be null");
         }
@@ -36,7 +41,7 @@ class Backend : public HasLifecycle<Backend>,
         return _snapshot(sink, key);
     }
 
-    ReturnCode snapshot(const Sink &sink) {
+    ReturnCode snapshot(IFrameSink &sink) {
         FAIL_IF_UNEXPECTED_FWD(snap, _store.getAllGroupKeys(),
                                "Failed to get metric group keys from store");
         auto ret = OK();
@@ -51,7 +56,7 @@ class Backend : public HasLifecycle<Backend>,
     ReturnCode _onBegin() { return _registerCommands(); }
     ReturnCode _onEnd() { return _deregisterCommands(); }
 
-    ReturnCode _snapshot(const Sink &sink, Store::MetricGroupKey key) {
+    ReturnCode _snapshot(IFrameSink &sink, MetricGroupKey key) {
         FAIL_IF_UNEXPECTED_FWD(group, _store.getMetricGroup(key),
                                "Failed to get metric group");
 

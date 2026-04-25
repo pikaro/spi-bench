@@ -2,6 +2,7 @@
 
 #include "Concepts/Performance.hpp"
 #include "Macros/Facade.hpp"
+#include "Metrics.hpp"
 #include "Mutex/detail/MutexGuard.hpp"
 #include "PlatformSelect.hpp"
 #include <cstddef>
@@ -139,9 +140,9 @@ template <class F, class... Args>
 typename MutexExecSpec<F, Args...>::R
 execute_mutex_exec_spec(MutexExecSpec<F, Args...> &&req) {
     FAIL_IF_NULL(req.mutex, req.failValue, "MutexRequest %s", req.name);
-    MutexGuard guard(req.mutex, ::platform::ms_to_ticks(
-                                    req.timeoutMs.value_or(MS_MAX_DELAY)),
-                     false);
+    MutexGuard guard(
+        req.mutex,
+        ::platform::ms_to_ticks(req.timeoutMs.value_or(MS_MAX_DELAY)), false);
     if (!guard.locked()) {
         _log_e("Failed to acquire mutex %s from task %s (holder=%s)%s",
                req.name, Platform::current_task_name(),
@@ -149,6 +150,9 @@ execute_mutex_exec_spec(MutexExecSpec<F, Args...> &&req) {
                Platform::held_by_current_task(req.mutex)
                    ? " [recursive acquisition]"
                    : "");
+        if (!metrics().timeout()) {
+            _log_w("Failed to record timeout metric for mutex %s", req.name);
+        }
         return std::move(req.failValue);
     }
     return std::apply(std::move(req.fun), std::move(req.args));
@@ -158,9 +162,9 @@ template <class F, class... Args>
 typename MutexExecSpec<F, Args...>::R
 execute_mutex_exec_spec_const(MutexExecSpecConst<F, Args...> &&req) {
     FAIL_IF_NULL(req.mutex, req.failValue, "MutexRequest %s", req.name);
-    MutexGuard guard(req.mutex, ::platform::ms_to_ticks(
-                                    req.timeoutMs.value_or(MS_MAX_DELAY)),
-                     false);
+    MutexGuard guard(
+        req.mutex,
+        ::platform::ms_to_ticks(req.timeoutMs.value_or(MS_MAX_DELAY)), false);
     if (!guard.locked()) {
         _log_e("Failed to acquire mutex %s from task %s (holder=%s)%s",
                req.name, Platform::current_task_name(),
@@ -168,6 +172,9 @@ execute_mutex_exec_spec_const(MutexExecSpecConst<F, Args...> &&req) {
                Platform::held_by_current_task(req.mutex)
                    ? " [recursive acquisition]"
                    : "");
+        if (!metrics().timeout()) {
+            _log_w("Failed to record timeout metric for mutex %s", req.name);
+        }
         return std::move(req.failValue);
     }
     return std::apply(std::move(req.fun), std::move(req.args));

@@ -5,8 +5,9 @@
 #include "StaticConfig/TaskRegistry.hpp"
 #include "TaskController/Facade.hpp"
 #include "TaskController/Interfaces/TaskRuntimeSnapshot.hpp"
+#include "TaskControllerRegistry/Interfaces/ITaskSource.hpp"
 #include "TaskControllerRegistry/Interfaces/TaskSourceFeatures.hpp"
-#include "TaskControllerRegistry/Interfaces/TaskSourceHooks.hpp"
+#include "TaskControllerRegistry/Interfaces/Types.hpp"
 #include "TaskControllerRegistry/detail/Types.hpp" // IWYU pragma: keep
 #include "Types/Error.hpp"
 #include <cstdint>
@@ -17,39 +18,30 @@
 
 namespace Totem::TaskControllerRegistry::detail {
 
-using SourceKey = uintptr_t;
-
 struct SourceEntry {
-    TaskSourceHooks hooks{};
+    ITaskSource *source;
     std::string_view displayName;
     TaskSourceKind kind = TaskSourceKind::Unknown;
     uint32_t capabilities = TaskSourceCapability::None;
 };
 
-using DirectoryImpl =
-    Directory<SourceKey, SourceEntry, TaskRegistryConfig::sourceCountMax>;
+class Directory;
+
+using DirectoryImpl = BaseDirectory<Directory, SourceKey, SourceEntry,
+                                    TaskRegistryConfig::sourceCountMax>;
 
 class Directory : public DirectoryImpl {
   public:
     explicit Directory()
         : DirectoryImpl("TaskControllerRegistry",
-                        Totem::TaskControllerRegistry::detail::logComponent) {
-        _setHooks({
-            .self = this,
-            .beforeRemoveHook = beforeRemove,
-        });
-    }
+                        Totem::TaskControllerRegistry::detail::logComponent) {}
 
-    using EntryKey = typename DirectoryImpl::EntryKey;
-
-    std::expected<EntryKey, ReturnCode>
-    add(EntryKey sourceKey, TaskSourceHooks hooks, TaskSourceInfo info) {
-        FAIL_IF(!hooks.validate(), std::unexpected(ERR(InvalidArgument)),
-                "%s: Task source hooks are not fully initialized", ownerName());
+    std::expected<SourceKey, ReturnCode>
+    add(SourceKey sourceKey, ITaskSource &source, TaskSourceInfo info) {
         FAIL_IF(info.displayName.empty(), std::unexpected(ERR(InvalidArgument)),
                 "%s: Task source display name cannot be empty", ownerName());
         auto entry = SourceEntry{
-            .hooks = hooks,
+            .source = &source,
             .displayName = info.displayName,
             .kind = info.kind,
             .capabilities = info.capabilities,
@@ -64,7 +56,7 @@ class Directory : public DirectoryImpl {
     }
 
     ReturnCode beforeRemove(std::string_view name, const SourceEntry &entry) {
-        auto emptyResult = entry.hooks.empty();
+        auto emptyResult = entry.source->empty();
         FAIL_IF(!emptyResult, emptyResult.error(),
                 "Failed to determine if task source %s->" SV_FMT
                 " can be removed",
@@ -83,29 +75,33 @@ class Directory : public DirectoryImpl {
     ReturnCode forEachTaskSnapshot(Fn &&fun) {
         using Handler = std::remove_reference_t<Fn>;
         return withAllConst(
-            [&](const EntryKey &, const SourceEntry &entry) -> ReturnCode {
-                auto downstreamSink = TaskSnapshotSink{
-                    .self = std::addressof(fun),
-                    .consumeHook =
-                        [](void *handlerPtr,
-                           const TaskController::TaskRuntimeSnapshot &snapshot)
-                        -> ReturnCode {
-                        auto &handler = *static_cast<Handler *>(handlerPtr);
+            [&](const SourceKey &, const SourceEntry &entry) -> ReturnCode {
+                struct DownstreamSink final : ISnapshotSink {
+                    explicit DownstreamSink(Handler &handler)
+                        : handler(handler) {}
+
+                    ReturnCode consume(
+                        const TaskController::TaskRuntimeSnapshot &snapshot)
+                        override {
                         return handler(snapshot);
-                    },
+                    }
+
+                    Handler &handler;
                 };
+
+                DownstreamSink downstreamSink{fun};
                 struct DecoratedSinkCtx {
                     const SourceEntry *entry;
-                    TaskSnapshotSink downstream;
-                } ctx{.entry = &entry, .downstream = downstreamSink};
+                    ISnapshotSink *downstream;
+                } ctx{.entry = &entry, .downstream = &downstreamSink};
 
-                auto decorateResult = entry.hooks.forEachTaskSnapshot({
-                    .self = &ctx,
-                    .consumeHook = [](void *decoratedSinkCtx,
-                                      const TaskController::TaskRuntimeSnapshot
-                                          &snapshot) -> ReturnCode {
-                        auto &sinkCtx =
-                            *static_cast<DecoratedSinkCtx *>(decoratedSinkCtx);
+                struct DecoratedSink final : ISnapshotSink {
+                    explicit DecoratedSink(DecoratedSinkCtx &sinkCtx)
+                        : sinkCtx(sinkCtx) {}
+
+                    ReturnCode consume(
+                        const TaskController::TaskRuntimeSnapshot &snapshot)
+                        override {
                         auto decorated = snapshot;
                         if (decorated.sourceName.empty()) {
                             decorated.sourceName = sinkCtx.entry->displayName;
@@ -122,9 +118,15 @@ class Directory : public DirectoryImpl {
                                 TaskSourceKind::ManagedController) {
                             decorated.isManaged = true;
                         }
-                        return sinkCtx.downstream.consume(decorated);
-                    },
-                });
+                        return sinkCtx.downstream->consume(decorated);
+                    }
+
+                    DecoratedSinkCtx &sinkCtx;
+                };
+
+                DecoratedSink decoratedSink{ctx};
+                auto decorateResult =
+                    entry.source->forEachTaskSnapshot(decoratedSink);
                 FAIL_IF_ERR_FWD(
                     decorateResult,
                     "Failed to enumerate task snapshots for source " SV_FMT,

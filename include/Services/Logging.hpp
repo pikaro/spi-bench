@@ -1,145 +1,73 @@
 #pragma once
 
-#include "Concepts/Base.hpp"
+#include "LoggingBackend/Interfaces/IHasLogLevel.hpp"
+#include "LoggingBackend/Interfaces/Types.hpp"
 #include "Macros/internal/Error.hpp"
 #include "Macros/internal/Format.hpp"
 #include "Platform/PlatformSelect.hpp"
 #include "Types/Error.hpp"
-#include "Types/Logging.hpp"
 #include "esp_log.h"
 #include <atomic>
-#include <concepts>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <optional>
 
-namespace Totem::LoggerSupport::detail {
+namespace Totem::LoggingBackend::detail {
 
-template <class T>
-concept IsLoggerBackend =
-    requires(T &cls, const LogRecord &record, LogLevel level,
-             std::optional<LogComponent> componentOpt, LogComponent component) {
-        { cls.setLogLevel(level, componentOpt) } -> std::same_as<ReturnCode>;
-        { cls.send(record) } -> std::same_as<ReturnCode>;
-        { cls.loggingFor(level, componentOpt) } -> std::same_as<bool>;
-        {
-            cls.setComponentLogLevelDefault(component)
-        } -> std::same_as<ReturnCode>;
-    } &&
-    IsNamedEntity<T>;
+struct ILogger : public IHasLogLevel {
+    virtual ~ILogger() = default;
 
-struct LoggerBackend {
-    void *self = nullptr;
+    virtual ReturnCode send(const LogRecord &record) = 0;
+};
 
-    ReturnCode (*setLogLevelHook)(void *, LogLevel level,
-                                  std::optional<LogComponent> component) =
-        nullptr;
-    ReturnCode (*sendHook)(void *, const LogRecord &record) = nullptr;
-    bool (*loggingForHook)(void *, LogLevel level,
-                           std::optional<LogComponent> component) = nullptr;
-    ReturnCode (*setComponentLogLevelDefaultHook)(
-        void *, LogComponent component) = nullptr;
-
-    ReturnCode
-    setLogLevel(LogLevel level,
-                std::optional<LogComponent> component = std::nullopt) const {
-        return setLogLevelHook(self, level, component);
+struct NullLogger : public ILogger {
+    ReturnCode setLogLevel(LogLevel /*unused*/,
+                           std::optional<LogComponent> /*unused*/) override {
+        return OK(CoreError);
     }
-    ReturnCode send(const LogRecord &record) const {
-        return sendHook(self, record);
+
+    ReturnCode send(const LogRecord &record) override {
+        // FIXME: Abstract
+        ESP_EARLY_LOGE(MAGIC_CHR(record.component), "%s", record.msg.data());
+        return OK(CoreError);
     }
+
     [[nodiscard]] bool
-    loggingFor(LogLevel level,
-               std::optional<LogComponent> component = std::nullopt) const {
-        return loggingForHook(self, level, component);
-    }
-    ReturnCode setComponentLogLevelDefault(LogComponent component) const {
-        return setComponentLogLevelDefaultHook(self, component);
+    loggingFor(LogLevel /*unused*/,
+               std::optional<LogComponent> /*unused*/) const override {
+        return true;
     }
 
-    template <class T>
-        requires IsLoggerBackend<T>
-    static LoggerBackend bind(T &obj) {
-        return LoggerBackend{
-            .self = std::addressof(obj),
-            .setLogLevelHook =
-                [](void *ptr, LogLevel level,
-                   std::optional<LogComponent> component) -> ReturnCode {
-                return static_cast<T *>(ptr)->setLogLevel(level, component);
-            },
-            .sendHook = [](void *ptr, const LogRecord &data) -> ReturnCode {
-                return static_cast<T *>(ptr)->send(data);
-            },
-            .loggingForHook =
-                [](void *ptr, LogLevel level,
-                   std::optional<LogComponent> component) -> bool {
-                return static_cast<T *>(ptr)->loggingFor(level, component);
-            },
-            .setComponentLogLevelDefaultHook =
-                [](void *ptr, LogComponent component) -> ReturnCode {
-                return static_cast<T *>(ptr)->setComponentLogLevelDefault(
-                    component);
-            },
-        };
-    }
-
-    static LoggerBackend null() {
-        return LoggerBackend{
-            .self = nullptr,
-            .setLogLevelHook = [](void *, LogLevel, std::optional<LogComponent>)
-                -> ReturnCode { return OK(CoreError); },
-            .sendHook = [](void *, const LogRecord &record) -> ReturnCode {
-                // FIXME: Abstract
-                ESP_EARLY_LOGE(MAGIC_CHR(record.component), "%s",
-                               record.msg.data());
-                return OK(CoreError);
-            },
-            .loggingForHook = [](void *, LogLevel, std::optional<LogComponent>)
-                -> bool { return true; },
-            .setComponentLogLevelDefaultHook = [](void *, LogComponent)
-                -> ReturnCode { return OK(CoreError); },
-        };
-    }
-
-    [[nodiscard]] bool validate() const {
-        return self != nullptr && setLogLevelHook != nullptr &&
-               sendHook != nullptr && loggingForHook != nullptr &&
-               setComponentLogLevelDefaultHook != nullptr;
+    ReturnCode setComponentLogLevelDefault(LogComponent /*unused*/) override {
+        return OK(CoreError);
     }
 };
 
+static inline NullLogger nullLogger{};
+
+} // namespace Totem::LoggingBackend::detail
+
 class LoggingService {
+    using ILogger = Totem::LoggingBackend::detail::ILogger;
+
   public:
-    template <class T>
-    static ReturnCode setBackend(T &backend)
-        requires IsLoggerBackend<T>
-    {
-        auto loggerBackend = LoggerBackend::bind(backend);
+    static void set(ILogger &backend) {
         // FIXME: Include cycle - logger macros use Logger, FAIL uses logger
         // macros FAIL_IF(!loggerBackend.validate(), ERR(InvalidArgument),
         //         "Invalid logger backend provided: %s", backend.name);
-        _backend = loggerBackend;
-        return OK();
+        _backend.store(&backend, std::memory_order_release);
     }
 
-    static ReturnCode setLogLevel(LogLevel level) {
-        return _backend.setLogLevel(level);
+    static ILogger &get() {
+        return *_backend.load(std::memory_order_acquire);
     }
 
-    static ReturnCode send(const LogRecord &record) {
-        return _backend.send(record);
-    }
-
-    static bool
+    [[nodiscard]] static bool
     loggingFor(LogLevel level,
                std::optional<LogComponent> component = std::nullopt) {
-        return _backend.loggingFor(level, component);
-    }
-
-    static ReturnCode setComponentLogLevelDefault(LogComponent component) {
-        return _backend.setComponentLogLevelDefault(component);
+        return get().loggingFor(level, component);
     }
 
     __attribute__((__format__(__printf__, 3, 0))) static ReturnCode
@@ -168,7 +96,7 @@ class LoggingService {
                 _recordBusy.clear(std::memory_order_release);
                 return ret;
             }
-            auto result = send(record);
+            auto result = get().send(record);
             _recordBusy.clear(std::memory_order_release);
             return result;
         }
@@ -178,7 +106,7 @@ class LoggingService {
             !ret.ok()) {
             return ret;
         }
-        return send(record);
+        return get().send(record);
     }
 
   private:
@@ -198,11 +126,8 @@ class LoggingService {
         return OK();
     }
 
-    static inline LoggerBackend _backend = LoggerBackend::null();
+    static inline std::atomic<ILogger *> _backend{
+        &Totem::LoggingBackend::detail::nullLogger};
     static inline std::atomic_flag _recordBusy = ATOMIC_FLAG_INIT;
     static inline LogRecord _scratchRecord{};
 };
-
-} // namespace Totem::LoggerSupport::detail
-
-using Totem::LoggerSupport::detail::LoggingService;

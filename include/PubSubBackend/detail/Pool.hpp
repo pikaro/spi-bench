@@ -63,6 +63,29 @@ class Pool : public HasMutex<Pool<T, Capacity>> {
         return ERR(NotFound);
     }
 
+    /**
+     * Check whether a message slot is still occupied for the given message ID.
+     *
+     * This is intended for integration tests that need to verify that the
+     * original envelope owner has released its pool entry after transport
+     * ownership handoff and fanout complete.
+     */
+    [[nodiscard]] bool contains(MessageId messageId) const {
+        for (const auto &slot : _storage) {
+            if (slot.value && slot.messageId == messageId) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Convenience inverse of contains() for ownership-release checks.
+     */
+    [[nodiscard]] bool wasFreed(MessageId messageId) const {
+        return !contains(messageId);
+    }
+
     [[nodiscard]] static std::expected<const void *, ReturnCode>
     getPtr(void *owner, const Envelope &envelope) {
         auto *pool = static_cast<Pool *>(owner);

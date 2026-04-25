@@ -4,7 +4,7 @@
 #include "PubSubBackend/Interfaces/Envelope.hpp"
 #include "PubSubBackend/detail/ControlPlane.hpp"
 #include "PubSubBackend/detail/Publisher.hpp"
-#include "PubSubBackend/detail/TransporterDirectory.hpp"
+#include "PubSubBackend/detail/TransportDirectory.hpp"
 #include "PubSubBackend/detail/Types.hpp"
 #include "Queue/Facade.hpp"
 #include "Types/Error.hpp"
@@ -18,7 +18,7 @@
 namespace Totem::PubSubBackend::detail {
 
 struct DrainerDependencies {
-    TransporterDirectory &transporters;
+    TransportDirectory &transporters;
     Publisher &publisher;
     ControlPlane &controlPlane;
     Totem::Queue::Handle *publishQueue;
@@ -27,7 +27,7 @@ struct DrainerDependencies {
 };
 
 class Drainer {
-    using TransporterKey = TransporterDirectory::EntryKey;
+    using TransporterKey = TransportDirectory::EntryKey;
     using Topic = typename Spec::Topic;
     using NodeId = typename Spec::NodeId;
 
@@ -54,8 +54,7 @@ class Drainer {
         for (size_t i = 0; i < kMaxInFlightMessages; ++i) {
             auto &frame = _inFlightFrames[i];
             if (frame.valid() && (frame.pendingMask & mask) != 0) {
-                if (frame.envelope.header.messageId ==
-                    envelope.header.messageId) {
+                if (frame.envelope.header == envelope.header) {
                     _log_d("Drainer: ack from transport " SV_FMT
                            " for " MAGIC_PUBSUB_SV_FMT,
                            SV_ARG(magic_enum::enum_name(transportId)),
@@ -102,13 +101,19 @@ class Drainer {
 
     struct PublishContext {
         Drainer *self;
-        TransportId ingressTransport;
+        TransportId transportId = 0;
     };
 
-    static ReturnCode _publishCallback(void *ctx, const Envelope &envelope) {
+    static ReturnCode _publishCallback(
+        void *ctx, const Envelope &envelope,
+        std::optional<IngressContext> ingressContext = std::nullopt) {
         auto *publishContext = static_cast<PublishContext *>(ctx);
-        return publishContext->self->_publishFrame(
-            envelope, publishContext->ingressTransport);
+        if (!ingressContext.has_value()) {
+            ingressContext = IngressContext{
+                .transportId = publishContext->transportId,
+            };
+        }
+        return publishContext->self->_publishFrame(envelope, ingressContext);
     }
 
     ReturnCode _publishFromTransports() {
@@ -118,17 +123,18 @@ class Drainer {
         auto ret = OK();
         for (size_t i = 0; i < snapshot.count; ++i) {
             const auto &entry = snapshot.entries[i];
-            auto ctx = PublishContext{.self = this,
-                                      .ingressTransport = entry.transportId};
-            ret.combine(entry.transporter.pollInto(&ctx, &_publishCallback));
+            auto ctx = PublishContext{
+                .self = this,
+                .transportId = entry.transportId,
+            };
+            ret.combine(entry.transporter->pollInto(&ctx, &_publishCallback));
         }
         return ret;
     }
 
     std::expected<FrameHandle, ReturnCode>
     _storeFrame(const Envelope &envelope,
-                std::optional<TransportId> ingressTransport =
-                    std::nullopt) {
+                std::optional<IngressContext> ingressContext = std::nullopt) {
         StoredFrame frame;
         frame.envelope = envelope;
         TransportMask mask = 0;
@@ -136,14 +142,13 @@ class Drainer {
         (void)_transporters.withAll(
             [&](const TransporterKey &,
                 const TransporterEntry &entry) -> ReturnCode {
-                if (ingressTransport.has_value() &&
-                    entry.transportId == *ingressTransport) {
+                auto dispatch =
+                    Publisher::dispatchFor(entry, envelope, ingressContext);
+                if (!dispatch) {
                     return OK();
                 }
-                if ((entry.topicMask & envelope.header.topic) != 0) {
-                    mask |= entry.transportId;
-                    ++pendingCount;
-                }
+                mask |= entry.transportId;
+                ++pendingCount;
                 return OK();
             });
         if (pendingCount == 0) {
@@ -172,14 +177,14 @@ class Drainer {
 
     ReturnCode
     _publishFrame(const Envelope &item,
-                  std::optional<TransportId> ingressTransport = std::nullopt) {
+                  std::optional<IngressContext> ingressContext = std::nullopt) {
         auto ret = OK();
         _log_d("Drainer: publish frame " MAGIC_PUBSUB_SV_FMT "%s",
                MAGIC_PUBSUB_SV_ARG(item.header),
-               ingressTransport.has_value() ? " from transport ingress" : "");
-        ret.combine(_controlPlane.handle(item, ingressTransport));
+               ingressContext.has_value() ? " from transport ingress" : "");
+        ret.combine(_controlPlane.handle(item, ingressContext));
         ret.combine(_publisher.publishToSubscribers(item));
-        auto storeResult = _storeFrame(item, ingressTransport);
+        auto storeResult = _storeFrame(item, ingressContext);
         if (!storeResult) {
             if (storeResult.error() == ERR(NotFound)) {
                 _log_d("Drainer: releasing " MAGIC_PUBSUB_SV_FMT
@@ -196,11 +201,11 @@ class Drainer {
                  ERR_ARG(storeResult.error()));
         }
         ret.combine(
-            _publisher.publishToTransports(*storeResult, ingressTransport));
+            _publisher.publishToTransports(*storeResult, ingressContext));
         return ret;
     }
 
-    TransporterDirectory &_transporters;
+    TransportDirectory &_transporters;
     Publisher &_publisher;
     ControlPlane &_controlPlane;
     Totem::Queue::Handle *_publishQueue;

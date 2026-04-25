@@ -2,49 +2,42 @@
 
 #include "Data.hpp"
 #include "Macros/Facade.hpp"
-#include "PubSubBackend/Facade.hpp" // IWYU pragma: export
 #include "PubSubBackend/Interfaces/Envelope.hpp"
 #include "PubSubBackend/Interfaces/Subscriber.hpp"
 #include "PubSubBackend/Interfaces/Types.hpp"
+#include "PubSubBackend/detail/Types.hpp"
 #include "Types/Error.hpp"
 #include <cstring>
 #include <expected>
 
-class PubSubService {
-    using Node = Totem::PubSubBackend::Node;
+namespace Totem::PubSubBackend::detail {
 
-    inline static Node *backend = nullptr;
+struct INode {
+    virtual ~INode() = default;
+
+    virtual std::expected<SubscriberKey, ReturnCode>
+    subscribe(const char *subscriberName, const Subscriber &subscriber,
+              NodeData::PubSub::Topic topic) = 0;
+    virtual ReturnCode unsubscribe(const SubscriberKey &subscriberKey) = 0;
+    virtual ReturnCode publish(const Envelope &envelope) = 0;
+    virtual ReturnCode ack(NodeData::PubSub::Transport transport,
+                           const Envelope &envelope) = 0;
+    [[nodiscard]] virtual MessageId nextMessageId() = 0;
+};
+
+} // namespace Totem::PubSubBackend::detail
+
+class PubSubService {
+    using INode = Totem::PubSubBackend::detail::INode;
+    inline static INode *backend = nullptr;
 
   public:
     using Topic = NodeData::PubSub::Topic;
 
-    static void setBackend(Node &backendNode) { backend = &backendNode; }
+    static void set(INode &backendNode) { backend = &backendNode; }
 
-    static Node &node() {
+    static INode &get() {
         ABORT_IF_NULL(backend, "PubSub backend node is not set");
         return *backend;
-    }
-
-    static std::expected<Node::SubscriberKey, ReturnCode>
-    subscribe(const char *subscriberName,
-              const Totem::PubSubBackend::Subscriber &subscriber, Topic topic) {
-        return node().subscribe(subscriberName, subscriber, topic);
-    }
-
-    static ReturnCode unsubscribe(const Node::SubscriberKey &subscriberKey) {
-        return node().unsubscribe(subscriberKey);
-    }
-
-    static ReturnCode publish(const Totem::PubSubBackend::Envelope &envelope) {
-        return node().publish(envelope);
-    }
-
-    static ReturnCode ack(NodeData::PubSub::Transport transport,
-                          const Totem::PubSubBackend::Envelope &envelope) {
-        return Node::ack(backend, transport, envelope);
-    }
-
-    [[nodiscard]] static Totem::PubSubBackend::MessageId nextMessageId() {
-        return node().nextMessageId();
     }
 };

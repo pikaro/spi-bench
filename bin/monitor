@@ -3,16 +3,17 @@
 set -eEuo pipefail
 
 if [ -z "${1:-}" ]; then
-    echo "Usage: $0 <env>"
+    echo "Usage: $0 <env> [baud]"
     exit 1
 fi
 
 ENV="$1"
+BAUD="${2:-921600}"
 
 GIT_ROOT="$(git rev-parse --show-toplevel)"
 . "${GIT_ROOT}/.venv/bin/activate"
 
 eval "$("${BASH_SOURCE%/*}/select_port.py" "$ENV")"
-pio device monitor -b 115200 --raw --port "$UPLOAD_PORT"
+pio device monitor -b "${BAUD}" --raw --port "$UPLOAD_PORT"
 
 # --filter "exclude timestamp" --filter "exclude level" --filter "exclude source" --filter "exclude line"

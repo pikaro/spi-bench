@@ -11,6 +11,7 @@ struct WIRE_MSG Header {
     MessageId messageId{};
     TopicId topic{};
     NodeId source{};
+    TrafficClass trafficClass{TrafficClass::Noncritical};
     uint16_t payloadSize{};
 
     bool operator==(const Header &other) const {

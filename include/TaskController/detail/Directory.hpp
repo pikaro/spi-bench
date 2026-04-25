@@ -4,11 +4,12 @@
 #include "Macros/Facade.hpp"
 #include "StaticConfig/TaskController.hpp"
 #include "TaskController/Interfaces/Config.hpp"
+#include "TaskController/Interfaces/IRegistry.hpp"
 #include "TaskController/Interfaces/TaskHooks.hpp"
+#include "TaskController/Interfaces/Types.hpp"
 #include "TaskController/detail/Concepts.hpp"
 #include "TaskController/detail/Runner.hpp"
 #include "Types/Error.hpp"
-#include <cstdint>
 #include <cstring>
 #include <expected>
 #include <memory>
@@ -25,28 +26,23 @@ struct RunnerEntry {
     std::string_view name;
 };
 
-using RunnerKey = uintptr_t;
-using DirectoryImpl =
-    Directory<RunnerKey, RunnerEntry, TaskControllerConfig::maxTasksPerClass>;
+class Directory;
+
+using DirectoryImpl = BaseDirectory<Directory, RunnerKey, RunnerEntry,
+                                    TaskControllerConfig::maxTasksPerClass>;
 
 class Directory : public DirectoryImpl {
   public:
-    explicit Directory(const char *ownerName, LogComponent component)
-        : DirectoryImpl(ownerName, component) {
-        _setHooks({
-            .self = this,
-            .beforeRemoveHook = beforeRemove,
-        });
-    }
+    explicit Directory(const char *ownerName, LogComponent component,
+                       IRegistry &registryHooks)
+        : DirectoryImpl(ownerName, component), _registry(registryHooks) {}
 
-    using EntryKey = typename DirectoryImpl::EntryKey;
-
-    std::expected<EntryKey, ReturnCode> add(const char *runnerName,
-                                            TaskHooks taskHooks) {
+    std::expected<RunnerKey, ReturnCode> add(const char *runnerName,
+                                             TaskHooks taskHooks) {
         FAIL_IF_NULL(runnerName, std::unexpected(ERR(InvalidArgument)),
                      "%s: Runner name cannot be null", ownerName());
-        auto runner = std::make_unique<Runner>(taskHooks);
-        auto key = reinterpret_cast<EntryKey>(runner.get());
+        auto runner = std::make_unique<Runner>(taskHooks, _registry);
+        auto key = reinterpret_cast<RunnerKey>(runner.get());
         auto entry = RunnerEntry{.runner = std::move(runner),
                                  .hooks = taskHooks,
                                  .name = runnerName};
@@ -73,7 +69,7 @@ class Directory : public DirectoryImpl {
         requires IsSnapshotHandler<Fn>
     ReturnCode forEachTaskSnapshot(Fn &&fun) {
         return withAll(
-            [&](const EntryKey &, const RunnerEntry &entry) -> ReturnCode {
+            [&](const RunnerKey &, const RunnerEntry &entry) -> ReturnCode {
                 FAIL_IF_NULL(entry.runner, ERR(InvalidState),
                              "Runner for owner %s is null", ownerName());
                 auto takeSnapshotResult = entry.runner->takeSnapshot();
@@ -87,6 +83,32 @@ class Directory : public DirectoryImpl {
                 return fun(*snapshotResult);
             });
     }
+
+    template <typename Fn>
+        requires(std::is_invocable_r_v<ReturnCode, Fn, RunnerEntry &>)
+    ReturnCode withName(std::string_view runnerName, Fn &&fn) {
+        bool found = false;
+        auto ret = withAll(
+            [&found, runnerName, &fn](const RunnerKey &,
+                                      RunnerEntry &entry) -> ReturnCode {
+                if (entry.name != runnerName) {
+                    return OK();
+                }
+                found = true;
+                return std::invoke(std::forward<Fn>(fn), entry);
+            },
+            [runnerName](const RunnerKey &, const RunnerEntry &entry) {
+                return entry.name == runnerName;
+            });
+        FAIL_IF_ERR_FWD(ret, "Failed to access runner " SV_FMT " in %s",
+                        SV_ARG(runnerName), ownerName());
+        FAIL_IF(!found, ERR(NotFound), "Runner " SV_FMT " not found in %s",
+                SV_ARG(runnerName), ownerName());
+        return OK();
+    }
+
+  private:
+    IRegistry &_registry;
 };
 
 } // namespace Totem::TaskController::detail

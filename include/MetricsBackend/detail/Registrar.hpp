@@ -1,24 +1,24 @@
 #pragma once
 
 #include "Macros/Facade.hpp"
-#include "MetricsBackend/detail/Types.hpp"
+#include "MetricsBackend/Interfaces/Types.hpp"
+#include "MetricsBackend/detail/Types.hpp" // IWYU pragma: keep
+#include "Services/Metrics.hpp"
 #include "Store.hpp"
 #include "Types/Error.hpp"
-#include "Types/Metrics.hpp"
+#include "MetricsBackend/Interfaces/Types.hpp"
 #include <expected>
 #include <functional>
 
 namespace Totem::MetricsBackend::detail {
 
-class Registrar {
-    using MetricGroupKey = Store::MetricGroupKey;
-
+class Registrar : public IRegistrar {
   public:
     explicit Registrar(Store &store) : _store(store) {}
 
     std::expected<GroupHandle, ReturnCode>
     // Take a reference wrapper to reject temporaries
-    addGroup(std::reference_wrapper<const MetricGroupDesc> desc) {
+    addGroup(std::reference_wrapper<const MetricGroupDesc> desc) override {
         const auto &descRef = desc.get();
         FAIL_IF_ERR_FWD_UNEXPECTED(
             descRef.validate(),
@@ -32,7 +32,7 @@ class Registrar {
 
     std::expected<CounterHandle, ReturnCode>
     addCounter(MetricGroupKey groupKey,
-               std::reference_wrapper<const MetricDesc> desc) {
+               std::reference_wrapper<const MetricDesc> desc) override {
         const auto &descRef = desc.get();
         FAIL_IF(descRef.type != MetricType::Counter,
                 std::unexpected(ERR(InvalidArgument)),
@@ -48,7 +48,7 @@ class Registrar {
 
     std::expected<GaugeHandle, ReturnCode>
     addGauge(MetricGroupKey groupKey,
-             std::reference_wrapper<const MetricDesc> desc) {
+             std::reference_wrapper<const MetricDesc> desc) override {
         const auto &descRef = desc.get();
         FAIL_IF(descRef.type != MetricType::Gauge,
                 std::unexpected(ERR(InvalidArgument)),

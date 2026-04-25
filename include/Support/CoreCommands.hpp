@@ -17,7 +17,7 @@ inline CommandDesc helloCmd = {
 };
 
 inline ReturnCode register_core_commands() {
-    auto &reg = CommandService::registrar();
+    auto &reg = CommandRegistrarService::get();
 
     FAIL_IF_UNEXPECTED_FWD(_, reg.registerCommand(helloCmd),
                            "Failed to register hello command");

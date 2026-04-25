@@ -20,7 +20,7 @@ class ControlPlane {
 
     ReturnCode
     handle(const Envelope &envelope,
-           std::optional<TransportId> ingressTransport = std::nullopt) {
+           std::optional<IngressContext> ingressContext = std::nullopt) {
         if (!isControlPlaneTopic(envelope.header.topic)) {
             return OK();
         }
@@ -32,7 +32,7 @@ class ControlPlane {
                MAGIC_PUBSUB_SV_ARG(envelope.header));
         if (topic == Topic::PubSub) {
             return _subscriptionManager.handlePubSubEvent(envelope,
-                                                          ingressTransport);
+                                                          ingressContext);
         }
 
         FAIL(ERR(InvalidArgument),

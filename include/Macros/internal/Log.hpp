@@ -2,12 +2,12 @@
 
 #include "Platform/PlatformSelect.hpp" // IWYU pragma: export
 #include "Services/Logging.hpp"        // IWYU pragma: export
-#include "Types/Logging.hpp"           // IWYU pragma: export
-#include <array>                      // IWYU pragma: export
-#include <source_location>            // IWYU pragma: export
-#include <string_view>                // IWYU pragma: export
+#include "LoggingBackend/Interfaces/Types.hpp"           // IWYU pragma: export
+#include <array>                       // IWYU pragma: export
+#include <source_location>             // IWYU pragma: export
+#include <string_view>                 // IWYU pragma: export
 
-namespace Totem::LoggerSupport::detail {
+namespace Totem::LoggerBackend::detail {
 
 constexpr std::string_view logFileName(std::string_view path) {
     auto pos = path.find_last_of("/\\");
@@ -41,14 +41,14 @@ constexpr std::string_view logFunctionName(std::string_view function) {
     return qualified.substr(prevSep + 2);
 }
 
-} // namespace Totem::LoggerSupport::detail
+} // namespace Totem::LoggerBackend::detail
 
 #define LOG_LOC(msg, ...)                                                      \
     do {                                                                       \
         auto loc = std::source_location::current();                            \
         auto _logFile =                                                        \
-            Totem::LoggerSupport::detail::logFileName(loc.file_name());        \
-        auto _logFunction = Totem::LoggerSupport::detail::logFunctionName(     \
+            Totem::LoggerBackend::detail::logFileName(loc.file_name());        \
+        auto _logFunction = Totem::LoggerBackend::detail::logFunctionName(     \
             loc.function_name());                                              \
         (void)LoggingService::logf(                                            \
             LogLevel::Error, logComponent, "[%.*s:%d:%.*s] " msg,              \
@@ -59,8 +59,10 @@ constexpr std::string_view logFunctionName(std::string_view function) {
 
 #define INTERNAL_LOG_IMPL(logLevel, logTag, logFormat, ...)                    \
     do {                                                                       \
-        (void)LoggingService::logf(logLevel, logTag, logFormat,                \
-                                   ##__VA_ARGS__);                             \
+        if (LoggingService::loggingFor(logLevel, logTag)) {                    \
+            (void)LoggingService::logf(logLevel, logTag, logFormat,            \
+                                       ##__VA_ARGS__);                         \
+        }                                                                      \
     } while (0)
 
 #define _log_v(format, ...)                                                    \

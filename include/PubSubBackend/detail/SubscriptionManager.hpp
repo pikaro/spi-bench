@@ -4,7 +4,7 @@
 #include "PubSubBackend/Interfaces/Envelope.hpp"
 #include "PubSubBackend/Interfaces/Types.hpp"
 #include "PubSubBackend/detail/Pool.hpp"
-#include "PubSubBackend/detail/TransporterDirectory.hpp"
+#include "PubSubBackend/detail/TransportDirectory.hpp"
 #include "PubSubBackend/detail/Types.hpp"
 #include "PubSubBackend/detail/Wire.hpp"
 #include "Types/Error.hpp"
@@ -20,13 +20,14 @@ namespace Totem::PubSubBackend::detail {
 
 struct SubscriptionManagerDependencies {
     void *pubSubNode;
-    TransporterDirectory &transporters;
+    TransportDirectory &transporters;
     PublishCallback publishCallback;
     NextMessageIdCallback nextMessageIdCallback;
+    NodeId (*nodeIdCallback)(void *owner);
 
     [[nodiscard]] bool validate() const {
         return pubSubNode != nullptr && publishCallback != nullptr &&
-               nextMessageIdCallback != nullptr;
+               nextMessageIdCallback != nullptr && nodeIdCallback != nullptr;
     }
 };
 
@@ -44,7 +45,8 @@ class SubscriptionManager {
     explicit SubscriptionManager(const SubscriptionManagerDependencies &deps)
         : _pubSubNode(deps.pubSubNode), _publishCallback(deps.publishCallback),
           _eventPool(deps.pubSubNode, deps.nextMessageIdCallback),
-          _transporters(deps.transporters) {
+          _transporters(deps.transporters),
+          _nodeIdCallback(deps.nodeIdCallback) {
         ABORT_IF_NOT(deps.validate(),
                      "Invalid SubscriptionManager dependencies");
     }
@@ -127,7 +129,7 @@ class SubscriptionManager {
 
     ReturnCode handlePubSubEvent(
         const Envelope &envelope,
-        std::optional<TransportId> ingressTransport = std::nullopt) {
+        std::optional<IngressContext> ingressContext = std::nullopt) {
         auto topic = static_cast<Topic>(envelope.header.topic);
         FAIL_IF(topic != Topic::PubSub, ERR(InvalidArgument),
                 "Received non-PubSub event in PubSub event handler");
@@ -138,13 +140,13 @@ class SubscriptionManager {
         _log_d("SubscriptionManager: decoded PubSub event %u for topic " SV_FMT,
                static_cast<unsigned>(event.type),
                SV_ARG(magic_enum::enum_name(static_cast<Topic>(event.topic))));
-        return handlePubSubEvent(event, ingressTransport);
+        return handlePubSubEvent(event, ingressContext);
     }
 
     ReturnCode handlePubSubEvent(
         const PubSubEvent &event,
-        std::optional<TransportId> ingressTransport = std::nullopt) {
-        if (!ingressTransport.has_value()) {
+        std::optional<IngressContext> ingressContext = std::nullopt) {
+        if (!ingressContext.has_value()) {
             _log_d(
                 "SubscriptionManager: ignoring local PubSub control event "
                 "for topic " SV_FMT,
@@ -155,23 +157,39 @@ class SubscriptionManager {
         switch (event.type) {
         case SubscribeEventType::Register:
             _log_i(
-                "SubscriptionManager: transport %u subscribed to topic " SV_FMT,
-                *ingressTransport,
+                "SubscriptionManager: transport %u peer %u subscribed to "
+                "topic " SV_FMT,
+                ingressContext->transportId, ingressContext->peerId,
                 SV_ARG(magic_enum::enum_name(static_cast<Topic>(event.topic))));
-            return _transporters.subscribeTransport(*ingressTransport,
+            return _transporters.subscribeTransport(*ingressContext,
                                                     event.topic);
         case SubscribeEventType::Unregister:
             _log_i(
-                "SubscriptionManager: transport %u unsubscribed from "
-                "topic " SV_FMT,
-                *ingressTransport,
+                "SubscriptionManager: transport %u peer %u unsubscribed "
+                "from topic " SV_FMT,
+                ingressContext->transportId, ingressContext->peerId,
                 SV_ARG(magic_enum::enum_name(static_cast<Topic>(event.topic))));
-            return _transporters.unsubscribeTransport(*ingressTransport,
+            return _transporters.unsubscribeTransport(*ingressContext,
                                                       event.topic);
         default:
             return ERR(InvalidArgument);
         }
         return OK();
+    }
+
+    ReturnCode replaySubscriptions() {
+        auto ret = OK();
+        for (const auto &slot : _subscriptionSlots) {
+            if (slot.subscriberCount.load(std::memory_order_relaxed) == 0) {
+                continue;
+            }
+            auto event = PubSubEvent{
+                .topic = slot.topic,
+                .type = SubscribeEventType::Register,
+            };
+            ret.combine(_sendPubSubEvent(event));
+        }
+        return ret;
     }
 
   private:
@@ -186,6 +204,7 @@ class SubscriptionManager {
             .owner = &_eventPool,
             .topic = Topic::PubSub,
             .messageId = messageId,
+            .source = _nodeIdCallback(_pubSubNode),
             .getPayloadPtr = EventPool::getPtr,
             .encodePayload = EventPool::encodePayload,
             .release = EventPool::release,
@@ -252,7 +271,8 @@ class SubscriptionManager {
     std::array<SubscriptionSlot, Limits::maxTopics> _subscriptionSlots{};
     PublishCallback _publishCallback;
     EventPool _eventPool;
-    TransporterDirectory &_transporters;
+    TransportDirectory &_transporters;
+    NodeId (*_nodeIdCallback)(void *owner);
 };
 
 } // namespace Totem::PubSubBackend::detail

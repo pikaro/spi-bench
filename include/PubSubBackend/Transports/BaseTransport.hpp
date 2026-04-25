@@ -3,15 +3,18 @@
 #include "Base/HasLifecycle.hpp"
 #include "Macros/Facade.hpp"
 #include "PubSubBackend/Interfaces/Envelope.hpp"
+#include "PubSubBackend/detail/ITransport.hpp"
 #include "PubSubBackend/detail/IngressBuffer.hpp"
 #include "PubSubBackend/detail/SerDe.hpp"
 #include "PubSubBackend/detail/Types.hpp"
 #include "Queue/Facade.hpp"
 #include "Types/Error.hpp"
+#include "Types/Signal.hpp"
 #include <array>
 #include <cstddef>
 #include <expected>
 #include <limits>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -27,15 +30,24 @@ using SendCallback = ReturnCode (*)(void *owner, const Header &header,
                                     std::span<const std::byte> frame);
 using ReceiveCallback = std::expected<size_t, ReturnCode> (*)(
     void *owner, std::span<std::byte> out);
+using AvailableCallback = bool (*)(void *owner);
+using WakeCallback = ReturnCode (*)(void *owner, Signal signal);
+using IngressDispatchCallback = detail::IngressDispatchCallback;
 
 struct BaseTransportDependencies {
     void *pubSubNode;
     void *transport = nullptr;
     detail::TransportId transportId;
+    detail::TransportForwardingPolicy forwardingPolicy =
+        detail::TransportForwardingPolicy::PointToPoint;
     std::string_view name;
     SendAckCallback sendAckCallback;
     SendCallback sendCallback = nullptr;
     ReceiveCallback receiveCallback = nullptr;
+    AvailableCallback availableCallback = nullptr;
+    detail::ITransportAvailabilityObserver *availabilityObserver = nullptr;
+    WakeCallback wakeCallback = nullptr;
+    IngressDispatchCallback ingressDispatchCallback = nullptr;
     detail::IngressBuffer &ingress;
 
     [[nodiscard]] bool valid() const {
@@ -45,7 +57,8 @@ struct BaseTransportDependencies {
     }
 };
 
-class BaseTransport : public HasLifecycle<BaseTransport> {
+class BaseTransport : public HasLifecycle<BaseTransport>,
+                      public detail::ITransport {
     friend class HasLifecycle<BaseTransport>;
     friend struct LifecycleContract<BaseTransport>;
     using Topic = typename detail::Spec::Topic;
@@ -55,9 +68,15 @@ class BaseTransport : public HasLifecycle<BaseTransport> {
     explicit BaseTransport(const BaseTransportDependencies &deps)
         : _pubSubNode(deps.pubSubNode), _transport(deps.transport),
           _instanceName(deps.name), _transportId(deps.transportId),
+          _forwardingPolicy(deps.forwardingPolicy),
           _sendAckCallback(deps.sendAckCallback),
           _sendCallback(deps.sendCallback),
-          _receiveCallback(deps.receiveCallback), _ingress(deps.ingress) {
+          _receiveCallback(deps.receiveCallback),
+          _availableCallback(deps.availableCallback),
+          _availabilityObserver(deps.availabilityObserver),
+          _wakeCallback(deps.wakeCallback),
+          _ingressDispatchCallback(deps.ingressDispatchCallback),
+          _ingress(deps.ingress) {
         ABORT_IF_NOT(deps.valid(), "Invalid BaseTransport dependencies");
     }
 
@@ -66,14 +85,27 @@ class BaseTransport : public HasLifecycle<BaseTransport> {
 
     static constexpr const char *name = "BaseTransport";
 
-    [[nodiscard]] detail::TransportId transportId() const {
+    [[nodiscard]] detail::TransportId transportId() const override {
         return _transportId;
     }
-    [[nodiscard]] std::string_view instanceName() const {
+    [[nodiscard]] std::string_view instanceName() const override {
         return _instanceName;
     }
+    [[nodiscard]] detail::TransportForwardingPolicy
+    forwardingPolicy() const override {
+        return _forwardingPolicy;
+    }
+    [[nodiscard]] detail::PeerMask knownPeers() const override { return 0; }
+    [[nodiscard]] bool available() const override { return _available(); }
 
-    ReturnCode enqueue(detail::FrameHandle frameHandle) {
+    ReturnCode
+    enqueue(detail::FrameHandle frameHandle,
+            const detail::TransportDispatch & /*dispatch*/ = {}) override {
+        FAIL_IF_ERR_FWD(_observeAvailability(),
+                        "Failed to observe transport availability");
+        FAIL_IF_NOT(_available(), ERR(InvalidState),
+                    "Cannot enqueue frame for unavailable transport " SV_FMT,
+                    SV_ARG(_instanceName));
         _log_d(SV_FMT ": enqueue send for " MAGIC_PUBSUB_SV_FMT,
                SV_ARG(_instanceName),
                MAGIC_PUBSUB_SV_ARG(frameHandle->envelope.header));
@@ -83,14 +115,33 @@ class BaseTransport : public HasLifecycle<BaseTransport> {
         return OK();
     }
 
-    ReturnCode send(size_t maxCount = std::numeric_limits<size_t>::max()) {
+    ReturnCode
+    enqueueRaw(const Header &header, std::span<const std::byte> frame,
+               const detail::TransportDispatch & /*dispatch*/ = {}) override {
+        FAIL_IF_ERR_FWD(_observeAvailability(),
+                        "Failed to observe transport availability");
+        FAIL_IF_NOT(_available(), ERR(InvalidState),
+                    "Cannot enqueue raw frame for unavailable transport "
+                    SV_FMT,
+                    SV_ARG(_instanceName));
+        _log_d(SV_FMT ": direct raw enqueue for " MAGIC_PUBSUB_SV_FMT,
+               SV_ARG(_instanceName), MAGIC_PUBSUB_SV_ARG(header));
+        return _sendCallback(_transport, header, frame);
+    }
+
+    ReturnCode
+    send(size_t maxCount = std::numeric_limits<size_t>::max()) override {
         FAIL_IF_INACTIVE_ERR("Cannot work inactive transport %s",
                              _instanceName);
+        FAIL_IF_ERR_FWD(_observeAvailability(),
+                        "Failed to observe transport availability");
+        if (!_available()) {
+            return OK();
+        }
         auto ret = OK();
         size_t count = 0;
 
         detail::FrameHandle item;
-        auto buf = std::array<std::byte, bufferSize>{};
 
         while (ret.ok() && count < maxCount) {
             ret.combine(Totem::Queue::Platform::receive(
@@ -99,10 +150,33 @@ class BaseTransport : public HasLifecycle<BaseTransport> {
                 _log_d(SV_FMT ": dequeued send for " MAGIC_PUBSUB_SV_FMT,
                        SV_ARG(_instanceName),
                        MAGIC_PUBSUB_SV_ARG(item->envelope.header));
-                FAIL_IF_UNEXPECTED_FWD(
-                    frameSize, detail::SerDe::serialize(item->envelope, buf),
-                    "Failed to serialize frame for sending");
-                auto frame = std::span<const std::byte>{buf.data(), frameSize};
+                // Keep transport scratch frames on the stack. They are small,
+                // moving them into shared transport state did not lower the
+                // observed PubSub stack watermark, and member buffers add
+                // refactoring risk if transport call ownership ever widens
+                // beyond the current single-runner model.
+                auto sendBuffer = std::array<std::byte, bufferSize>{};
+                const auto frameSize =
+                    detail::SerDe::encodedSize(item->envelope.header);
+                if (frameSize > sendBuffer.size()) {
+                    return ERR(Overflow);
+                }
+                auto frame =
+                    std::span<const std::byte>{sendBuffer.data(), frameSize};
+                if (item->envelope.owner == &_ingress &&
+                    _ingress.hasSerializedFrame(item->envelope.header)) {
+                    FAIL_IF_ERR_FWD(
+                        _ingress.getSerializedFrame(
+                            item->envelope.header,
+                            std::span<std::byte>{sendBuffer.data(), frameSize}),
+                        "Failed to reuse serialized ingress frame for sending");
+                } else {
+                    FAIL_IF_UNEXPECTED_FWD(
+                        encodedSize,
+                        detail::SerDe::serialize(item->envelope, sendBuffer),
+                        "Failed to serialize frame for sending");
+                    (void)encodedSize;
+                }
                 _log_d(SV_FMT ": sending %zu bytes for " MAGIC_PUBSUB_SV_FMT,
                        SV_ARG(_instanceName), frameSize,
                        MAGIC_PUBSUB_SV_ARG(item->envelope.header));
@@ -124,32 +198,56 @@ class BaseTransport : public HasLifecycle<BaseTransport> {
         return OK();
     }
 
-    ReturnCode receive(size_t maxCount = std::numeric_limits<size_t>::max()) {
+    ReturnCode
+    receive(size_t maxCount = std::numeric_limits<size_t>::max()) override {
         FAIL_IF_INACTIVE_ERR("Cannot work inactive transport %s",
                              _instanceName);
+        FAIL_IF_ERR_FWD(_observeAvailability(),
+                        "Failed to observe transport availability");
+        if (!_available()) {
+            return OK();
+        }
         auto ret = OK();
         size_t count = 0;
 
-        auto buf = std::array<std::byte, bufferSize>{};
-
         while (ret.ok() && count < maxCount) {
-            auto receiveResult = _receiveCallback(_transport, buf);
+            auto receiveBuffer = std::array<std::byte, bufferSize>{};
+            auto receiveResult = _receiveCallback(_transport, receiveBuffer);
 
             if (receiveResult) {
                 _log_d(SV_FMT ": received raw frame of %zu bytes",
                        SV_ARG(_instanceName), *receiveResult);
+                auto frame = std::span<const std::byte>{receiveBuffer.data(),
+                                                        *receiveResult};
+                if (_ingressDispatchCallback != nullptr) {
+                    FAIL_IF_UNEXPECTED_FWD(
+                        handled,
+                        _ingressDispatchCallback(
+                            _pubSubNode, frame,
+                            detail::IngressContext{
+                                .transportId = _transportId,
+                            }),
+                        "Failed to dispatch transport ingress frame");
+                    if (handled) {
+                        ++count;
+                        continue;
+                    }
+                }
                 FAIL_IF_UNEXPECTED_FWD(
                     envelope,
-                    _ingress.storeFrame(
-                        std::span<const std::byte>{buf.data(), *receiveResult}),
+                    _ingress.storeFrame(frame),
                     "Failed to store received frame in ingress");
+                if (!envelope.has_value()) {
+                    ++count;
+                    continue;
+                }
                 _log_d(SV_FMT
                        ": enqueuing received envelope for " MAGIC_PUBSUB_SV_FMT,
                        SV_ARG(_instanceName),
-                       MAGIC_PUBSUB_SV_ARG(envelope.header));
+                       MAGIC_PUBSUB_SV_ARG(envelope->header));
                 FAIL_IF_ERR_FWD(
                     Totem::Queue::Platform::send(
-                        _publishQueue, static_cast<void *>(&envelope)),
+                        _publishQueue, static_cast<void *>(&*envelope)),
                     "Failed to enqueue received frame for publishing");
                 ++count;
             } else {
@@ -166,8 +264,14 @@ class BaseTransport : public HasLifecycle<BaseTransport> {
         return OK();
     }
 
-    ReturnCode pollInto(void *ctx, detail::PollIntoCallback callback,
-                        size_t maxCount = std::numeric_limits<size_t>::max()) {
+    ReturnCode
+    pollInto(void *ctx, detail::PollIntoCallback callback,
+             size_t maxCount = std::numeric_limits<size_t>::max()) override {
+        FAIL_IF_ERR_FWD(_observeAvailability(),
+                        "Failed to observe transport availability");
+        if (!_available()) {
+            return OK();
+        }
         size_t count = 0;
         while (count++ < maxCount) {
             Envelope item;
@@ -183,7 +287,7 @@ class BaseTransport : public HasLifecycle<BaseTransport> {
             }
             _log_d(SV_FMT ": pollInto dispatch " MAGIC_PUBSUB_SV_FMT,
                    SV_ARG(_instanceName), MAGIC_PUBSUB_SV_ARG(item.header));
-            FAIL_IF_ERR_FWD(callback(ctx, item),
+            FAIL_IF_ERR_FWD(callback(ctx, item, std::nullopt),
                             "Failed to process item from publish queue");
         }
         std::unreachable();
@@ -194,6 +298,42 @@ class BaseTransport : public HasLifecycle<BaseTransport> {
         _log_d(SV_FMT ": ack " MAGIC_PUBSUB_SV_FMT, SV_ARG(_instanceName),
                MAGIC_PUBSUB_SV_ARG(envelope.header));
         return _sendAckCallback(_pubSubNode, _transportId, envelope);
+    }
+
+    ReturnCode _wake(Signal signal = Signal::Ping) {
+        if (_wakeCallback == nullptr) {
+            return OK();
+        }
+        return _wakeCallback(_pubSubNode, signal);
+    }
+
+    [[nodiscard]] bool _available() const {
+        if (_availableCallback == nullptr) {
+            return true;
+        }
+        return _availableCallback(_transport);
+    }
+
+    ReturnCode _observeAvailability() {
+        const auto availableNow = _available();
+        if (!_availabilityKnown) {
+            _availabilityKnown = true;
+            _wasAvailable = availableNow;
+            if (!availableNow || _availabilityObserver == nullptr) {
+                return OK();
+            }
+            return _availabilityObserver->onTransportAvailabilityChanged(
+                _transportId, availableNow);
+        }
+        if (_wasAvailable == availableNow) {
+            return OK();
+        }
+        _wasAvailable = availableNow;
+        if (_availabilityObserver == nullptr) {
+            return OK();
+        }
+        return _availabilityObserver->onTransportAvailabilityChanged(
+            _transportId, availableNow);
     }
 
     ReturnCode _onBegin() {
@@ -233,9 +373,16 @@ class BaseTransport : public HasLifecycle<BaseTransport> {
     void *_transport = nullptr;
     std::string_view _instanceName;
     detail::TransportId _transportId;
+    detail::TransportForwardingPolicy _forwardingPolicy;
     SendAckCallback _sendAckCallback = nullptr;
     SendCallback _sendCallback = nullptr;
     ReceiveCallback _receiveCallback = nullptr;
+    AvailableCallback _availableCallback = nullptr;
+    detail::ITransportAvailabilityObserver *_availabilityObserver = nullptr;
+    WakeCallback _wakeCallback = nullptr;
+    IngressDispatchCallback _ingressDispatchCallback = nullptr;
+    bool _availabilityKnown = false;
+    bool _wasAvailable = false;
 
     Totem::Queue::Handle _sendQueue{};
     Totem::Queue::Platform::Storage<detail::FrameHandle,

@@ -24,7 +24,43 @@ class StepScheduler {
         }
     }
 
+    [[nodiscard]] uint32_t timeoutMsUntilNextStep() {
+        return ::platform::ticks_to_ms(_timeoutTicksUntilNextStep());
+    }
+
+    void markPeriodicStep() {
+        if (_intervalTicks == 0) {
+            return;
+        }
+
+        const auto now = ::platform::get_tick();
+        if (_noCatchup && (now - _lastStepTick) > _intervalTicks) {
+            _lastStepTick = now;
+            return;
+        }
+
+        _lastStepTick += _intervalTicks;
+    }
+
   private:
+    [[nodiscard]] ::platform::Tick _timeoutTicksUntilNextStep() {
+        if (_intervalTicks == 0) {
+            return 0;
+        }
+
+        const auto now = ::platform::get_tick();
+        if (_noCatchup && (now - _lastStepTick) > _intervalTicks) {
+            _lastStepTick = now;
+            return _intervalTicks;
+        }
+
+        const auto nextStepTick = _lastStepTick + _intervalTicks;
+        if (now >= nextStepTick) {
+            return 0;
+        }
+        return nextStepTick - now;
+    }
+
     ::platform::Tick _intervalTicks;
     ::platform::Tick _lastStepTick;
     bool _noCatchup;

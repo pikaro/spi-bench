@@ -1,14 +1,17 @@
 #pragma once
 
 #include "Macros/Facade.hpp"
+#include "MetricsBackend/Interfaces/Types.hpp"
 #include "Mutex/Facade.hpp"
 #include "Platform/PlatformSelect.hpp"
 #include "TaskController/Interfaces/Config.hpp"
+#include "TaskController/Interfaces/IRegistry.hpp"
 #include "TaskController/Interfaces/TaskHooks.hpp"
 #include "TaskController/Interfaces/TaskRuntimeSnapshot.hpp"
 #include "TaskController/detail/Loop.hpp"
 #include "TaskController/detail/PlatformSelect.hpp"
 #include "TaskController/detail/StateManager.hpp"
+#include "TaskMetrics.hpp"
 #include "Types/Error.hpp"
 #include "Types/Signal.hpp"
 #include <atomic>
@@ -22,12 +25,15 @@ class Runner {
   public:
     static constexpr const char *name = "TaskController::Runner";
 
-    explicit Runner(TaskHooks hooks) : _hooks(hooks) {}
+    explicit Runner(TaskHooks hooks, IRegistry &registry)
+        : _hooks(hooks), _registry(registry) {}
 
     [[nodiscard]] const Config &config() const { return _config; }
 
     ReturnCode start(Config cfg) {
         _config = cfg;
+        _metricsGroupDesc.name = cfg.name;
+        _metrics = TaskMetrics::create(_metricsGroupDesc);
 
         if (!_stateManager.tryStart()) {
             _log_e("Failed to start runner %s: Invalid state", _config.name);
@@ -41,13 +47,14 @@ class Runner {
         return OK();
     }
 
-    ReturnCode requestStop() {
+    ReturnCode requestStop() { return signal(Signal::Stop); }
+
+    ReturnCode signal(Signal signal = Signal::Ping) {
         Mutex::ScopedSpinlockGuard guard{_lock};
         FAIL_IF_NULL(_handle, ERR(OperationFailed),
-                     "Cannot request stop on unstarted runner");
-        auto result = Platform::signal_task(_handle, Signal::Stop);
-        FAIL_IF_ERR(result, ERR(OperationFailed),
-                    "Failed to signal task to stop");
+                     "Cannot signal unstarted runner");
+        auto result = Platform::signal_task(_handle, signal);
+        FAIL_IF_ERR(result, ERR(OperationFailed), "Failed to signal task");
         return OK();
     }
 
@@ -65,6 +72,12 @@ class Runner {
         _hasStopResult.store(true, std::memory_order_release);
         _stateManager.enterStopped();
 
+        auto deregisterResult = _registry.deregisterManagedTaskHandle(
+            reinterpret_cast<uintptr_t>(handle));
+        if (!deregisterResult.ok()) {
+            _log_e("Failed to deregister killed runner handle for %s: " ERR_FMT,
+                   _config.name, ERR_ARG(deregisterResult));
+        }
         Platform::kill_task(handle);
         _log_w("Killed runner %s", _config.name);
     }
@@ -194,10 +207,18 @@ class Runner {
   private:
     static void _run(void *runner) {
         auto *self = static_cast<Runner *>(runner);
+        uintptr_t nativeHandle = 0;
+        {
+            Mutex::ScopedSpinlockGuard guard{self->_lock};
+            if (self->_handle != nullptr) {
+                nativeHandle = reinterpret_cast<uintptr_t>(self->_handle);
+            }
+        }
 
         auto loop = Loop({.config = self->_config,
                           .hooks = self->_hooks,
-                          .stateManager = self->_stateManager});
+                          .stateManager = self->_stateManager,
+                          .metrics = self->_metrics.value()});
         auto result = loop.run();
         if (result.reason == ExitReason::StopRequested) {
             _log_i("Runner %s exited successfully", self->_config.name);
@@ -212,6 +233,14 @@ class Runner {
         {
             Mutex::ScopedSpinlockGuard guard{self->_lock};
             self->_handle = nullptr;
+        }
+        if (nativeHandle != 0) {
+            auto deregisterResult =
+                self->_registry.deregisterManagedTaskHandle(nativeHandle);
+            if (!deregisterResult.ok()) {
+                _log_e("Failed to deregister runner handle for %s: " ERR_FMT,
+                       self->_config.name, ERR_ARG(deregisterResult));
+            }
         }
         self->_stopResult = result;
         self->_hasStopResult.store(true, std::memory_order_release);
@@ -237,6 +266,19 @@ class Runner {
             Mutex::ScopedSpinlockGuard guard{_lock};
             _handle = result.handle;
         }
+        auto registerResult = _registry.registerManagedTaskHandle(
+            reinterpret_cast<uintptr_t>(result.handle));
+        if (!registerResult.ok()) {
+            {
+                Mutex::ScopedSpinlockGuard guard{_lock};
+                _handle = nullptr;
+            }
+            Platform::kill_task(result.handle);
+            _stateManager.enterStopped();
+            FAIL(registerResult,
+                 "Failed to register managed task handle for runner %s",
+                 _config.name);
+        }
 
         _log_i("Started runner %s", _config.name);
 
@@ -245,10 +287,19 @@ class Runner {
 
     TaskHandle _handle = nullptr;
     StateManager _stateManager;
+
     Config _config;
+    MetricsBackend::MetricGroupDesc _metricsGroupDesc{
+        .name = nullptr,
+    };
+    std::optional<TaskMetrics> _metrics = std::nullopt;
+
     TaskRuntimeSnapshot _runtimeSnapshot{};
     TaskPlatformSnapshot _platformSnapshot{};
+
     TaskHooks _hooks;
+    IRegistry &_registry;
+
     std::optional<Result> _stopResult = std::nullopt;
     std::atomic<bool> _hasEverStarted = false;
     std::atomic<bool> _hasStopResult = false;

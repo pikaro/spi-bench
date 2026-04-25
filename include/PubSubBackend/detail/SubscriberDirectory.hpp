@@ -20,21 +20,21 @@ struct SubscriberEntry {
     std::string_view name;
 };
 
+class SubscriberDirectory;
+
 using SubscriberDirectoryImpl =
-    Directory<uintptr_t, SubscriberEntry, Spec::Limits::maxSubscribers>;
+    BaseDirectory<SubscriberDirectory, SubscriberKey, SubscriberEntry,
+                  Spec::Limits::maxSubscribers>;
 
 class SubscriberDirectory : public SubscriberDirectoryImpl {
-    using Base = SubscriberDirectoryImpl;
-
   public:
     explicit SubscriberDirectory(const char *ownerName)
-        : Base(ownerName, Totem::PubSubBackend::detail::logComponent) {}
+        : SubscriberDirectoryImpl(ownerName,
+                                  Totem::PubSubBackend::detail::logComponent) {}
 
-    using EntryKey = typename Base::EntryKey;
-
-    std::expected<EntryKey, ReturnCode> add(const char *subscriberName,
-                                            const Subscriber &subscriber,
-                                            TopicId topic) {
+    std::expected<SubscriberKey, ReturnCode> add(const char *subscriberName,
+                                                 const Subscriber &subscriber,
+                                                 TopicId topic) {
         FAIL_IF_NULL(subscriberName, std::unexpected(ERR(InvalidArgument)),
                      "%s: PubSub subscriber name cannot be null",
                      this->ownerName());
@@ -49,7 +49,7 @@ class SubscriberDirectory : public SubscriberDirectoryImpl {
     }
 
     [[nodiscard]] std::expected<TopicId, ReturnCode>
-    topicForSubscriber(const EntryKey &subscriberKey) const {
+    topicForSubscriber(const SubscriberKey &subscriberKey) const {
         TopicId topic;
         auto ret = this->withEntryConst(subscriberKey,
                                         [&topic](const SubscriberEntry &entry) {

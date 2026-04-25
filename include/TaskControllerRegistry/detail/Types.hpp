@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Types/Logging.hpp"
+#include "LoggingBackend/Interfaces/Types.hpp"
 
 namespace Totem::TaskControllerRegistry::detail {
 

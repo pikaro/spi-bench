@@ -4,13 +4,12 @@
 #include "Concepts/Base.hpp"
 #include "TaskController/Facade.hpp"
 #include "TaskController/Interfaces/Config.hpp"
-#include "TaskController/Interfaces/RegistryHooks.hpp"
+#include "TaskController/Interfaces/IRegistry.hpp"
 #include "Types/Error.hpp"
 
 template <class Derived, typename ConfT = NoConfig> class HasTaskController {
   protected:
-    explicit HasTaskController(
-        Totem::TaskController::RegistryHooks registryHooks)
+    explicit HasTaskController(Totem::TaskController::IRegistry &registryHooks)
         : _taskController(Derived::name, registryHooks, Derived::logComponent) {
     }
 

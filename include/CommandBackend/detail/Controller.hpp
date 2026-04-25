@@ -3,7 +3,8 @@
 #include "Base/HasLifecycle.hpp"
 #include "Base/HasTaskController.hpp"
 #include "CommandBackend/Interfaces/CommandDesc.hpp"
-#include "CommandBackend/Interfaces/Transport.hpp"
+#include "CommandBackend/Interfaces/ITransport.hpp"
+#include "CommandBackend/Interfaces/Types.hpp"
 #include "CommandBackend/detail/Config.hpp"
 #include "CommandBackend/detail/Dispatcher.hpp"
 #include "CommandBackend/detail/Registrar.hpp"
@@ -11,7 +12,7 @@
 #include "CommandBackend/detail/Types.hpp" // IWYU pragma: keep
 #include "Macros/Facade.hpp"
 #include "StaticConfig/Command.hpp"
-#include "TaskController/Interfaces/RegistryHooks.hpp"
+#include "TaskController/Interfaces/IRegistry.hpp"
 #include "TaskController/Interfaces/TaskHooks.hpp"
 #include "Types/Error.hpp"
 #include <array>
@@ -34,17 +35,15 @@ class Controller : public HasLifecycle<Controller, Config>,
 
     static constexpr const char *name = "CommandCtrl";
 
-    explicit Controller(TaskController::RegistryHooks registryHooks)
-        : HasTaskController(registryHooks), _registrar(_store) {}
+    explicit Controller(TaskController::IRegistry &registry)
+        : HasTaskController(registry), _registrar(_store) {}
 
     Registrar &registrar() { return _registrar; }
 
-    ReturnCode addTransport(const Transport &transport) {
-        FAIL_IF(!transport.validate(), ERR(InvalidArgument),
-                "Invalid command transport provided to %s", name);
+    ReturnCode addTransport(ITransport &transport) {
         for (auto &slot : _transports) {
-            if (!slot.validate()) {
-                slot = transport;
+            if (slot == nullptr) {
+                slot = &transport;
                 return OK();
             }
         }
@@ -78,7 +77,7 @@ class Controller : public HasLifecycle<Controller, Config>,
 
         FAIL_IF_UNEXPECTED_FWD(
             commandEntry,
-            _store.get(Store::CommandNameKey::fromStringView(commandLine[0])),
+            _store.get(CommandNameKey::fromStringView(commandLine[0])),
             "Command " SV_FMT " not found in store", SV_ARG(commandLine[0]));
 
         return Dispatcher::dispatch(commandEntry.second, commandEntry.first,
@@ -87,32 +86,35 @@ class Controller : public HasLifecycle<Controller, Config>,
 
     ReturnCode _onTaskStep() {
         for (const auto &transport : _transports) {
-            if (!transport.validate()) {
+            if (transport == nullptr) {
                 continue;
             }
-            auto pollResult = transport.poll();
+            auto pollResult = transport->poll();
             if (!pollResult) {
                 if (pollResult.error() == ERR(CoreError, NotFound)) {
                     continue;
                 }
                 if (pollResult.error().domain == ErrorDomain::Command) {
-                    _log_w("Command error from transport %s: " ERR_FMT,
-                           transport.name, ERR_ARG(pollResult.error()));
+                    _log_w("Command error from transport " SV_FMT ": " ERR_FMT,
+                           SV_ARG(transport->displayName()),
+                           ERR_ARG(pollResult.error()));
                     continue;
                 }
-                FAIL(pollResult.error(), "Error from command transport %s",
-                     transport.name);
+                FAIL(pollResult.error(),
+                     "Error from command transport " SV_FMT ": " ERR_FMT,
+                     SV_ARG(transport->displayName()),
+                     ERR_ARG(pollResult.error()));
             }
 
             auto dispatchResult = _dispatch(*pollResult);
             if (dispatchResult == ERR(CoreError, NotFound)) {
-                _log_w("Command not found for input from transport %s",
-                       transport.name);
+                _log_w("Command not found for input from transport " SV_FMT,
+                       SV_ARG(transport->displayName()));
                 continue;
             }
             FAIL_IF_ERR_FWD(dispatchResult,
-                            "Failed to dispatch command from transport %s",
-                            transport.name);
+                            "Failed to dispatch command from transport " SV_FMT,
+                            SV_ARG(transport->displayName()));
         }
         return OK();
     }
@@ -125,7 +127,7 @@ class Controller : public HasLifecycle<Controller, Config>,
 
     Store _store;
     Registrar _registrar;
-    std::array<Transport, CommandConfig::maxTransports> _transports;
+    std::array<ITransport *, CommandConfig::maxTransports> _transports{nullptr};
 
     static const LogComponent logComponent =
         Totem::CommandBackend::detail::logComponent;

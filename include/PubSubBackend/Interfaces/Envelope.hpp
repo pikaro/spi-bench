@@ -33,6 +33,12 @@ struct EnvelopeDef {
     void *owner;
     Topic topic;
     MessageId messageId;
+    NodeId source = static_cast<NodeId>(NodeData::PubSub::nodeId);
+    TrafficClass trafficClass =
+        static_cast<uint32_t>(topic) ==
+                static_cast<uint32_t>(NodeData::PubSub::Topic::PubSub)
+            ? TrafficClass::Critical
+            : TrafficClass::Noncritical;
     PayloadPtrGetter getPayloadPtr = nullptr;
     PayloadGetter getPayload = nullptr;
     PayloadEncoder encodePayload = nullptr;
@@ -124,7 +130,8 @@ struct Envelope {
                     .timestampMs = ::platform::get_time(),
                     .messageId = def.messageId,
                     .topic = static_cast<TopicId>(def.topic),
-                    .source = static_cast<NodeId>(NodeData::PubSub::nodeId),
+                    .source = def.source,
+                    .trafficClass = def.trafficClass,
                     .payloadSize = static_cast<uint16_t>(payloadSize),
                 },
             .owner = def.owner,

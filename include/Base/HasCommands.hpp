@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CommandBackend/Interfaces/CommandDesc.hpp"
-#include "CommandBackend/detail/Store.hpp"
+#include "CommandBackend/Interfaces/Types.hpp"
 #include "Concepts/Base.hpp"
 #include "Macros/Facade.hpp"
 #include "Services/Commands.hpp"
@@ -15,7 +15,7 @@
 template <class Derived, typename CommandSet> class HasCommands {
   protected:
     ReturnCode _registerCommands() {
-        auto &registrar = CommandService::registrar();
+        auto &registrar = CommandRegistrarService::get();
         auto cmdSet = CommandSet();
         for (auto *cmd : cmdSet.commands()) {
             FAIL_IF(_registeredCommandCount >=
@@ -37,7 +37,7 @@ template <class Derived, typename CommandSet> class HasCommands {
     }
 
     ReturnCode _deregisterCommands() {
-        auto &registrar = CommandService::registrar();
+        auto &registrar = CommandRegistrarService::get();
         for (const auto &nameKey : _registeredCommandKeys) {
             if (!nameKey) {
                 continue;
@@ -51,7 +51,7 @@ template <class Derived, typename CommandSet> class HasCommands {
 
   private:
     uint8_t _registeredCommandCount = 0;
-    std::array<Totem::CommandBackend::detail::Store::CommandNameKey,
+    std::array<Totem::CommandBackend::CommandNameKey,
                CommandConfig::maxEntriesPerClass>
         _registeredCommandKeys{};
 };

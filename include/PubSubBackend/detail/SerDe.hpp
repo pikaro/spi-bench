@@ -68,33 +68,51 @@ class SerDe {
                          ReturnCode>
     deserializeRaw(std::span<const std::byte> frame) {
         _log_d("SerDe: deserialize raw frame of %zu bytes", frame.size());
+        FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
+            header, peekHeader(frame), "Failed to peek header from frame");
+        FAIL_IF_ERR_FWD_UNEXPECTED(validateFrame(frame, header),
+                                   "Failed to validate frame for "
+                                   MAGIC_PUBSUB_SV_FMT,
+                                   MAGIC_PUBSUB_SV_ARG(header));
+        auto payloadSpan = frame.subspan(headerSize, header.payloadSize);
+        _log_d("SerDe: deserialized " MAGIC_PUBSUB_SV_FMT,
+               MAGIC_PUBSUB_SV_ARG(header));
+        return std::make_pair(header, payloadSpan);
+    }
+
+    static std::expected<Header, ReturnCode>
+    peekHeader(std::span<const std::byte> frame) {
         FAIL_IF(frame.size() < headerSize + overheadSize,
                 std::unexpected(ERR(CoreError, InvalidData)),
                 "Frame size is too small to contain header and CRC");
+        auto headerSpan = frame.first(headerSize);
+        FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(header,
+                                          Codec<Header>::decode(headerSpan),
+                                          "Failed to decode header from frame");
+        FAIL_IF(encodedSize(header) != frame.size(),
+                std::unexpected(ERR(CoreError, InvalidData)),
+                "Frame size does not match encoded size for "
+                MAGIC_PUBSUB_SV_FMT,
+                MAGIC_PUBSUB_SV_ARG(header));
+        return header;
+    }
 
+    static ReturnCode validateFrame(std::span<const std::byte> frame,
+                                    const Header &header) {
+        FAIL_IF(encodedSize(header) != frame.size(), ERR(CoreError, InvalidData),
+                "Frame size does not match encoded size for "
+                MAGIC_PUBSUB_SV_FMT,
+                MAGIC_PUBSUB_SV_ARG(header));
         auto crcSpan =
             frame.subspan(frame.size() - sizeof(uint32_t), sizeof(uint32_t));
         uint32_t expectedCrc{};
         std::memcpy(&expectedCrc, crcSpan.data(), sizeof(expectedCrc));
 
         auto actualCrc = _crcSum(frame.first(frame.size() - sizeof(uint32_t)));
-        if (actualCrc != expectedCrc) {
-            return std::unexpected(ERR(CoreError, InvalidData));
-        }
-
-        auto headerSpan = frame.first(headerSize);
-        auto payloadSpan =
-            frame.subspan(headerSize, frame.size() - overheadSize - headerSize);
-
-        FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(header,
-                                          Codec<Header>::decode(headerSpan),
-                                          "Failed to decode header from frame");
-        FAIL_IF(payloadSpan.size() != header.payloadSize,
-                std::unexpected(ERR(CoreError, InvalidData)),
-                "Payload size in frame does not match payloadSize in header");
-        _log_d("SerDe: deserialized " MAGIC_PUBSUB_SV_FMT,
-               MAGIC_PUBSUB_SV_ARG(header));
-        return std::make_pair(header, payloadSpan);
+        FAIL_IF(actualCrc != expectedCrc, ERR(CoreError, InvalidData),
+                "CRC mismatch for " MAGIC_PUBSUB_SV_FMT,
+                MAGIC_PUBSUB_SV_ARG(header));
+        return OK();
     }
 
     template <typename T>
@@ -128,7 +146,8 @@ class SerDe {
   private:
     [[nodiscard]] static uint32_t
     _crcSum(const std::span<const std::byte> frame) {
-        return CRC::Calculate(frame.data(), frame.size(), CRC::CRC_32());
+        static const auto table = CRC::CRC_32().MakeTable();
+        return CRC::Calculate(frame.data(), frame.size(), table);
     }
 };
 

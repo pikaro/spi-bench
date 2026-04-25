@@ -2,45 +2,46 @@
 
 #include "Base/HasLifecycle.hpp"
 #include "Directory.hpp"
+#include "LoggingBackend/Interfaces/Types.hpp"
 #include "Macros/Facade.hpp"
 #include "Runner.hpp"
 #include "TaskController/Interfaces/Config.hpp"
-#include "TaskController/Interfaces/RegistryHooks.hpp"
+#include "TaskController/Interfaces/IRegistry.hpp"
 #include "TaskController/Interfaces/TaskHooks.hpp"
+#include "TaskController/Interfaces/TaskRuntimeSnapshot.hpp"
+#include "TaskController/Interfaces/Types.hpp"
 #include "TaskController/detail/Concepts.hpp"
 #include "TaskController/detail/PlatformSelect.hpp"
+#include "TaskControllerRegistry/Interfaces/ITaskSource.hpp"
 #include "TaskControllerRegistry/Interfaces/TaskSourceFeatures.hpp"
-#include "TaskControllerRegistry/Interfaces/TaskSourceHooks.hpp"
 #include "Types/Error.hpp"
-#include "Types/Logging.hpp"
+#include "Types/Signal.hpp"
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <memory>
-#include <optional>
+#include <string_view>
+#include <utility>
 
 namespace Totem::TaskController::detail {
 
 static constexpr ::platform::Tick defaultEndKillDelayMs = 100;
 
-class Controller : public HasLifecycle<Controller, Config> {
+class Controller : public HasLifecycle<Controller, Config>,
+                   public TaskControllerRegistry::ITaskSource {
     friend class HasLifecycle<Controller, Config>;
     friend struct LifecycleContract<Controller, Config>;
 
     using RunnerKeySnapshot = Directory::EntryKeySnapshot;
 
   public:
-    using RunnerKey = Directory::EntryKey;
-
     static constexpr const char *name = "TaskController::Controller";
 
-    Controller(const char *ownerName, RegistryHooks registryHooks,
+    Controller(const char *ownerName, IRegistry &registry,
                LogComponent component)
-        : _directory(ownerName, component), _registryHooks(registryHooks),
+        : _directory(ownerName, component, registry), _registry(registry),
           _ownerName(ownerName) {
-        ABORT_IF_NOT(_registryHooks.validate(),
-                     "Invalid registry hooks for %s of %s", name, _ownerName);
         auto sourceInfo = TaskControllerRegistry::TaskSourceInfo{
             .displayName = ownerName,
             .kind = TaskControllerRegistry::TaskSourceKind::ManagedController,
@@ -48,16 +49,14 @@ class Controller : public HasLifecycle<Controller, Config> {
                 TaskControllerRegistry::TaskSourceCapability::Reap |
                 TaskControllerRegistry::TaskSourceCapability::Managed,
         };
-        ABORT_IF_ERR(_registryHooks.registerSource(
-                         reinterpret_cast<uintptr_t>(this),
-                         TaskControllerRegistry::TaskSourceHooks::bind(*this),
-                         sourceInfo),
+        ABORT_IF_ERR(_registry.registerSource(reinterpret_cast<uintptr_t>(this),
+                                              *this, sourceInfo),
                      "Failed to register %s of %s", name, _ownerName);
     }
 
-    ~Controller() {
+    ~Controller() override {
         ABORT_IF_ERR(
-            _registryHooks.deregisterSource(reinterpret_cast<uintptr_t>(this)),
+            _registry.deregisterSource(reinterpret_cast<uintptr_t>(this)),
             "Failed to deregister %s of %s", name, _ownerName);
     }
 
@@ -114,19 +113,58 @@ class Controller : public HasLifecycle<Controller, Config> {
             });
     }
 
-    std::expected<uint8_t, ReturnCode> reap() {
+    ReturnCode signalTask(RunnerKey ref, Signal signal = Signal::Ping) {
+        FAIL_IF_INACTIVE_ERR("%s of %s", name, _ownerName);
+        return _directory.withEntry(
+            ref, [this, signal](RunnerEntry &entry) -> ReturnCode {
+                FAIL_IF(!entry.runner->hasEverStarted(), ERR(InvalidState),
+                        "Cannot signal %s of %s: Task runner has not been "
+                        "started",
+                        name, _ownerName);
+                FAIL_IF(entry.runner->hasStopped(), ERR(InvalidState),
+                        "Cannot signal %s of %s: Task runner has already been "
+                        "stopped",
+                        name, _ownerName);
+                return entry.runner->signal(signal);
+            });
+    }
+
+    ReturnCode signalTask(std::string_view refName,
+                          Signal signal = Signal::Ping) {
+        FAIL_IF_INACTIVE_ERR("%s of %s", name, _ownerName);
+        return _directory.withName(
+            refName, [this, signal](RunnerEntry &entry) -> ReturnCode {
+                FAIL_IF(!entry.runner->hasEverStarted(), ERR(InvalidState),
+                        "Cannot signal %s of %s: Task runner has not been "
+                        "started",
+                        name, _ownerName);
+                FAIL_IF(entry.runner->hasStopped(), ERR(InvalidState),
+                        "Cannot signal %s of %s: Task runner has already been "
+                        "stopped",
+                        name, _ownerName);
+                return entry.runner->signal(signal);
+            });
+    }
+
+    std::expected<uint8_t, ReturnCode> reap() override {
         FAIL_IF_INACTIVE_UNEXPECTED("%s of %s", name, _ownerName);
         auto filter = [](const RunnerKey &, const RunnerEntry &entry) -> bool {
             return entry.runner->hasStopped();
         };
-        auto extractedResult = _directory.extract(filter);
-        FAIL_IF(
-            extractedResult.error(), std::unexpected(extractedResult.error()),
-            "Failed to extract stopped runners for %s of %s", name, _ownerName);
+        auto stoppedKeysResult = _directory.snapshotKeys(filter);
+        FAIL_IF(!stoppedKeysResult, std::unexpected(stoppedKeysResult.error()),
+                "Failed to snapshot stopped runners for %s of %s", name,
+                _ownerName);
         ReturnCode finalRet = OK();
-        for (size_t i = 0; i < extractedResult.value().count; ++i) {
-            auto &entry = extractedResult.value().entries[i];
-            auto ret = _handleStoppedRunner(*this, entry);
+        uint8_t handledCount = 0;
+        for (size_t i = 0; i < stoppedKeysResult->count; ++i) {
+            const auto key = stoppedKeysResult->keys[i];
+            bool removeEntry = true;
+            auto ret = _directory.withEntry(
+                key,
+                [this, key, &removeEntry](RunnerEntry &entry) -> ReturnCode {
+                    return _handleStoppedRunner(*this, key, entry, removeEntry);
+                });
             if (!ret.ok()) {
                 _log_e("Error while handling stopped runner for %s of "
                        "%s: " ERR_FMT,
@@ -134,12 +172,26 @@ class Controller : public HasLifecycle<Controller, Config> {
                 if (finalRet.ok()) {
                     finalRet = ret;
                 }
+                continue;
             }
+            if (removeEntry) {
+                auto removeRet = _directory.remove(key);
+                if (!removeRet.ok()) {
+                    _log_e("Error while removing stopped runner for %s of "
+                           "%s: " ERR_FMT,
+                           name, _ownerName, ERR_ARG(removeRet));
+                    if (finalRet.ok()) {
+                        finalRet = removeRet;
+                    }
+                    continue;
+                }
+            }
+            ++handledCount;
         }
         FAIL_IF_ERR(finalRet, std::unexpected(finalRet),
                     "Error while handling stopped runners for %s of %s", name,
                     _ownerName);
-        return static_cast<uint8_t>(extractedResult.value().count);
+        return handledCount;
     }
 
     std::expected<uint8_t, ReturnCode> terminate() {
@@ -183,7 +235,7 @@ class Controller : public HasLifecycle<Controller, Config> {
         });
     }
 
-    [[nodiscard]] std::expected<bool, ReturnCode> empty() const {
+    [[nodiscard]] std::expected<bool, ReturnCode> empty() override {
         FAIL_IF_INACTIVE_UNEXPECTED("%s of %s", name, _ownerName);
         return _directory.empty();
     }
@@ -194,7 +246,15 @@ class Controller : public HasLifecycle<Controller, Config> {
         return _directory.forEachTaskSnapshot(fun);
     }
 
-    [[nodiscard]] std::expected<uint8_t, ReturnCode> taskCount() const {
+    ReturnCode
+    forEachTaskSnapshot(TaskControllerRegistry::ISnapshotSink &sink) override {
+        return _directory.forEachTaskSnapshot(
+            [&sink](const TaskRuntimeSnapshot &snapshot) {
+                return sink.consume(snapshot);
+            });
+    }
+
+    [[nodiscard]] std::expected<uint8_t, ReturnCode> taskCount() override {
         return _directory.size();
     }
 
@@ -249,8 +309,9 @@ class Controller : public HasLifecycle<Controller, Config> {
         return ERR(OperationFailed);
     }
 
-    static ReturnCode _handleStoppedRunner(Controller &self,
-                                           RunnerEntry &entry) {
+    static ReturnCode _handleStoppedRunner(Controller &self, RunnerKey key,
+                                           RunnerEntry &entry,
+                                           bool &removeEntry) {
         auto result = entry.runner->stopResult();
         FAIL_IF(!result.has_value(), ERR(NotFound),
                 "Stopped runner missing stop result");
@@ -274,11 +335,14 @@ class Controller : public HasLifecycle<Controller, Config> {
             if (config.autoRestart) {
                 _log_i("Auto-restarting task runner %s->%s", self._ownerName,
                        config.name);
-                auto restartResult = _restartTask(self, hooks, config);
+                auto restartResult =
+                    _restartTaskInPlace(self, key, entry, hooks, config);
                 if (!restartResult.ok()) {
                     _log_e(
                         "Failed to auto-restart task runner %s->%s: " ERR_FMT,
                         self._ownerName, config.name, ERR_ARG(restartResult));
+                } else {
+                    removeEntry = false;
                 }
             }
         } else {
@@ -288,26 +352,26 @@ class Controller : public HasLifecycle<Controller, Config> {
         return OK();
     }
 
-    static ReturnCode _restartTask(Controller &self, TaskHooks hooks,
-                                   Config config) {
-        auto addResult = self._directory.add(config.name, hooks);
-        FAIL_IF(
-            !addResult, addResult.error(),
-            "Failed to add task runner %s->%s back to directory for restart",
-            self._ownerName, config.name);
-        auto startResult = self.startTask(*addResult, config);
+    static ReturnCode _restartTaskInPlace(Controller &self, RunnerKey key,
+                                          RunnerEntry &entry, TaskHooks hooks,
+                                          Config config) {
+        auto restartedRunner = std::make_unique<Runner>(hooks, self._registry);
+        auto startResult = restartedRunner->start(config);
         if (!startResult.ok()) {
             _log_e("Failed to restart task runner %s->%s: " ERR_FMT,
                    self._ownerName, config.name, ERR_ARG(startResult));
-            (void)self._directory.remove(*addResult);
             return startResult;
         }
+        entry.runner = std::move(restartedRunner);
+        entry.hooks = hooks;
+        entry.config = config;
+        (void)key;
         return OK();
     }
 
     Directory _directory;
     std::atomic<bool> _permitRegistration{false};
-    RegistryHooks _registryHooks;
+    IRegistry &_registry;
     const char *const _ownerName;
 };
 

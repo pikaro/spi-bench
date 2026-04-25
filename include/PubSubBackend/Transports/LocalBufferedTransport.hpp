@@ -3,8 +3,10 @@
 #include "LocalTransport.hpp"
 #include "Macros/Facade.hpp"
 #include "PubSubBackend/Interfaces/Envelope.hpp"
+#include "PubSubBackend/Interfaces/Types.hpp"
 #include "PubSubBackend/Interfaces/Wire.hpp"
 #include "PubSubBackend/detail/EgressBuffer.hpp"
+#include "PubSubBackend/detail/Metrics.hpp"
 #include "PubSubBackend/detail/Types.hpp"
 #include "Types/Error.hpp"
 #include <cstddef>
@@ -17,6 +19,22 @@ struct LocalTransportEgressByteArenaConfig {
     static constexpr size_t slotCount = 32;
     static constexpr size_t spanCount = 32;
     static constexpr size_t maxRecordAgeMs = 1000;
+
+    [[nodiscard]] static bool isCritical(const Header &header) {
+        return header.trafficClass == TrafficClass::Critical;
+    }
+
+    static ReturnCode onEvictNoncritical(const Header &) {
+        return detail::metrics().addEgressEvictedNoncritical();
+    }
+
+    static ReturnCode onDropNoncritical(const Header &) {
+        return detail::metrics().addEgressDroppedNoncritical();
+    }
+
+    static ReturnCode onRejectCritical(const Header &) {
+        return detail::metrics().addEgressRejectedCritical();
+    }
 };
 
 class LocalBufferedTransport : public LocalTransport {
@@ -57,9 +75,14 @@ class LocalBufferedTransport : public LocalTransport {
                frame.size(), MAGIC_PUBSUB_SV_ARG(header));
         FAIL_IF_ERR_FWD(LocalTransport::_send(header, frame),
                         "Failed to send frame over LocalTransport");
-        FAIL_IF_ERR_FWD(_egressBuffer.store(header, frame),
-                        "Failed to store frame in egress buffer for "
-                        "LocalBufferedTransport");
+        FAIL_IF_UNEXPECTED_FWD(storeRet, _egressBuffer.store(header, frame),
+                               "Failed to store frame in egress buffer for "
+                               "LocalBufferedTransport");
+        if (!storeRet) {
+            _log_w("%s: dropped noncritical buffered frame with message ID %lu "
+                   "under egress pressure",
+                   name, static_cast<unsigned long>(header.messageId));
+        }
         return OK();
     }
 

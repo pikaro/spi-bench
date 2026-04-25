@@ -4,6 +4,11 @@ This document records the repository-level layout and boundaries that are useful
 for navigation and safe edits. Use MCP/LSP for symbol details inside these
 areas.
 
+## Compiler diagnostics
+
+- `main.cpp.cpp.sarif` in the project root contains the latest compiler
+    diagnostics in SARIF format.
+
 ## Top-Level Layout
 
 - `include/`: reusable library code and subsystem internals
@@ -13,7 +18,7 @@ areas.
 - `boards/`: custom PlatformIO board definitions
 - `platformio.ini`: active build environments and common flags
 - `CMakeLists.txt` and `src/CMakeLists.txt`: source-root selection and ESP-IDF
-  component registration
+    component registration
 
 ## Source Roots
 
@@ -27,13 +32,14 @@ by the current PlatformIO environment.
 ## Generated Code
 
 - `include/Generated/Wire/` contains generated wire support code
-- The wire output is produced by `bin/generate_wire_fields.py`
+- `include/Generated/Bindings/` contains generated binding support code
+- The generated outputs are produced through `make wire` and `make bindings`
 - Prefer regenerating these files through the documented command flow instead of
-  editing generated output directly
+    editing generated output directly
 
 ## Editing Guidance
 
 - Prefer changes in the owning subsystem instead of cross-cutting edits
 - Treat `include/Base/` and similar foundational areas as high-impact; change
-  them only when the task requires it
+    them only when the task requires it
 - Keep project docs focused on intent and workflow, not symbol duplication

@@ -1,10 +1,10 @@
 #pragma once
 
 #include "CommandBackend/Interfaces/CommandDesc.hpp"
+#include "CommandBackend/Interfaces/Types.hpp"
 #include "CommandBackend/detail/Types.hpp"
 #include "Generic/Directory.hpp"
 #include "StaticConfig/Command.hpp"
-#include "Types/Collection.hpp"
 #include "Types/Error.hpp"
 #include <cstring>
 #include <expected>
@@ -16,25 +16,22 @@ struct CommandSlot {
     void *ctx;
 };
 
-using DirectoryImpl = GettableDirectory<NameKey<CommandConfig::maxNameLength>,
-                                        CommandSlot, CommandConfig::maxEntries>;
+class Directory;
+
+using DirectoryImpl =
+    BaseGettableDirectory<Directory, CommandNameKey, CommandSlot,
+                          CommandConfig::maxEntries>;
 
 class Directory : public DirectoryImpl {
   public:
-    using EntryKey = typename DirectoryImpl::EntryKey;
-
     explicit Directory()
         : DirectoryImpl("Command::Directory",
-                        Totem::CommandBackend::detail::logComponent) {
-        _setHooks({
-            .self = this,
-        });
-    }
+                        Totem::CommandBackend::detail::logComponent) {}
 
-    std::expected<EntryKey, ReturnCode> add(const EntryKey &commandNameKey,
-                                            void *ctx,
-                                            const CommandDesc &metricDesc) {
-        return _addImpl(commandNameKey, {.desc = &metricDesc, .ctx = ctx});
+    std::expected<CommandNameKey, ReturnCode>
+    add(void *ctx, const CommandDesc &metricDesc) {
+        return _addImpl(CommandNameKey::fromStringView(metricDesc.name),
+                        {.desc = &metricDesc, .ctx = ctx});
     }
 };
 

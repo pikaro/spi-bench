@@ -8,6 +8,7 @@
 #include "Types/Error.hpp"
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <expected>
 #include <span>
@@ -17,6 +18,7 @@ namespace Totem::PubSubBackend::Transports {
 
 struct LocalTransportDependencies {
     BaseTransportDependencies base;
+    uint32_t readyAfterMs = 0;
 
     [[nodiscard]] bool valid() const { return base.valid(); }
 
@@ -39,6 +41,10 @@ struct LocalTransportDependencies {
 class LocalTransport : public BaseTransport {
     using Base = BaseTransport;
     friend struct BaseTransportContract;
+    // Point-to-point local links only bridge one peer pair. A small RX queue
+    // is enough to absorb scheduler jitter without paying for a full
+    // maxMessageQueueSize buffer per endpoint.
+    static constexpr size_t rxQueueDepth = 4;
 
     struct RxFrame {
         std::array<std::byte, Base::bufferSize> data;
@@ -47,7 +53,7 @@ class LocalTransport : public BaseTransport {
 
   public:
     explicit LocalTransport(LocalTransportDependencies deps)
-        : Base(deps.withBaseDeps(this, _sendCallback, _receiveCallback)) {
+        : Base(_makeBaseDeps(this, deps)), _readyAfterMs(deps.readyAfterMs) {
         ABORT_IF_NOT(deps.valid(), "Invalid LocalTransport dependencies");
     }
 
@@ -55,6 +61,14 @@ class LocalTransport : public BaseTransport {
     DELETE_MOVE(LocalTransport)
 
     static constexpr const char *name = "LocalTransport";
+
+    /**
+     * Point-to-point local transport does not retain a transport-owned egress
+     * copy after enqueueing onto the linked peer RX queue.
+     */
+    [[nodiscard]] bool wasFrameFreed(const Header & /*header*/) const {
+        return true;
+    }
 
     ReturnCode addLink(LocalTransport &other) {
         FAIL_IF_INACTIVE_ERR("Cannot link inactive LocalTransport");
@@ -71,6 +85,18 @@ class LocalTransport : public BaseTransport {
     }
 
   protected:
+    static BaseTransportDependencies
+    _makeBaseDeps(LocalTransport *self, LocalTransportDependencies &deps) {
+        auto baseDeps = deps.withBaseDeps(self, _sendCallback, _receiveCallback);
+        baseDeps.availableCallback = _availableCallback;
+        return baseDeps;
+    }
+
+    static bool _availableCallback(void *transport) {
+        auto *self = static_cast<LocalTransport *>(transport);
+        return self->_available();
+    }
+
     static ReturnCode _sendCallback(void *localTransport, const Header &header,
                                     std::span<const std::byte> frame) {
         auto *self = static_cast<LocalTransport *>(localTransport);
@@ -130,8 +156,10 @@ class LocalTransport : public BaseTransport {
         _log_d("%s: enqueue %zu-byte frame into local RX queue", name,
                frame.size());
         FAIL_IF_ERR_FWD(
-            Totem::Queue::Platform::send(_rxFrameQueue, &rxFrame, 0),
+            Totem::Queue::Platform::send(_rxFrameQueue, &rxFrame,
+                                         queueSendTimeoutTicks),
             "Failed to send frame to rxFrame queue");
+        FAIL_IF_ERR_FWD(_wake(), "Failed to wake LocalTransport peer");
         return OK();
     }
 
@@ -147,12 +175,27 @@ class LocalTransport : public BaseTransport {
         return OK();
     }
 
-    LocalTransport *link;
+    [[nodiscard]] bool _available() const {
+        return _selfReady() && link != nullptr && link->_selfReady();
+    }
+
+    [[nodiscard]] bool _selfReady() const {
+        if (!_readinessStarted) {
+            _readinessStarted = true;
+            _readyAtMs = ::platform::get_time() + _readyAfterMs;
+        }
+        return ::platform::get_time() >= _readyAtMs;
+    }
+
+    LocalTransport *link = nullptr;
+    uint32_t _readyAfterMs = 0;
+    mutable bool _readinessStarted = false;
+    mutable uint32_t _readyAtMs = 0;
 
     Totem::Queue::Handle _rxFrameQueue{};
-    Totem::Queue::Platform::Storage<RxFrame,
-                                    detail::Spec::Limits::maxMessageQueueSize>
-        _rxFrameQueueStorage{};
+    Totem::Queue::Platform::Storage<RxFrame, rxQueueDepth> _rxFrameQueueStorage{};
+
+    static constexpr ::platform::Tick queueSendTimeoutTicks = 1;
 };
 
 } // namespace Totem::PubSubBackend::Transports

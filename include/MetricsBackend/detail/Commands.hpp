@@ -1,11 +1,11 @@
 #pragma once
 
 #include "CommandBackend/Interfaces/CommandDesc.hpp"
+#include "LoggingBackend/Interfaces/Types.hpp"
 #include "Macros/Facade.hpp"
-#include "MetricsBackend/Interfaces/Sink.hpp"
+#include "MetricsBackend/Interfaces/IFrameSink.hpp"
 #include "StaticConfig/Metrics.hpp"
 #include "Types/Error.hpp"
-#include "Types/Logging.hpp"
 #include <array>
 #include <cinttypes>
 #include <cstdint>
@@ -31,7 +31,9 @@ dump_metric_snapshot(const MetricsBackend::MetricFrame &snap) {
 
         snprintf(buf.data(), groupWidth + 1, // +1 for null terminator
                  "@%10" PRIu32 " [%3" PRIu8 " " SV_FMT "] | ", snap.timestampMs,
-                 snap.group.metricCount, SV_ARG(snap.group.displayName()));
+                 snap.group.metricCount,
+                 SV_ARG(snap.group.displayName(),
+                        MetricConfig::maxMetricGroupNameLength));
 
         constexpr size_t metricWidth = MetricConfig::maxMetricNameLength +
                                        10   // max uint32_t digits
@@ -42,12 +44,13 @@ dump_metric_snapshot(const MetricsBackend::MetricFrame &snap) {
         for (size_t i = 0;
              i < metricsPerLine && printedMetrics < snap.group.metricCount;
              ++i) {
-            const auto &metric = snap.metrics[i];
+            const auto &metric = snap.metrics[printedMetrics];
 
-            snprintf(start, metricWidth + 1, SV_FMT " %10" PRIu32 SV_FMT "%s",
-                     SV_ARG(metric.displayName(), 8), metric.value,
-                     SV_ARG(metric.unit(), 2),
-                     (i < snap.group.metricCount - 1) ? " | " : "");
+            snprintf(
+                start, metricWidth + 1, SV_FMT " %10" PRIu32 SV_FMT "%s",
+                SV_ARG(metric.displayName(), MetricConfig::maxMetricNameLength),
+                metric.value, SV_ARG(metric.unit(), 2),
+                (i < snap.group.metricCount - 1) ? " | " : "");
 
             start += metricWidth;
             FAIL_IF(start >= buf.data() + buf.size(), ERR(OutOfMemory),
@@ -66,13 +69,14 @@ template <typename Owner> struct Commands {
     static ReturnCode handle_metrics(CommandDesc::ParsedArgs /*unused*/,
                                      void *ctx) {
         auto *metrics = static_cast<Owner *>(ctx);
-        return metrics->snapshot(MetricsBackend::Sink{
-            .self = metrics,
-            .consumeHook =
-                [](void *, const MetricsBackend::MetricFrame &snap) {
-                    return dump_metric_snapshot(snap);
-                },
-        });
+        struct DumpSink final : MetricsBackend::IFrameSink {
+            ReturnCode
+            consume(const MetricsBackend::MetricFrame &snap) override {
+                return dump_metric_snapshot(snap);
+            }
+        } sink;
+
+        return metrics->snapshot(sink);
     }
 
     static inline CommandDesc metricsCmd = {

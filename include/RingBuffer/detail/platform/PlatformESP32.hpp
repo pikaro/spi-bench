@@ -46,23 +46,23 @@ struct RingBuffer {
         auto *handle = xRingbufferCreate(size, platformConfig.type);
         if (handle == nullptr) {
             _log_e("Failed to create ring buffer of size %zu", size);
-            return std::unexpected(ERR(CoreError, OperationFailed));
+            return std::unexpected(ERR(OperationFailed));
         }
         return handle;
     }
 
     static ReturnCode destroy(RingBufferHandle handle) {
         vRingbufferDelete(handle);
-        return OK(CoreError);
+        return OK();
     }
 
     static ReturnCode send(RingBufferHandle handle, const void *data,
                            size_t sizeBytes, Tick timeout = TICK_MAX_DELAY) {
         auto result = xRingbufferSend(handle, data, sizeBytes, timeout);
         if (result != pdTRUE) {
-            return ERR(CoreError, OperationFailed);
+            return ERR(Timeout);
         }
-        return OK(CoreError);
+        return OK();
     }
 
     template <typename T>
@@ -71,14 +71,14 @@ struct RingBuffer {
         size_t sizeBytes;
         auto *data = xRingbufferReceive(handle, &sizeBytes, timeout);
         if (data == nullptr) {
-            return std::unexpected(ERR(CoreError, Timeout));
+            return std::unexpected(ERR(Timeout));
         }
         return std::make_pair(reinterpret_cast<const T *>(data), sizeBytes);
     }
 
     static ReturnCode returnItem(RingBufferHandle handle, void *item) {
         vRingbufferReturnItem(handle, item);
-        return OK(CoreError);
+        return OK();
     }
 };
 

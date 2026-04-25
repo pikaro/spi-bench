@@ -29,6 +29,19 @@ commands.
 
 See: /docs/commands.md
 
+### Serena MCP Symbol Usage
+
+- Prefer the canonical name_path returned by Serena for follow-up symbol
+    operations.
+- When targeting a specific known symbol, always provide relative_path.
+- Use the most specific name_path that is convenient:
+    - an absolute path like `/Totem/PubSubBackend/Envelope[1]/make` guarantees a
+        full exact match
+    - a non-absolute canonical or suffix path like
+        `Totem/PubSubBackend/Envelope[1]/make` or `Envelope/make` is also
+        acceptable when it is unique within the provided relative_path
+- Use broader non-absolute or substring patterns mainly for discovery.
+
 ## Coding Conventions
 
 - Follow existing patterns in neighboring files
@@ -123,6 +136,9 @@ For every task:
     non-obvious repo facts that are expensive to rediscover.
 - Do not store information that is already cheap and reliable to recover from
     MCP/LSP or source code.
+- Do not store information that is already contained in the AGENTS.md or docs/\*
+    files, or information that should be added to those files instead of
+    memories.
 - Read relevant memories at the start of a task when the topic suggests prior
     decisions or discovered pitfalls.
 - Update existing memories when refining the same topic instead of creating

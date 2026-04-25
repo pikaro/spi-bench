@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Base/HasLifecycle.hpp"
 #include "Base/HasMutex.hpp"
 #include "Macros/Facade.hpp"
 #include "Types/Collection.hpp"
@@ -14,6 +15,8 @@
 #include <optional>
 #include <string_view>
 #include <type_traits>
+
+namespace Totem::Generic::detail {
 
 inline std::string_view directory_string_view_or_empty(std::string_view value) {
     return value;
@@ -72,34 +75,25 @@ template <typename Key, typename Entry> struct DirectoryRepresentation {
     }
 };
 
-template <typename Entry> struct DirectoryHooks {
-    void *self = nullptr;
-
-    ReturnCode (*beforeAddHook)(void *, std::string_view,
-                                const Entry &) = nullptr;
-    ReturnCode (*beforeRemoveHook)(void *, std::string_view,
-                                   const Entry &) = nullptr;
-
-    ReturnCode onBeforeAdd(std::string_view name, const Entry &entry) const {
-        return (beforeAddHook != nullptr) ? beforeAddHook(self, name, entry)
-                                          : OK(CoreError);
-    }
-    ReturnCode onBeforeRemove(std::string_view name, const Entry &entry) const {
-        return (beforeRemoveHook != nullptr)
-                   ? beforeRemoveHook(self, name, entry)
-                   : OK(CoreError);
-    }
-
-    [[nodiscard]] bool validate() const {
-        auto anyHookSet =
-            beforeAddHook != nullptr || beforeRemoveHook != nullptr;
-        return self != nullptr || !anyHookSet;
-    }
+template <class T>
+concept HasBeforeRemove = requires(T &cls, std::string_view name,
+                                   const typename T::EntryType &entry) {
+    { cls.beforeRemove(name, entry) } -> std::same_as<ReturnCode>;
 };
 
-template <typename Key, typename Entry, size_t N,
-          class Representation = DirectoryRepresentation<Key, Entry>>
-class Directory : HasMutex<Directory<Key, Entry, N, Representation>> {
+template <class T>
+concept HasBeforeAdd = requires(T &cls, std::string_view name,
+                                const typename T::EntryType &entry) {
+    { cls.beforeAdd(name, entry) } -> std::same_as<ReturnCode>;
+};
+
+} // namespace Totem::Generic::detail
+
+template <class Derived, typename Key, typename Entry, size_t N,
+          class Representation =
+              Totem::Generic::detail::DirectoryRepresentation<Key, Entry>>
+class BaseDirectory
+    : HasMutex<BaseDirectory<Derived, Key, Entry, N, Representation>> {
     static_assert(std::is_nothrow_move_constructible_v<Entry>,
                   "Directory entries must be nothrow move constructible");
     static_assert(std::is_nothrow_move_assignable_v<Entry>,
@@ -134,7 +128,7 @@ class Directory : HasMutex<Directory<Key, Entry, N, Representation>> {
 
     using SlottedMapType = SlottedMap<EntryKey, Entry, N>;
 
-    explicit Directory(const char *ownerName, LogComponent logComponent)
+    explicit BaseDirectory(const char *ownerName, LogComponent logComponent)
         : _ownerName(ownerName), logComponent(logComponent) {}
 
     [[nodiscard]] const char *ownerName() const { return _ownerName; }
@@ -167,8 +161,9 @@ class Directory : HasMutex<Directory<Key, Entry, N, Representation>> {
             return _withEntryImpl(
                 _entries, key_, std::forward<decltype(fn_)>(fn_), logComponent);
         };
+        auto fnRef = std::ref(fn);
         return this->_locked("Directory::withEntry", ERR(Timeout), lambda,
-                             keyCref, std::forward<Fn>(fn));
+                             keyCref, fnRef);
     }
 
     template <typename Fn>
@@ -342,10 +337,12 @@ class Directory : HasMutex<Directory<Key, Entry, N, Representation>> {
                                " for removal",
                                _ownerName, SV_ARG(_keyName(key_)));
             auto displayName = _entryName(key_, item.get());
-            FAIL_IF_ERR(_hooks.onBeforeRemove(displayName, item.get()),
-                        ERR(OperationFailed),
-                        "BeforeRemove hook failed for %s->" SV_FMT, _ownerName,
-                        SV_ARG(displayName));
+            if constexpr (Totem::Generic::detail::HasBeforeRemove<Derived>) {
+                FAIL_IF_ERR(this->beforeRemove(displayName, item.get()),
+                            ERR(OperationFailed),
+                            "BeforeRemove hook failed for %s->" SV_FMT,
+                            _ownerName, SV_ARG(displayName));
+            }
             return _entries.remove(key_);
         };
 
@@ -442,12 +439,6 @@ class Directory : HasMutex<Directory<Key, Entry, N, Representation>> {
     }
 
   protected:
-    void _setHooks(DirectoryHooks<Entry> hooks) {
-        ABORT_IF_NOT(hooks.validate(), "Invalid directory hooks for %s",
-                     _ownerName);
-        _hooks = hooks;
-    }
-
     std::expected<EntryKey, ReturnCode> _addImpl(const EntryKey &entryKey,
                                                  Entry entry) {
         auto keyCref = std::cref(entryKey);
@@ -457,10 +448,12 @@ class Directory : HasMutex<Directory<Key, Entry, N, Representation>> {
                     ERR(LifecycleError, InvalidState),
                     "%s: Registration is currently not permitted", _ownerName);
             auto displayName = _entryName(key_, entry_);
-            FAIL_IF_ERR(_hooks.onBeforeAdd(displayName, entry_),
-                        ERR(OperationFailed),
-                        "BeforeAdd hook failed for %s->" SV_FMT, _ownerName,
-                        SV_ARG(displayName));
+            if constexpr (Totem::Generic::detail::HasBeforeAdd<Derived>) {
+                FAIL_IF_ERR(this->beforeAdd(displayName, entry_),
+                            ERR(OperationFailed),
+                            "BeforeAdd hook failed for %s->" SV_FMT, _ownerName,
+                            SV_ARG(displayName));
+            }
             auto ret = _entries.insert(key_, std::move(entry_));
             FAIL_IF_ERR(ret, ret,
                         "Failed to add directory entry %s->" SV_FMT " for %s",
@@ -543,17 +536,19 @@ class Directory : HasMutex<Directory<Key, Entry, N, Representation>> {
     std::atomic<bool> _permitRegistration{false};
     SlottedMapType _entries;
     const char *_ownerName;
-    DirectoryHooks<Entry> _hooks{};
     LogComponent logComponent;
 };
 
-template <typename Key, typename Entry, size_t N,
-          class Representation = DirectoryRepresentation<Key, Entry>>
-class GettableDirectory : public Directory<Key, Entry, N, Representation> {
-    using Base = Directory<Key, Entry, N, Representation>;
+template <class Derived, typename Key, typename Entry, size_t N,
+          class Representation =
+              Totem::Generic::detail::DirectoryRepresentation<Key, Entry>>
+class BaseGettableDirectory
+    : public BaseDirectory<Derived, Key, Entry, N, Representation> {
+    using Base = BaseDirectory<Derived, Key, Entry, N, Representation>;
 
   public:
-    explicit GettableDirectory(const char *ownerName, LogComponent component)
+    explicit BaseGettableDirectory(const char *ownerName,
+                                   LogComponent component)
         : Base(ownerName, component) {}
 
     using typename Base::EntryArray;
@@ -616,5 +611,5 @@ class GettableDirectory : public Directory<Key, Entry, N, Representation> {
     }
 };
 
-inline constexpr MutexContract<Directory<void *, void *, 1>>
+inline constexpr MutexContract<BaseDirectory<NoConfig, void *, void *, 1>>
     directory_mutex_contract;

@@ -1,5 +1,3 @@
-
-
 # list of languages for which language servers are started; choose from:
 #   al                  bash                clojure             cpp                 csharp
 #   csharp_omnisharp    dart                elixir              elm                 erlang
@@ -25,16 +23,13 @@
 # The first language is the default language and the respective language server will be used as a fallback.
 # Note that when using the JetBrains backend, language servers are not used and this list is correspondingly ignored.
 languages:
-- cpp
-language_servers:
-  cpp:
-    ls_path: bin/clangd
+  - cpp
 
 # list of tool names to exclude.
 # This extends the existing exclusions (e.g. from the global configuration)
 #
 # Below is the complete list of tools for convenience.
-# To make sure you have the latest list of tools, and to view their descriptions, 
+# To make sure you have the latest list of tools, and to view their descriptions,
 # execute `uv run scripts/print_tool_overview.py`.
 #
 #  * `activate_project`: Activates a project based on the project name or path.
@@ -108,12 +103,12 @@ symbol_info_budget:
 # Valid values: LSP, JetBrains
 # Note: the backend is fixed at startup. If a project with a different backend
 # is activated post-init, an error will be returned.
-language_backend:
+language_backend: "LSP"
 
 # line ending convention to use when writing source files.
 # Possible values: unset (use global setting), "lf", "crlf", or "native" (platform default)
 # This does not affect Serena's own files (e.g. memories and configuration files), which always use native line endings.
-line_ending:
+line_ending: "native"
 
 # list of regex patterns which, when matched, mark a memory entry as read‑only.
 # Extends the list from the global configuration, merging the two lists.
@@ -131,7 +126,11 @@ ignored_memory_patterns: []
 # Maps the language key to the options.
 # Have a look at the docstring of the constructors of the LS implementations within solidlsp (e.g., for C# or PHP) to see which options are available.
 # No documentation on options means no options are available.
-ls_specific_settings: {}
+ls_specific_settings:
+  cpp:
+    ls_path: bin/clangd
+    prime_files:
+      - src/master/main.cpp
 
 # list of additional paths to ignore in this project.
 # Same syntax as gitignore, so you can use * and **.
@@ -148,7 +147,7 @@ ignore_all_files_in_gitignore: true
 
 # initial prompt for the project. It will always be given to the LLM upon activating the project
 # (contrary to the memories, which are loaded on demand).
-initial_prompt: ''
+initial_prompt: ""
 
 # the encoding used by text files in the project
 # For a list of possible encodings, see https://docs.python.org/3.11/library/codecs.html#standard-encodings

@@ -17,6 +17,7 @@ class SignalHandler {
     struct Result {
         ReturnCode error{OK()};
         bool continueRunning = true;
+        bool timeout = false;
 
         [[nodiscard]] bool ok() const { return error.ok(); }
     };
@@ -28,8 +29,12 @@ class SignalHandler {
 
     Result handleSignal() {
         auto timeout = _useNotify ? _notifyTimeoutMs : 0;
+        return handleSignal(timeout, _notifyExpectTimeout);
+    }
+
+    Result handleSignal(uint32_t timeoutMs, bool expectTimeout) {
         auto waitResult =
-            Platform::wait_for_signal(_name, timeout, _notifyExpectTimeout);
+            Platform::wait_for_signal(_name, timeoutMs, expectTimeout);
 
         if (!waitResult.ok) {
             _log_e("Runner %s: Failed to wait for signal", _name);
@@ -41,7 +46,7 @@ class SignalHandler {
 
         // Timeout was expected
         if (waitResult.timeout) {
-            return {};
+            return Result{.timeout = true};
         }
 
         auto signal = waitResult.signal;
@@ -66,6 +71,7 @@ class SignalHandler {
         auto result = Result{
             .error = notifyResult,
             .continueRunning = notifyResult.ok(),
+            .timeout = false,
         };
 
         if (!notifyResult.ok()) {

@@ -32,7 +32,9 @@ struct Uart {
                 },
         };
 
-        FAIL_IF_ESP(uart_driver_install(_uartNumber, 2048, 0, 0, nullptr, 0),
+        FAIL_IF_ESP(uart_driver_install(_uartNumber, 2048,
+                                        static_cast<int>(::UartConfig::txBufferSize),
+                                        0, nullptr, 0),
                     ERR(OperationFailed), "Failed to install UART driver");
         FAIL_IF_ESP(uart_param_config(_uartNumber, &uart_config),
                     ERR(OperationFailed),

@@ -2,11 +2,13 @@
 
 #include "Base/HasLifecycle.hpp"
 #include "Macros/Facade.hpp"
+#include "Mutex/Facade.hpp"
+#include "Platform/PlatformSelect.hpp"
 #include "StaticConfig/TaskRegistry.hpp"
 #include "TaskController/Facade.hpp"
-#include "TaskController/Interfaces/RegistryHooks.hpp"
+#include "TaskController/Interfaces/IRegistry.hpp"
 #include "TaskController/Interfaces/TaskRuntimeSnapshot.hpp"
-#include "TaskControllerRegistry/Interfaces/TaskSourceHooks.hpp"
+#include "TaskControllerRegistry/Interfaces/ITaskSource.hpp"
 #include "TaskControllerRegistry/detail/Directory.hpp"
 #include "TaskControllerRegistry/detail/Metrics.hpp"
 #include "Types/Error.hpp"
@@ -18,13 +20,12 @@
 
 namespace Totem::TaskControllerRegistry::detail {
 
-class Registry : public HasLifecycle<Registry> {
+class Registry : public HasLifecycle<Registry>,
+                 public TaskController::IRegistry {
     friend class HasLifecycle<Registry>;
     friend struct LifecycleContract<Registry>;
 
   public:
-    using SourceKey = Directory::EntryKey;
-
     DELETE_COPY(Registry)
     DELETE_MOVE(Registry)
 
@@ -34,9 +35,9 @@ class Registry : public HasLifecycle<Registry> {
 
     static constexpr const char *name = "TaskControllerRegistry::Registry";
 
-    ReturnCode registerSource(SourceKey sourceKey, TaskSourceHooks hooks,
-                              TaskSourceInfo info) {
-        auto ret = _directory.add(sourceKey, hooks, info);
+    ReturnCode registerSource(const SourceKey &sourceKey, ITaskSource &source,
+                              TaskSourceInfo info) override {
+        auto ret = _directory.add(sourceKey, source, info);
         FAIL_IF(!ret, ret.error(), "Failed to register task source " SV_FMT,
                 SV_ARG(info.displayName));
         FAIL_IF_ERR_FWD(
@@ -46,7 +47,7 @@ class Registry : public HasLifecycle<Registry> {
         return OK();
     }
 
-    ReturnCode deregisterSource(SourceKey sourceKey) {
+    ReturnCode deregisterSource(const SourceKey &sourceKey) override {
         auto ret = _directory.remove(sourceKey);
         FAIL_IF_ERR(ret, ret, "Failed to deregister task source");
         FAIL_IF_ERR_FWD(
@@ -55,20 +56,64 @@ class Registry : public HasLifecycle<Registry> {
         return OK();
     }
 
+    ReturnCode registerManagedTaskHandle(uintptr_t handle) override {
+        FAIL_IF(handle == 0, ERR(InvalidArgument),
+                "Cannot register null managed task handle");
+        Mutex::ScopedSpinlockGuard guard{_managedTaskHandleLock};
+        for (size_t i = 0; i < _managedTaskHandleCount; ++i) {
+            if (_managedTaskHandles[i] == handle) {
+                return OK();
+            }
+        }
+        FAIL_IF(_managedTaskHandleCount >= _managedTaskHandles.size(),
+                ERR(OutOfMemory),
+                "Not enough space to track managed task handles");
+        _managedTaskHandles[_managedTaskHandleCount++] = handle;
+        return OK();
+    }
+
+    ReturnCode deregisterManagedTaskHandle(uintptr_t handle) override {
+        FAIL_IF(handle == 0, ERR(InvalidArgument),
+                "Cannot deregister null managed task handle");
+        Mutex::ScopedSpinlockGuard guard{_managedTaskHandleLock};
+        for (size_t i = 0; i < _managedTaskHandleCount; ++i) {
+            if (_managedTaskHandles[i] != handle) {
+                continue;
+            }
+            for (size_t j = i + 1; j < _managedTaskHandleCount; ++j) {
+                _managedTaskHandles[j - 1] = _managedTaskHandles[j];
+            }
+            --_managedTaskHandleCount;
+            _managedTaskHandles[_managedTaskHandleCount] = 0;
+            return OK();
+        }
+        return ERR(NotFound);
+    }
+
+    [[nodiscard]] bool isManagedTaskHandle(uintptr_t handle) const {
+        if (handle == 0) {
+            return false;
+        }
+        Mutex::ScopedSpinlockGuard guard{_managedTaskHandleLock};
+        for (size_t i = 0; i < _managedTaskHandleCount; ++i) {
+            if (_managedTaskHandles[i] == handle) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     ReturnCode reap() {
         size_t reapedCount = 0;
 
         auto ret = _directory.withAll([&reapedCount](
                                           const SourceKey &,
                                           SourceEntry &entry) -> ReturnCode {
-            if (entry.hooks.reapHook == nullptr) {
-                return OK();
-            }
-            FAIL_IF_UNEXPECTED_FWD(count, entry.hooks.reap(),
+            FAIL_IF_UNEXPECTED_FWD(count, entry.source->reap(),
                                    "Failed to reap tasks for source " SV_FMT,
                                    SV_ARG(entry.displayName));
 
-            if (reapedCount > 0) {
+            if (count > 0) {
                 reapedCount += count;
                 _log_w("Reaped %u tasks for source " SV_FMT, reapedCount,
                        SV_ARG(entry.displayName));
@@ -87,25 +132,7 @@ class Registry : public HasLifecycle<Registry> {
     template <typename Fn>
         requires TaskController::IsSnapshotHandler<Fn>
     ReturnCode forEachTaskSnapshot(Fn &&fun) {
-        std::array<uintptr_t, TaskRegistryConfig::observedTaskCountMax>
-            seenHandles{};
-        size_t seenHandleCount = 0;
-        return _directory.forEachTaskSnapshot(
-            [&fun, &seenHandles, &seenHandleCount](
-                const TaskController::TaskRuntimeSnapshot &snap) {
-                if (snap.nativeHandle != 0) {
-                    for (size_t i = 0; i < seenHandleCount; ++i) {
-                        if (seenHandles[i] == snap.nativeHandle) {
-                            return OK();
-                        }
-                    }
-                    FAIL_IF(seenHandleCount >= seenHandles.size(),
-                            ERR(OutOfMemory),
-                            "Not enough space to deduplicate task snapshots");
-                    seenHandles[seenHandleCount++] = snap.nativeHandle;
-                }
-                return fun(snap);
-            });
+        return _directory.forEachTaskSnapshot(fun);
     }
 
     ReturnCode collectTaskSnapshotsInto(
@@ -119,10 +146,6 @@ class Registry : public HasLifecycle<Registry> {
                 out = out.subspan(1);
                 return OK();
             });
-    }
-
-    [[nodiscard]] TaskController::RegistryHooks hooks() {
-        return TaskController::RegistryHooks::bind(*this);
     }
 
     [[nodiscard]] std::expected<uint8_t, ReturnCode> sourceCount() const {
@@ -155,11 +178,14 @@ class Registry : public HasLifecycle<Registry> {
     }
 
     Directory _directory;
+    mutable ::platform::Spinlock _managedTaskHandleLock =
+        ::platform::create_spinlock();
+    std::array<uintptr_t, TaskRegistryConfig::managedTaskCountMax>
+        _managedTaskHandles{};
+    size_t _managedTaskHandleCount = 0;
     Metrics _metrics;
 };
 
 inline constexpr LifecycleContract<Registry> _registry_lifecycle;
-inline constexpr TaskController::RegistryHooks::Contract<Registry>
-    _registry_hooks_contract;
 
 } // namespace Totem::TaskControllerRegistry::detail

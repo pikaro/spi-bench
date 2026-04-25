@@ -3,7 +3,7 @@
 #include "Base/HasCommands.hpp"
 #include "Base/HasLifecycle.hpp"
 #include "Macros/Facade.hpp"
-#include "Monitoring/Interfaces/Sink.hpp"
+#include "Monitoring/Interfaces/IFrameSink.hpp"
 #include "Monitoring/detail/Commands.hpp"
 #include "Monitoring/detail/PlatformSelect.hpp"
 #include "StaticConfig/TaskRegistry.hpp"
@@ -30,7 +30,7 @@ class Monitoring : public HasLifecycle<Monitoring>,
 
     static constexpr const char *name = "Monitoring";
 
-    ReturnCode snapshot(const Sink &sink) {
+    ReturnCode snapshot(IFrameSink &sink) {
         auto now = ::platform::get_time();
         if (now < _lastSnapshotTimestamp) {
             // Time went backwards, likely due to overflow. Reset all totals to

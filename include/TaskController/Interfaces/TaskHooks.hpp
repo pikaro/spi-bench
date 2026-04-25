@@ -8,6 +8,9 @@
 
 namespace Totem::TaskController {
 
+// NOTE: Not using pure virtual interface to allow binding to any class with the
+// appropriate methods as required
+
 struct TaskHooks {
     template <class T> struct Contract {
         static_assert(

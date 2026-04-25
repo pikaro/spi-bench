@@ -5,8 +5,8 @@
 #include "StaticConfig/TaskRegistry.hpp"
 #include "Support/Basic.hpp"
 #include "TaskController/Interfaces/TaskRuntimeSnapshot.hpp"
+#include "TaskControllerRegistry/Interfaces/ITaskSource.hpp"
 #include "TaskControllerRegistry/Interfaces/TaskSourceFeatures.hpp"
-#include "TaskControllerRegistry/Interfaces/TaskSourceHooks.hpp"
 #include "TaskControllerRegistry/detail/Registry.hpp"
 #include "Types/Error.hpp"
 #include <array>
@@ -18,7 +18,7 @@
 
 namespace Totem::TaskControllerRegistry::detail {
 
-class SystemTaskSource {
+class SystemTaskSource : public ITaskSource {
     using TaskStatus = ::platform::TaskStatus;
 
   public:
@@ -31,12 +31,11 @@ class SystemTaskSource {
             .capabilities = TaskSourceCapability::None,
         };
         ABORT_IF_ERR(_registry.registerSource(reinterpret_cast<uintptr_t>(this),
-                                              TaskSourceHooks::bind(*this),
-                                              info),
+                                              *this, info),
                      "Failed to register system task source");
     }
 
-    ~SystemTaskSource() {
+    ~SystemTaskSource() override {
         ABORT_IF_ERR(
             _registry.deregisterSource(reinterpret_cast<uintptr_t>(this)),
             "Failed to deregister system task source");
@@ -45,10 +44,7 @@ class SystemTaskSource {
     DELETE_COPY(SystemTaskSource)
     DELETE_MOVE(SystemTaskSource)
 
-    ReturnCode forEachTaskSnapshot(TaskSnapshotSink sink) {
-        FAIL_IF(!sink.validate(), ERR(InvalidArgument),
-                "System task source requires a valid sink");
-
+    ReturnCode forEachTaskSnapshot(ISnapshotSink &sink) override {
         uint32_t totalRuntimeCounter = 0;
         auto countResponse = Platform::get_system_task_statuses(
             _taskStatuses, totalRuntimeCounter);
@@ -60,6 +56,9 @@ class SystemTaskSource {
         for (size_t i = 0; i < count; ++i) {
             const auto &taskStatus = _taskStatuses[i];
             auto handle = reinterpret_cast<uintptr_t>(taskStatus.xHandle);
+            if (_registry.isManagedTaskHandle(handle)) {
+                continue;
+            }
             auto runTimeMs =
                 Platform::runtime_counter_to_ms(taskStatus.ulRunTimeCounter);
             auto previousRunTimeMs = _findPreviousRuntimeMs(handle);
@@ -113,8 +112,16 @@ class SystemTaskSource {
         return OK();
     }
 
-    [[nodiscard]] static std::expected<uint8_t, ReturnCode> taskCount() {
+    [[nodiscard]] std::expected<uint8_t, ReturnCode> taskCount() override {
         return Platform::get_task_count();
+    }
+
+    [[nodiscard]] std::expected<uint8_t, ReturnCode> reap() override {
+        return 0;
+    }
+
+    [[nodiscard]] std::expected<bool, ReturnCode> empty() override {
+        return true;
     }
 
   private:

@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 
+export XDG_CACHE_HOME="$PWD/.cache"
+
 while read -r dirname; do
     export PATH="${dirname}:$PATH"
 done < <(
-    ls -d "${HOME}/.platformio/packages/toolchain-"*"/bin" \
-        "${HOME}/.platformio/packages/toolchain-"*"/bin"
+    ls -d \
+        "${HOME}/.platformio/packages/toolchain-xtensa-esp-elf"*/bin \
+        "${HOME}/.platformio/packages/toolchain-riscv32-esp"*/bin \
+        "${HOME}/.platformio/packages/toolchain-esp32ulp"*/bin
 )
 
 set -- "${HOME}/.local/bin/clangd" \
-    --query-driver="${HOME}/.platformio/packages/toolchain-*/bin/*-gcc,${HOME}/.platformio/packages/toolchain-*/bin/*-g++" \
+    --query-driver="${HOME}/.platformio/packages/toolchain-xtensa-esp-elf*/bin/*-gcc,${HOME}/.platformio/packages/toolchain-xtensa-esp-elf*/bin/*-g++,${HOME}/.platformio/packages/toolchain-riscv32-esp*/bin/*-gcc,${HOME}/.platformio/packages/toolchain-riscv32-esp*/bin/*-g++,${HOME}/.platformio/packages/toolchain-esp32ulp*/bin/*-gcc" \
     --log=error \
     --background-index \
     --clang-tidy \

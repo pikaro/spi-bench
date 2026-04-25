@@ -2,7 +2,7 @@
 
 #include "FreeRTOSConfig.h"
 #include "Macros/Facade.hpp"
-#include "Monitoring/Interfaces/Sink.hpp"
+#include "Monitoring/Interfaces/IFrameSink.hpp"
 #include "Monitoring/detail/Types.hpp"
 #include "Support/Basic.hpp"
 #include "Types/Error.hpp"

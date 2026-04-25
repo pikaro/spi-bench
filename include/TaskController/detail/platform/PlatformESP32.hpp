@@ -85,7 +85,6 @@ struct Platform {
     static SignalWaitResult wait_for_signal(const char *ctx,
                                             uint32_t timeoutMs = MS_MAX_DELAY,
                                             bool expectTimeout = true) {
-        (void)xTaskNotifyStateClear(nullptr);
         uint32_t notifyValue = 0;
         auto ret =
             xTaskNotifyWait(NOTIFY_ENTRY_CLEAR_ALL, NOTIFY_EXIT_CLEAR_ALL,

@@ -32,19 +32,22 @@ Build output notes:
 Generate wire support code for the current PlatformIO environment:
 
 - `make wire`
+- `make bindings`
 
 Override the environment when needed:
 
 - `make wire PIO_ENV=master`
+- `make bindings PIO_ENV=master`
 
 Supporting commands:
 
 - Generate only the compilation database: `pio run -e master -t compiledb`
+- Generate PlatformIO env metadata for generators: `pio run -e master -t idedata`
 - Remove generated wire output: `make wire-clean`
 
 Implementation notes:
 
-- `make wire` uses `bin/generate_wire_fields.py`
+- `make wire` and `make bindings` cache `idedata` under `.pio/build/<env>/`
 - Generated output is written to `include/Generated/Wire/`
 
 ## Environment Notes

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CommandBackend/Interfaces/CommandDesc.hpp"
+#include "CommandBackend/Interfaces/Types.hpp"
 #include "CommandBackend/detail/Directory.hpp"
 #include "CommandBackend/detail/Types.hpp" // IWYU pragma: keep
 #include "Macros/Facade.hpp"
@@ -15,14 +16,11 @@ class Store {
     Store() { _enableRegistration(); }
     ~Store() { _disableRegistration(); }
 
-    using CommandNameKey = Directory::EntryKey;
-
     static constexpr const char *name = "Command::Store";
 
     std::expected<CommandNameKey, ReturnCode>
-    add(const char *commandName, void *ctx, const CommandDesc &commandDesc) {
-        return _directory.add(CommandNameKey::fromCharPtr(commandName), ctx,
-                              commandDesc);
+    add(void *ctx, const CommandDesc &commandDesc) {
+        return _directory.add(ctx, commandDesc);
     }
 
     ReturnCode remove(const CommandNameKey &commandNameKey) {

@@ -1,30 +1,30 @@
 #pragma once
 
+#include "LoggingBackend/Interfaces/Types.hpp"
 #include "Macros/Facade.hpp"
+#include "MetricsBackend/Interfaces/Types.hpp"
 #include "Services/Metrics.hpp"
 #include "Types/Error.hpp"
-#include "Types/Logging.hpp"
-#include "Types/Metrics.hpp"
 #include <cstddef>
 
 namespace Totem::TaskControllerRegistry::detail {
 
 struct Metrics {
-    static constexpr MetricGroupDesc groupDef = {
+    static constexpr MetricsBackend::MetricGroupDesc groupDef = {
         .name = "taskRegi",
         .logLevel = LogLevel::Info,
     };
 
-    static constexpr MetricDesc controllerCountDef = {
+    static constexpr MetricsBackend::MetricDesc controllerCountDef = {
         .name = "ctrlCont",
-        .type = MetricType::Counter,
-        .unit = MetricUnit::None,
+        .type = MetricsBackend::MetricType::Counter,
+        .unit = MetricsBackend::MetricUnit::None,
     };
 
-    static constexpr MetricDesc reapedCountDef = {
+    static constexpr MetricsBackend::MetricDesc reapedCountDef = {
         .name = "reaped",
-        .type = MetricType::Counter,
-        .unit = MetricUnit::None,
+        .type = MetricsBackend::MetricType::Counter,
+        .unit = MetricsBackend::MetricUnit::None,
     };
 
     static Metrics create() {
@@ -41,15 +41,15 @@ struct Metrics {
     }
 
     ReturnCode addTask() const {
-        return ::Metrics::recorder().increment(controllerCount);
+        return ::MetricsService::recorder().increment(controllerCount);
     }
 
     ReturnCode removeTask() const {
-        return ::Metrics::recorder().decrement(controllerCount);
+        return ::MetricsService::recorder().decrement(controllerCount);
     }
 
     ReturnCode addReaped(size_t count) const {
-        return ::Metrics::recorder().increment(reapedCount, count);
+        return ::MetricsService::recorder().increment(reapedCount, count);
     }
 
     Totem::MetricsBackend::GroupHandle group;

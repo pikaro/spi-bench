@@ -46,4 +46,6 @@ inline void start_critical_section(Spinlock &lock) {
 }
 inline void end_critical_section(Spinlock &lock) { portEXIT_CRITICAL(&lock); }
 
+inline static constexpr auto CoreCount = portNUM_PROCESSORS;
+
 } // namespace platform

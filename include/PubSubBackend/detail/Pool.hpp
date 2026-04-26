@@ -34,6 +34,9 @@ class Pool : public HasMutex<Pool<T, Capacity>> {
     static constexpr const char *name = "PubSub::Pool";
 
     std::expected<MessageId, ReturnCode> store(const T &value) {
+        auto guard = this->_mutexGuard(mutexTimeoutMs, false);
+        FAIL_IF_NOT(guard.locked(), std::unexpected(ERR(Timeout)),
+                    "Timed out locking PubSub pool for store");
         for (auto &slot : _storage) {
             if (!slot.value) {
                 slot.value.emplace(value);
@@ -42,7 +45,6 @@ class Pool : public HasMutex<Pool<T, Capacity>> {
                 return slot.messageId;
             }
         }
-
         return std::unexpected(ERR(Overflow));
     }
 
@@ -52,6 +54,9 @@ class Pool : public HasMutex<Pool<T, Capacity>> {
     }
 
     ReturnCode release(const Envelope &envelope) {
+        auto guard = this->_mutexGuard(mutexTimeoutMs, false);
+        FAIL_IF_NOT(guard.locked(), ERR(Timeout),
+                    "Timed out locking PubSub pool for release");
         for (auto &slot : _storage) {
             if (slot.value && slot.messageId == envelope.header.messageId) {
                 _log_d("%s: release messageId %u", name,
@@ -71,6 +76,11 @@ class Pool : public HasMutex<Pool<T, Capacity>> {
      * ownership handoff and fanout complete.
      */
     [[nodiscard]] bool contains(MessageId messageId) const {
+        auto guard = this->_mutexGuard(mutexTimeoutMs, false);
+        if (!guard.locked()) {
+            _log_e("%s: timed out locking pool for contains", name);
+            return false;
+        }
         for (const auto &slot : _storage) {
             if (slot.value && slot.messageId == messageId) {
                 return true;
@@ -94,6 +104,9 @@ class Pool : public HasMutex<Pool<T, Capacity>> {
 
     [[nodiscard]] std::expected<const void *, ReturnCode>
     getPtr(const Envelope &envelope) const {
+        auto guard = this->_mutexGuard(mutexTimeoutMs, false);
+        FAIL_IF_NOT(guard.locked(), std::unexpected(ERR(Timeout)),
+                    "Timed out locking PubSub pool for getPtr");
         for (const auto &slot : _storage) {
             if (slot.value && slot.messageId == envelope.header.messageId) {
                 return static_cast<const void *>(std::addressof(*slot.value));
@@ -111,6 +124,9 @@ class Pool : public HasMutex<Pool<T, Capacity>> {
 
     [[nodiscard]] std::expected<std::reference_wrapper<const T>, ReturnCode>
     get(const Envelope &envelope) const {
+        auto guard = this->_mutexGuard(mutexTimeoutMs, false);
+        FAIL_IF_NOT(guard.locked(), std::unexpected(ERR(Timeout)),
+                    "Timed out locking PubSub pool for get");
         for (const auto &slot : _storage) {
             if (slot.value && slot.messageId == envelope.header.messageId) {
                 return std::cref(*slot.value);
@@ -122,17 +138,23 @@ class Pool : public HasMutex<Pool<T, Capacity>> {
     static ReturnCode encodePayload(void *owner, const Envelope &env,
                                     std::span<std::byte> out) {
         auto *pool = static_cast<Pool *>(owner);
-        auto value = pool->get(env);
-        if (!value) {
-            return value.error();
+        auto guard = pool->_mutexGuard(mutexTimeoutMs, false);
+        FAIL_IF_NOT(guard.locked(), ERR(Timeout),
+                    "Timed out locking PubSub pool for encode");
+        for (const auto &slot : pool->_storage) {
+            if (slot.value && slot.messageId == env.header.messageId) {
+                return Codec<T>::encode(*slot.value, out);
+            }
         }
-        return Codec<T>::encode(value->get(), out);
+        return ERR(NotFound);
     }
 
   private:
     void *_pubSubNode;
     std::array<Slot, Capacity> _storage;
     NextMessageIdCallback _nextMessageIdCallback;
+
+    static constexpr uint32_t mutexTimeoutMs = 10;
 };
 
 inline constexpr MutexContract<Pool<int, 0>> _pool_mutex_contract;

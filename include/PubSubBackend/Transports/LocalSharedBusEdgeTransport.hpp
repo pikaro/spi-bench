@@ -1,11 +1,9 @@
 #pragma once
 
-#include "BaseTransport.hpp"
+#include "LocalPollingTransport.hpp"
 #include "Macros/Facade.hpp"
 #include "PubSubBackend/Interfaces/Types.hpp"
 #include "PubSubBackend/Interfaces/Wire.hpp"
-#include "PubSubBackend/detail/EgressBuffer.hpp"
-#include "PubSubBackend/detail/Metrics.hpp"
 #include "PubSubBackend/detail/SerDe.hpp"
 #include "PubSubBackend/detail/Types.hpp"
 #include "Queue/Facade.hpp"
@@ -25,10 +23,9 @@ class LocalSharedBusLink {
     static constexpr size_t frameBufferSize = detail::SerDe::headerSize +
                                              detail::Spec::Limits::maxPayloadSize +
                                              detail::SerDe::overheadSize;
-    // A shared-bus link only connects one edge peer and one router. Keeping a
-    // full PubSub-sized queue in each direction is disproportionately
-    // expensive in static memory and is not representative of the intended
-    // low-latency bus behavior.
+    // A shared-bus link only connects one edge peer and one router. A small
+    // queue is enough to absorb scheduler jitter without pushing the
+    // single-MCU harness into heap exhaustion.
     static constexpr size_t queueDepth = 4;
 
     struct Frame {
@@ -172,38 +169,15 @@ struct LocalSharedBusEdgeTransportDependencies {
     }
 };
 
-struct LocalSharedBusEdgeEgressByteArenaConfig {
-    static constexpr size_t bufferSize = 512;
-    static constexpr size_t slotCount = 32;
-    static constexpr size_t spanCount = 32;
-    static constexpr size_t maxRecordAgeMs = 1000;
-
-    [[nodiscard]] static bool isCritical(const Header &header) {
-        return header.trafficClass == TrafficClass::Critical;
-    }
-
-    static ReturnCode onEvictNoncritical(const Header & /*unused*/) {
-        return detail::metrics().addEgressEvictedNoncritical();
-    }
-
-    static ReturnCode onDropNoncritical(const Header & /*unused*/) {
-        return detail::metrics().addEgressDroppedNoncritical();
-    }
-
-    static ReturnCode onRejectCritical(const Header & /*unused*/) {
-        return detail::metrics().addEgressRejectedCritical();
-    }
-};
-
 /**
  * Common local test transport for shared-bus edge semantics.
  *
- * The transport retains serialized frames in transport-owned storage until a
- * router transport polls them. Frames received from the router are published
- * locally through the normal BaseTransport receive path.
+ * Outbound frames are copied into the shared-bus link queue, which is the
+ * local simulator's durable handoff point. Frames received from the router are
+ * published locally through the normal BaseTransport receive path.
  */
-class LocalSharedBusEdgeTransport : public BaseTransport {
-    using Base = BaseTransport;
+class LocalSharedBusEdgeTransport : public LocalPollingTransport {
+    using Base = LocalPollingTransport;
 
   public:
     explicit LocalSharedBusEdgeTransport(
@@ -221,15 +195,17 @@ class LocalSharedBusEdgeTransport : public BaseTransport {
     [[nodiscard]] PeerId peerId() const { return _peerId; }
 
     /**
-     * Report whether this edge transport still retains a frame in its
-     * transport-owned egress buffer.
+     * Shared-bus edge simulation hands durable ownership to the link queue and
+     * does not retain separate egress records.
      */
     [[nodiscard]] bool hasBufferedFrame(const Header &header) const {
-        return _egressBuffer.contains(header);
+        (void)header;
+        return false;
     }
 
     [[nodiscard]] bool wasFrameFreed(const Header &header) const {
-        return _egressBuffer.wasFreed(header);
+        (void)header;
+        return true;
     }
 
     ReturnCode addLink(LocalSharedBusLink &sharedBusLink) {
@@ -280,20 +256,12 @@ class LocalSharedBusEdgeTransport : public BaseTransport {
     ReturnCode enqueueRaw(const Header &header, std::span<const std::byte> frame,
                           const detail::TransportDispatch &dispatch = {})
         override {
+        (void)header;
         (void)dispatch;
         FAIL_IF_NULL(_link, ERR(InvalidState),
                      "No shared-bus link established for outbound frame");
-        FAIL_IF_UNEXPECTED_FWD(storeRet, _egressBuffer.store(header, frame),
-                               "Failed to store direct outbound shared-bus "
-                               "frame");
-        if (!storeRet) {
-            return ERR(Timeout);
-        }
         auto linkRet = _link->sendToRouter(frame);
         if (!linkRet.ok()) {
-            FAIL_IF_ERR_FWD(_egressBuffer.release(header),
-                            "Failed to roll back direct outbound "
-                            "shared-bus frame after link enqueue failure");
             FAIL(linkRet,
                  "Failed to enqueue direct outbound shared-bus frame into "
                  "link: " ERR_FMT,
@@ -301,10 +269,20 @@ class LocalSharedBusEdgeTransport : public BaseTransport {
         }
         FAIL_IF_ERR_FWD(_wakeRouter(),
                         "Failed to wake shared-bus router receiver");
-        FAIL_IF_ERR_FWD(_egressBuffer.release(header),
-                        "Failed to release direct outbound shared-bus frame "
-                        "after link handoff");
         return OK();
+    }
+
+    ReturnCode receive(size_t maxCount = std::numeric_limits<size_t>::max())
+        override {
+        return _receiveAvailabilityOnly(maxCount);
+    }
+
+    ReturnCode pollInto(void *ctx, detail::PollIntoCallback callback,
+                        size_t maxCount = std::numeric_limits<size_t>::max())
+        override {
+        return _pollReceiveCallbackInto(
+            ctx, callback, detail::IngressContext{.transportId = _transportId},
+            maxCount);
     }
 
   protected:
@@ -328,21 +306,11 @@ class LocalSharedBusEdgeTransport : public BaseTransport {
     }
 
     ReturnCode _send(const Header &header, std::span<const std::byte> frame) {
+        (void)header;
         FAIL_IF_NULL(_link, ERR(InvalidState),
                      "No shared-bus link established for outbound frame");
-        FAIL_IF_UNEXPECTED_FWD(storeRet, _egressBuffer.store(header, frame),
-                               "Failed to store outbound shared-bus frame");
-        if (!storeRet) {
-            _log_w("%s: dropped noncritical outbound shared-bus frame with "
-                   "message ID %lu under egress pressure",
-                   name, static_cast<unsigned long>(header.messageId));
-            return OK();
-        }
         auto linkRet = _link->sendToRouter(frame);
         if (!linkRet.ok()) {
-            FAIL_IF_ERR_FWD(_egressBuffer.release(header),
-                            "Failed to roll back outbound shared-bus frame"
-                            " after link enqueue failure");
             FAIL(linkRet,
                  "Failed to enqueue outbound shared-bus frame into link: "
                  ERR_FMT,
@@ -350,9 +318,6 @@ class LocalSharedBusEdgeTransport : public BaseTransport {
         }
         FAIL_IF_ERR_FWD(_wakeRouter(),
                         "Failed to wake shared-bus router receiver");
-        FAIL_IF_ERR_FWD(_egressBuffer.release(header),
-                        "Failed to release outbound shared-bus frame after "
-                        "link handoff");
         return OK();
     }
 
@@ -390,7 +355,6 @@ class LocalSharedBusEdgeTransport : public BaseTransport {
     uint32_t _readyAfterMs = 0;
     mutable bool _readinessStarted = false;
     mutable uint32_t _readyAtMs = 0;
-    detail::EgressBuffer<LocalSharedBusEdgeEgressByteArenaConfig> _egressBuffer;
 };
 
 class LocalDMABufferedTransport : public LocalSharedBusEdgeTransport {

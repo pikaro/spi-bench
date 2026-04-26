@@ -1,8 +1,10 @@
 #pragma once
 
 #include "Macros/Facade.hpp"
-#include "StaticConfig/Uart.hpp"
+#include "Platform/platform/PlatformESP32/PlatformSelect.hpp"
+#include "StaticConfig/Console.hpp"
 #include "Types/Error.hpp"
+#include "driver/gpio.h" // IWYU pragma: keep
 #include "driver/uart.h"
 #include "freertos/projdefs.h"
 #include "hal/uart_types.h"
@@ -15,10 +17,10 @@
 
 namespace platform {
 
-struct Uart {
+struct Console {
     static ReturnCode init() {
         const uart_config_t uart_config = {
-            .baud_rate = ::UartConfig::baudRate,
+            .baud_rate = ::ConsoleConfig::baudRate,
             .data_bits = UART_DATA_8_BITS,
             .parity = UART_PARITY_DISABLE,
             .stop_bits = UART_STOP_BITS_1,
@@ -32,16 +34,16 @@ struct Uart {
                 },
         };
 
-        FAIL_IF_ESP(uart_driver_install(_uartNumber, 2048,
-                                        static_cast<int>(::UartConfig::txBufferSize),
-                                        0, nullptr, 0),
-                    ERR(OperationFailed), "Failed to install UART driver");
+        FAIL_IF_ESP(
+            uart_driver_install(_uartNumber, 2048,
+                                static_cast<int>(::ConsoleConfig::txBufferSize),
+                                0, nullptr, 0),
+            ERR(OperationFailed), "Failed to install UART driver");
         FAIL_IF_ESP(uart_param_config(_uartNumber, &uart_config),
                     ERR(OperationFailed),
                     "Failed to configure UART parameters");
-        FAIL_IF_ESP(uart_set_pin(_uartNumber, UART_PIN_NO_CHANGE,
-                                 UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE,
-                                 UART_PIN_NO_CHANGE),
+        FAIL_IF_ESP(uart_set_pin(_uartNumber, UART_TX_PIN, UART_RX_PIN,
+                                 UART_RTS_PIN, UART_CTS_PIN),
                     ERR(OperationFailed), "Failed to set UART pins");
         return OK();
     }
@@ -89,10 +91,10 @@ struct Uart {
     }
 
   private:
-    static_assert(::UartConfig::uartNumber < UART_NUM_MAX,
+    static_assert(::ConsoleConfig::uartNumber < UART_NUM_MAX,
                   "UART number must be less than UART_NUM_MAX");
     static constexpr uart_port_t _uartNumber =
-        static_cast<uart_port_t>(::UartConfig::uartNumber);
+        static_cast<uart_port_t>(::ConsoleConfig::uartNumber);
 };
 
 } // namespace platform

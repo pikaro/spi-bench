@@ -3,10 +3,16 @@
 This repository contains an embedded C++23 library and application stack for
 ESP32-class microcontrollers, built with PlatformIO on top of ESP-IDF.
 
-The intended end state is a multi-device system composed of multiple
-microcontrollers running code from this repository, coordinated through the
-PubSub system while each device executes different components and
-configurations.
+The intended end state is a festival "rave stick": a reliable multi-node LED
+controller that can run unattended for many hours. A bus master handles WiFi and
+central coordination; a media node processes I2S audio and publishes FFT / beat
+events; four ESP32-S3 GPU nodes render LED frame segments; side nodes over
+RS485, I2C, and BLE provide sensors, bulbs, and future peripherals.
+
+The system is event-driven because full LED frame data is too expensive to
+publish at the target 100 fps. Nodes publish compact events such as FFT frames,
+beats, bell strikes, warnings, errors, and metrics. GPU nodes subscribe to those
+events and render their own LED segment locally.
 
 ## Current Scope
 
@@ -54,6 +60,21 @@ organized as follows:
     - `listener` -> `src/listener`
     - `slave1` and `slave2` -> `src/slave`
 
+### SDKConfig
+
+The `sdkconfig.<env>` files are generated from `sdkconfig.stack.*` templates. A
+`build_script` assembles all sections with an `extends` in `platformio.ini` if
+`sdkconfig.stack.<group>` exists. I.e. if `env:master` extends `esp32s3`, which
+extends `esp32`, the build script will add to `sdkconfig.defaults.master` in
+order:
+
+- `sdkconfig.stack.esp32`
+- `sdkconfig.stack.esp32s3`
+- `sdkconfig.stack.master`
+
+If options have changed, it deletes the existing `sdkconfig.master` to force
+regeneration.
+
 ## Verification Model
 
 There is currently no unit-test or host-side simulation harness.
@@ -72,27 +93,41 @@ polling. The on-device harness disables PubSub runner auto-restart so task
 failures remain visible during latency and pressure testing instead of being
 converted into repeated stack allocations.
 
-The local shared-bus simulation treats peer readiness as a bus-level event:
-when a peer becomes available, the router wakes its owning PubSub node so
+The local shared-bus simulation treats peer readiness as a bus-level event: when
+a peer becomes available, the router wakes its owning PubSub node so
 subscriptions can be replayed to peers that missed earlier control-plane
-advertisements.
-Router fanout is synchronous in the local shared-bus transport: enqueueing a
-frame clocks it into target peer queues immediately instead of staging an extra
-router egress dispatch. This keeps the single-device simulator closer to the
-intended low-utilization SPI bus and avoids measuring an artificial router task
-queue as bus latency.
-Frames received from transport ingress now retain their serialized wire image
-after a fixed-header peek, so forwarding transports can reuse the original
-bytes instead of reserializing the same envelope on every hop. Full frame CRC
-validation is deferred until a local payload read actually occurs, which keeps
-forward-only traffic closer to cut-through behavior while preserving end-to-end
-integrity checks for consumers.
-Transport ingress now also has a selective direct-relay fast path: if a
-received frame is neither control-plane nor locally subscribed, and exactly one
-downstream transport is interested, the node can hand the raw wire bytes
-straight to that downstream transport without first retaining the frame in the
-local ingress buffer. If the direct handoff backpressures or routing is more
-complex, the existing buffered ingress path remains the fallback.
+advertisements. Router fanout is synchronous in the local shared-bus transport:
+enqueueing a frame clocks it into target peer queues immediately instead of
+staging an extra router egress dispatch. Shared-bus edge and router transports
+now treat the local link queues as the durable simulator handoff point and no
+longer retain a second immediate-release egress arena copy. This keeps the
+single-device simulator closer to the intended low-utilization SPI bus and
+avoids measuring artificial queue, lock, and arena overhead as bus latency.
+Transport ingress is now polled through one receive-and-publish pass instead of
+a separate node receive pass followed by drainer polling. Frames received from
+transport ingress now retain their serialized wire image after a fixed-header
+peek, so forwarding transports can reuse the original bytes instead of
+reserializing the same envelope on every hop. Full frame CRC validation is
+deferred until a local payload read actually occurs, which keeps forward-only
+traffic closer to cut-through behavior while preserving end-to-end integrity
+checks for consumers. Transport ingress now also has a selective direct-relay
+fast path: if a received frame is neither control-plane nor locally subscribed,
+and exactly one downstream transport is interested, the node can hand the raw
+wire bytes straight to that downstream transport without first retaining the
+frame in the local ingress buffer. If the direct handoff backpressures or
+routing is more complex, the existing buffered ingress path remains the
+fallback.
+
+PubSub task configurations use notify wakeups so local publishes and transport
+ingress can run before the next periodic poll. Catch-up polling is disabled for
+PubSub tasks because missed periodic ticks should not create extra zero-delay
+work when the task is already being driven by explicit notifications. The
+single-device harness leaves PubSub node task core affinity free; pinning the
+simulated topology to one CPU has caused boot-time queue backlog and task
+failures.
+
+See [pubsub.md](pubsub.md) for the current PubSub architecture and development
+guidance.
 
 Task monitoring treats managed task-controller runners and platform/system tasks
 as distinct sources. Managed native task handles are tracked explicitly so the
@@ -108,7 +143,7 @@ Service facades are intended to stay lightweight. In particular, `Services/*`
 headers should not pull full backend implementations into unrelated subsystems.
 
 Logging egress over UART now uses the ESP-IDF TX software buffer configured via
-`include/StaticConfig/Uart.hpp`, and the logging sink no longer forces a full
+`include/StaticConfig/Console.hpp`, and the logging sink no longer forces a full
 UART drain after every record by default. This keeps logger callers decoupled
 through the aggregator ring buffer while letting the UART driver absorb bursty
 output without stalling the emitter task on each line.

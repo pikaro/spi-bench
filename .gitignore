@@ -2,8 +2,8 @@
 .cache
 compiledb/
 sdkconfig.*
-!sdkconfig.defaults
-!sdkconfig.*.defaults
+!sdkconfig.stack.*
+!sdkconfig.py
 *.sarif
 *.sarif.json
 backtrace

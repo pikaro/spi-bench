@@ -1,6 +1,6 @@
 #pragma once
 
-#include "BaseTransport.hpp"
+#include "LocalPollingTransport.hpp"
 #include "Macros/Facade.hpp"
 #include "PubSubBackend/Interfaces/Wire.hpp"
 #include "PubSubBackend/detail/Types.hpp"
@@ -38,8 +38,8 @@ struct LocalTransportDependencies {
     }
 };
 
-class LocalTransport : public BaseTransport {
-    using Base = BaseTransport;
+class LocalTransport : public LocalPollingTransport {
+    using Base = LocalPollingTransport;
     friend struct BaseTransportContract;
     // Point-to-point local links only bridge one peer pair. A small RX queue
     // is enough to absorb scheduler jitter without paying for a full
@@ -82,6 +82,19 @@ class LocalTransport : public BaseTransport {
         other.link = this;
         _log_i("%s linked to %s", name, other.name);
         return OK();
+    }
+
+    ReturnCode receive(size_t maxCount = std::numeric_limits<size_t>::max())
+        override {
+        return _receiveAvailabilityOnly(maxCount);
+    }
+
+    ReturnCode pollInto(void *ctx, detail::PollIntoCallback callback,
+                        size_t maxCount = std::numeric_limits<size_t>::max())
+        override {
+        return _pollReceiveCallbackInto(
+            ctx, callback, detail::IngressContext{.transportId = _transportId},
+            maxCount);
     }
 
   protected:

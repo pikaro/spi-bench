@@ -7,13 +7,10 @@
 #include "PubSubBackend/Interfaces/Wire.hpp"
 #include "PubSubBackend/Transports/BaseTransport.hpp"
 #include "PubSubBackend/Transports/LocalSharedBusEdgeTransport.hpp"
-#include "PubSubBackend/detail/EgressBuffer.hpp"
 #include "PubSubBackend/detail/ITransport.hpp"
 #include "PubSubBackend/detail/IngressBuffer.hpp"
-#include "PubSubBackend/detail/Metrics.hpp"
 #include "PubSubBackend/detail/SerDe.hpp"
 #include "PubSubBackend/detail/Types.hpp"
-#include "Queue/Facade.hpp"
 #include "Types/Error.hpp"
 #include <array>
 #include <cstddef>
@@ -40,35 +37,12 @@ struct LocalSharedBusRouterTransportDependencies {
     }
 };
 
-struct LocalSharedBusRouterEgressByteArenaConfig {
-    static constexpr size_t bufferSize = 1024;
-    static constexpr size_t slotCount = 32;
-    static constexpr size_t spanCount = 64;
-    static constexpr size_t maxRecordAgeMs = 1000;
-
-    [[nodiscard]] static bool isCritical(const Header &header) {
-        return header.trafficClass == TrafficClass::Critical;
-    }
-
-    static ReturnCode onEvictNoncritical(const Header & /*unused*/) {
-        return detail::metrics().addEgressEvictedNoncritical();
-    }
-
-    static ReturnCode onDropNoncritical(const Header & /*unused*/) {
-        return detail::metrics().addEgressDroppedNoncritical();
-    }
-
-    static ReturnCode onRejectCritical(const Header & /*unused*/) {
-        return detail::metrics().addEgressRejectedCritical();
-    }
-};
-
 /**
  * Local test transport that models a shared-bus router.
  *
- * The router polls edge transports for ingress data, stores fanout frames in
- * transport-owned egress memory, and redistributes them to selected peers over
- * subsequent send turns.
+ * The router polls edge transports for ingress data and synchronously fans
+ * frames out to selected peer link queues. Those per-peer queues are the local
+ * simulator's durable handoff point.
  */
 class LocalSharedBusRouterTransport
     : public HasLifecycle<LocalSharedBusRouterTransport>,
@@ -114,15 +88,17 @@ class LocalSharedBusRouterTransport
     [[nodiscard]] bool available() const { return true; }
 
     /**
-     * Report whether router fanout still retains the serialized frame in
-     * transport-owned egress memory.
+     * Shared-bus router simulation hands durable ownership to peer link queues
+     * and does not retain separate egress records.
      */
     [[nodiscard]] bool hasBufferedFrame(const Header &header) const {
-        return _egressBuffer.contains(header);
+        (void)header;
+        return false;
     }
 
     [[nodiscard]] bool wasFrameFreed(const Header &header) const {
-        return _egressBuffer.wasFreed(header);
+        (void)header;
+        return true;
     }
 
     ReturnCode addPeer(LocalSharedBusEdgeTransport &peer) {
@@ -151,7 +127,7 @@ class LocalSharedBusRouterTransport
         // into shared member storage did not improve measured stack use, and
         // stack-local scratch avoids coupling future transport reentrancy to
         // shared mutable state.
-        auto enqueueBuffer = std::array<std::byte, bufferSize>{};
+        std::array<std::byte, bufferSize> enqueueBuffer;
         const auto frameSize =
             detail::SerDe::encodedSize(frameHandle->envelope.header);
         if (frameSize > enqueueBuffer.size()) {
@@ -195,12 +171,6 @@ class LocalSharedBusRouterTransport
         FAIL_IF_INACTIVE_ERR("Cannot enqueue inactive shared-bus router");
         FAIL_IF(!dispatch.hasTargetPeers(), ERR(InvalidArgument),
                 "Shared-bus router raw enqueue requires target peers");
-        FAIL_IF_UNEXPECTED_FWD(stored, _egressBuffer.store(header, frame),
-                               "Failed to store direct shared-bus router "
-                               "frame");
-        if (!stored) {
-            return ERR(Timeout);
-        }
         auto pending = PendingDispatch{
             .header = header,
             .remainingPeers = static_cast<detail::PeerMask>(
@@ -209,45 +179,14 @@ class LocalSharedBusRouterTransport
         FAIL_IF(pending.remainingPeers == 0, ERR(InvalidArgument),
                 "Shared-bus router direct fanout has no attached target "
                 "peers");
-        auto queueRet =
-            Totem::Queue::Platform::send(_sendQueue, &pending, queueSendTimeoutTicks);
-        if (!queueRet.ok()) {
-            FAIL_IF_ERR_FWD(_egressBuffer.release(header),
-                            "Failed to roll back direct shared-bus router "
-                            "frame after queue failure");
-            FAIL(queueRet,
-                 "Failed to queue direct shared-bus router dispatch: " ERR_FMT,
-                 ERR_ARG(queueRet));
-        }
-        FAIL_IF_ERR_FWD(_wake(), "Failed to wake shared-bus router sender");
-        return OK();
+        return _sendPending(pending, frame);
     }
 
     ReturnCode send(size_t maxCount = std::numeric_limits<size_t>::max()) {
+        (void)maxCount;
         FAIL_IF_INACTIVE_ERR("Cannot send with inactive shared-bus router");
         FAIL_IF_ERR_FWD(_observePeerAvailability(),
                         "Failed to observe shared-bus peer availability");
-        auto ret = OK();
-        size_t count = 0;
-
-        while (ret.ok() && count < maxCount) {
-            PendingDispatch pending;
-            ret.combine(
-                Totem::Queue::Platform::receive(_sendQueue, &pending, 0));
-            if (!ret.ok()) {
-                break;
-            }
-            FAIL_IF_ERR_FWD(_sendPending(pending, count, maxCount),
-                            "Failed to send shared-bus router dispatch");
-        }
-
-        if (!ret.ok()) {
-            if (ret == ERR(Timeout)) {
-                return OK();
-            }
-            FAIL(ret, "Failed to dequeue shared-bus router dispatch: " ERR_FMT,
-                 ERR_ARG(ret));
-        }
         return OK();
     }
 
@@ -280,7 +219,7 @@ class LocalSharedBusRouterTransport
                 if (peer == nullptr) {
                     continue;
                 }
-                auto receiveBuffer = std::array<std::byte, bufferSize>{};
+                std::array<std::byte, bufferSize> receiveBuffer;
                 auto receiveResult = peer->takeFrameForRouter(receiveBuffer);
                 if (!receiveResult) {
                     if (receiveResult.error() == ERR(Timeout)) {
@@ -380,18 +319,6 @@ class LocalSharedBusRouterTransport
         return _wake();
     }
 
-    ReturnCode _requeuePending(const PendingDispatch &pending) {
-        auto ret = Totem::Queue::Platform::send(_sendQueue, &pending,
-                                                queueSendTimeoutTicks);
-        if (ret.ok()) {
-            return OK();
-        }
-        _log_w("%s: dropping shared-bus router frame with message ID %lu "
-               "because dispatch retry queue is full",
-               name, static_cast<unsigned long>(pending.header.messageId));
-        return _egressBuffer.release(pending.header);
-    }
-
     ReturnCode _sendPending(PendingDispatch pending,
                             std::span<const std::byte> frame) {
         while (pending.remainingPeers != 0) {
@@ -400,22 +327,28 @@ class LocalSharedBusRouterTransport
                                    "Failed to find next shared-bus target"
                                    " peer");
             auto *peer = _peers[peerIndex];
+            const auto peerBit =
+                static_cast<detail::PeerMask>(1U << peerIndex);
             auto deliverRet = peer->receiveFromRouter(frame);
             if (!deliverRet.ok()) {
                 if (deliverRet == ERR(Timeout) &&
                     pending.header.trafficClass == TrafficClass::Noncritical) {
                     _log_w("%s: dropped noncritical shared-bus router frame "
-                           "with message ID %lu under peer queue pressure",
+                           "with message ID %lu for peer %u under peer queue "
+                           "pressure",
                            name,
-                           static_cast<unsigned long>(pending.header.messageId));
-                    return OK();
+                           static_cast<unsigned long>(pending.header.messageId),
+                           static_cast<unsigned>(peer->peerId()));
+                    pending.remainingPeers &=
+                        static_cast<detail::PeerMask>(~peerBit);
+                    _sendCursor = (peerIndex + 1) % detail::maxPeerCount;
+                    continue;
                 }
                 FAIL(deliverRet,
                      "Failed to deliver shared-bus frame to peer %u: " ERR_FMT,
                      peer->peerId(), ERR_ARG(deliverRet));
             }
-            pending.remainingPeers &= static_cast<detail::PeerMask>(
-                ~(static_cast<detail::PeerMask>(1U << peerIndex)));
+            pending.remainingPeers &= static_cast<detail::PeerMask>(~peerBit);
             _sendCursor = (peerIndex + 1) % detail::maxPeerCount;
         }
         return OK();
@@ -450,70 +383,9 @@ class LocalSharedBusRouterTransport
         return availablePeers;
     }
 
-    ReturnCode _sendPending(PendingDispatch pending, size_t &count,
-                            size_t maxCount) {
-        auto frameSize = detail::SerDe::encodedSize(pending.header);
-        auto sendBuffer = std::array<std::byte, bufferSize>{};
-        auto frameSpan = std::span<std::byte>{sendBuffer.data(), frameSize};
+    ReturnCode _onBegin() { return OK(); }
 
-        FAIL_IF_ERR_FWD(
-            _egressBuffer.getRaw(pending.header, frameSpan),
-            "Failed to read shared-bus router frame from egress buffer");
-
-        while (pending.remainingPeers != 0 && count < maxCount) {
-            FAIL_IF_UNEXPECTED_FWD(peerIndex,
-                                   _findNextPeerIndex(pending.remainingPeers),
-                                   "Failed to find next shared-bus target"
-                                   " peer");
-            auto *peer = _peers[peerIndex];
-            auto deliverRet = peer->receiveFromRouter(
-                std::span<const std::byte>{sendBuffer.data(), frameSize});
-            if (!deliverRet.ok()) {
-                FAIL_IF_ERR_FWD(_requeuePending(pending),
-                                "Failed to requeue shared-bus router dispatch"
-                                " after delivery failure");
-                if (deliverRet == ERR(Timeout)) {
-                    return OK();
-                }
-                FAIL(deliverRet,
-                     "Failed to deliver shared-bus frame to peer %u: " ERR_FMT,
-                     peer->peerId(), ERR_ARG(deliverRet));
-            }
-            pending.remainingPeers &= static_cast<detail::PeerMask>(
-                ~(static_cast<detail::PeerMask>(1U << peerIndex)));
-            _sendCursor = (peerIndex + 1) % detail::maxPeerCount;
-            ++count;
-        }
-
-        if (pending.remainingPeers != 0) {
-            FAIL_IF_ERR_FWD(_requeuePending(pending),
-                            "Failed to requeue shared-bus router dispatch");
-            return OK();
-        }
-
-        FAIL_IF_ERR_FWD(_egressBuffer.release(pending.header),
-                        "Failed to release shared-bus router frame");
-        return OK();
-    }
-
-    ReturnCode _onBegin() {
-        auto sendQueueResult =
-            Totem::Queue::Platform::create(_sendQueueStorage);
-        FAIL_IF_ASSIGN_UNEXPECTED_FWD(
-            _sendQueue, sendQueueResult,
-            "Failed to create shared-bus router send queue: " ERR_FMT,
-            ERR_ARG(sendQueueResult.error()));
-        return OK();
-    }
-
-    ReturnCode _onEnd() {
-        auto ret = OK();
-        if (_sendQueue != nullptr) {
-            ret.combine(Totem::Queue::Platform::destroy(_sendQueue));
-            _sendQueue = nullptr;
-        }
-        return ret;
-    }
+    ReturnCode _onEnd() { return OK(); }
 
     void *_pubSubNode = nullptr;
     detail::TransportId _transportId = 0;
@@ -524,21 +396,11 @@ class LocalSharedBusRouterTransport
     detail::IngressDispatchCallback _ingressDispatchCallback = nullptr;
     detail::IngressBuffer &_ingress;
 
-    detail::EgressBuffer<LocalSharedBusRouterEgressByteArenaConfig>
-        _egressBuffer;
-
-    Totem::Queue::Handle _sendQueue{};
-    Totem::Queue::Platform::Storage<PendingDispatch,
-                                    detail::Spec::Limits::maxMessageQueueSize>
-        _sendQueueStorage{};
-
     std::array<LocalSharedBusEdgeTransport *, detail::maxPeerCount> _peers{};
     detail::PeerMask _attachedPeers = 0;
     detail::PeerMask _knownAvailablePeers = 0;
     size_t _receiveCursor = 0;
     size_t _sendCursor = 0;
-
-    static constexpr ::platform::Tick queueSendTimeoutTicks = 1;
 };
 
 inline constexpr LifecycleContract<LocalSharedBusRouterTransport>

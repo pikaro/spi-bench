@@ -11,6 +11,7 @@ for review.
 Priorities, in no particular order:
 
 - Minimal diffs over large refactors
+- Keep code DRY
 - Correctness over cleverness
 - Follow existing patterns exactly
 - Least Surprise and Clean Code principles
@@ -22,14 +23,36 @@ See: /docs/overview.md
 
 ## Project Map
 
-Available via Serena MCP LSP using the `get_symbols_overview` and `find_symbol`
-commands.
+Available via Serena MCP LSP using the `get_symbols_overview` command.
 
 ## Key Commands
 
+In addition to usual POSIX / GNU command-line tools, you have access to:
+
+- rg
+- rga
+- fd
+- sd
+- ast-grep
+- jq and yq
+
 See: /docs/commands.md
 
-### Serena MCP Symbol Usage
+### Serena MCP Usage
+
+- Be mindful of token usage. The presentation format Serena uses is
+    token-optimized, but it still uses more tokens than looking at a file
+    directly.
+- Use LSP tools only when they provide value - for example, to analyze symbol
+    relationships or to search for a symbol that is difficult to find through
+    file browsing. `rg` and `ast-grep` are often more efficient for simpler
+    tasks, and since the codebase uses small components split across many files,
+    ingesting the whole file is often the best way to get a better understanding
+    of the code.
+- When using LSP, limit the scope of your queries appropriately for the task at
+    hand instead of asking for large dumps of information.
+
+#### LSP Symbol Queries
 
 - Prefer the canonical name_path returned by Serena for follow-up symbol
     operations.
@@ -45,10 +68,15 @@ See: /docs/commands.md
 ## Coding Conventions
 
 - Follow existing patterns in neighboring files
+- Follow Clean Code and DRY principles
+- Prefer composition and delegation over inheritance if inheritance does not
+    provide clear value
 - No new dependencies without approval
 - Use descriptive names, even if longer
 - Comment non-obvious code, but avoid obvious comments
-- Keep functions small and focused
+- Keep classes and functions small and focused
+- Use SOLID principles where they provide value, but do not over-abstract or
+    over-engineer
 - Use deterministic behavior, simple ownership, and clear data flow over heavy
     abstractions
 
@@ -71,7 +99,7 @@ See: /docs/commands.md
 
 - Read /docs/overview.md before coding
 - Update docs if structure changes
-- Use MCP LSP for discovery and refactoring
+- Use MCP LSP for reference discovery and refactoring
 - Inform the user of apparent bugs and oversights you discover, even if not
     directly related to the task
 - If appropriate, add logging statements and metrics collection when adding or
@@ -93,10 +121,11 @@ See: /docs/commands.md
 
 ## Documentation Rules
 
+- Prefer using LSP or `rg` and similar shell tools for discovery instead of
+    writing documentation which only duplicates what can be found via LSP.
 - Prefer concrete file references over prose
-- Continuously update docs/\* with new discoveries and changes
-- Prefer using MCP LSP for discovery instead of writing documentation which only
-    duplicates what can be found via LSP
+- Continuously update docs/\* with new discoveries and changes, and remove
+    outdated information as you go.
 - You may modify docs/\* files regardless of the task scope
 - If the user specifically instructs you to document, you may **ONLY** update
     the relevant docs/\* file(s).
@@ -109,17 +138,27 @@ For every task:
     conventions.
 2. Use the `initial_instructions` Serena MCP command to read the instructions
     for usage of the MCP server.
-3. Create a plan
-4. Execute with minimal changes
-5. Test or verify correctness
-6. Repeat steps 3-5 until task is complete
-7. Add or update comments and function / file documentation as needed
-8. Update /docs/\* with any new discoveries or changes
-9. Report changes implemented and the rationale for them in the final task
+3. Understand the code which is relevant to the task using LSP and other tools
+    as needed.
+4. Consider whether the task introduces refactoring needs, such as extracting
+    code into a new class for DRYness.
+5. Create a plan, including any architectural changes or refactors. If the plan
+    includes major changes, ask for confirmation before proceeding.
+6. Execute with minimal changes as needed to complete the task, and conforming
+    to the coding conventions and boundaries outlined in this document
+7. Test or verify correctness if the change was complex enough to warrant it.
+8. Repeat steps 6-7 until task is complete
+9. If you have not tested or verified correctness so far, do so now.
+10. Add or update comments and function / file documentation as needed
+11. Update /docs/\* with any new discoveries or changes and remove outdated
+    information
+12. Report changes implemented and the rationale for them in the final task
     summary
-10. Report relevant discoveries, insights, open questions or potential issues
+13. Report relevant discoveries, insights, open questions or potential issues
     discovered if they would be helpful for improving code correctness,
-    maintainability, or quality.
+    maintainability, or quality. This is not limited to the scope of the task,
+    but reports about findings from adjacent areas should omit low-signal
+    findings.
 
 ## Memories
 
@@ -143,5 +182,9 @@ For every task:
     decisions or discovered pitfalls.
 - Update existing memories when refining the same topic instead of creating
     near-duplicates.
+- Remove outdated memories when they are no longer relevant or when the
+    information they contain has been added to AGENTS.md or docs/\* files.
 - Use a stable topic pattern such as project/area/topic, for example
     spi/build/master-scope or spi/pubsub/testing-plan.
+- You may create and recall memories without permission or instruction as you
+    see fit.

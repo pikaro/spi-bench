@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Base/HasMutex.hpp"
 #include "Data/PubSub.hpp"
 #include "Macros/Facade.hpp"
 #include "PubSubBackend/Interfaces/Envelope.hpp"
@@ -10,7 +11,6 @@
 #include <cinttypes>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <cstring>
 #include <span>
 
@@ -36,22 +36,27 @@ using NodeMask = uint32_t;
 }
 
 inline Message makeTestMessage() {
+    static uint32_t sequence = 0;
+    const auto value = ++sequence;
+
     Message msg{};
-    msg.flag = std::rand() % 2 == 0;
-    msg.intVal = std::rand() % 1000;
-    msg.uint32Val = std::rand() % 100000;
-    msg.uint16Val = std::rand() % 65536;
-    msg.uint8Val = std::rand() % 256;
+    msg.flag = (value & 1U) == 0;
+    msg.intVal = static_cast<int>(value % 1000U);
+    msg.uint32Val = value * 2654435761UL;
+    msg.uint16Val = static_cast<uint16_t>(value);
+    msg.uint8Val = static_cast<uint8_t>(value);
     std::strncpy(msg.strVal.data(), "Hello, PubSub!", msg.strVal.size() - 1);
     msg.strVal[msg.strVal.size() - 1] = '\0';
     for (size_t i = 0; i < msg.byteArrayVal.size(); ++i) {
-        msg.byteArrayVal[i] = std::byte(std::rand() % 256);
+        msg.byteArrayVal[i] = static_cast<std::byte>(value + i);
     }
     return msg;
 }
 
-class IntegrationHarness {
+class IntegrationHarness : public HasMutex<IntegrationHarness> {
   public:
+    static constexpr const char *name = "PubSubTest::IntegrationHarness";
+
     struct Stats {
         uint32_t publishAttempts = 0;
         uint32_t publishFailures = 0;
@@ -123,6 +128,9 @@ class IntegrationHarness {
                       NodeMask expectedRecipients, const PoolProbe &poolProbe,
                       std::span<const TransportProbe> transportProbes,
                       uint32_t nowMs) {
+        auto guard = _mutexGuard(mutexTimeoutMs, false);
+        FAIL_IF_NOT(guard.locked(), ERR(Timeout),
+                    "Timed out locking PubSub test harness for expect");
         FAIL_IF_NOT(poolProbe.valid(), ERR(InvalidArgument),
                     "Expectation requires a valid pool probe");
         FAIL_IF(expectedRecipients == 0, ERR(InvalidArgument),
@@ -157,6 +165,10 @@ class IntegrationHarness {
     }
 
     void cancel(const Header &header) {
+        auto guard = _mutexGuard(mutexTimeoutMs, false);
+        if (!guard.locked()) {
+            return;
+        }
         if (auto *expectation = _findExpectation(header)) {
             expectation->occupied = false;
         }
@@ -164,6 +176,9 @@ class IntegrationHarness {
     }
 
     ReturnCode recordPublicationAttempt() {
+        auto guard = _mutexGuard(mutexTimeoutMs, false);
+        FAIL_IF_NOT(guard.locked(), ERR(Timeout),
+                    "Timed out locking PubSub test harness for attempt");
         ++_stats.publishAttempts;
         return OK();
     }
@@ -172,12 +187,15 @@ class IntegrationHarness {
                              const Totem::PubSubBackend::Envelope &envelope) {
         FAIL_IF_UNEXPECTED_FWD(message, envelope.getPayloadAs<Message>(),
                                "Failed to decode message payload");
+        auto guard = _mutexGuard(mutexTimeoutMs, false);
+        FAIL_IF_NOT(guard.locked(), ERR(Timeout),
+                    "Timed out locking PubSub test harness for receipt");
 
         auto *expectation = _findExpectation(envelope.header);
         if (expectation == nullptr) {
             ++_stats.unexpectedMessages;
-            _log_e("PubSubTest: unexpected message for source %u messageId %u "
-                   "topic " SV_FMT,
+            _log_e("PubSubTest: unexpected message for source %u "
+                   "messageId %u topic " SV_FMT,
                    static_cast<unsigned>(envelope.header.source),
                    envelope.header.messageId,
                    MAGIC_SV_ARG(Totem::Data::PubSub::Topic,
@@ -236,31 +254,93 @@ class IntegrationHarness {
 
     void poll(uint32_t nowMs, uint32_t timeoutMs, uint32_t reportIntervalMs,
               uint32_t targetLatencyMs = 0) {
-        _evaluateExpectations(nowMs, timeoutMs, targetLatencyMs);
-        if (reportIntervalMs == 0) {
-            return;
+        std::array<TimeoutEvent, maxExpectations> timeoutEvents{};
+        size_t timeoutEventCount = 0;
+        ReportSnapshot report{};
+
+        {
+            auto guard = _mutexGuard(mutexTimeoutMs, false);
+            if (!guard.locked()) {
+                return;
+            }
+            _evaluateExpectations(nowMs, timeoutMs, targetLatencyMs,
+                                  timeoutEvents, timeoutEventCount);
+            if (reportIntervalMs != 0 &&
+                (nowMs - _lastReportAtMs) >= reportIntervalMs) {
+                _lastReportAtMs = nowMs;
+                report.emit = true;
+                report.stats = _stats;
+                report.pending = _pendingCount();
+            }
         }
-        if ((nowMs - _lastReportAtMs) < reportIntervalMs) {
-            return;
+
+        for (size_t i = 0; i < timeoutEventCount; ++i) {
+            const auto &event = timeoutEvents[i];
+            if (event.missingRecipients != 0) {
+                _log_e("PubSubTest: receipt timeout for source %u messageId %u "
+                       "topic " SV_FMT " missing recipients mask 0x%08" PRIx32,
+                       static_cast<unsigned>(event.header.source),
+                       event.header.messageId,
+                       MAGIC_SV_ARG(Totem::Data::PubSub::Topic,
+                                    event.header.topic),
+                       event.missingRecipients);
+            }
+            if (event.poolName != nullptr) {
+                _log_e("PubSubTest: pool release timeout for %s source %u "
+                       "messageId %u topic " SV_FMT,
+                       event.poolName,
+                       static_cast<unsigned>(event.header.source),
+                       event.header.messageId,
+                       MAGIC_SV_ARG(Totem::Data::PubSub::Topic,
+                                    event.header.topic));
+            }
+            for (size_t j = 0; j < event.egressTimeoutCount; ++j) {
+                _log_e("PubSubTest: egress release timeout for %s source %u "
+                       "messageId %u topic " SV_FMT,
+                       event.egressNames[j],
+                       static_cast<unsigned>(event.header.source),
+                       event.header.messageId,
+                       MAGIC_SV_ARG(Totem::Data::PubSub::Topic,
+                                    event.header.topic));
+            }
         }
-        _lastReportAtMs = nowMs;
-        _log_i("PubSubTest: attempts=%" PRIu32 " pending=%zu complete=%" PRIu32
-               " maxReceiptMs=%" PRIu32 " maxCompleteMs=%" PRIu32
-               " targetMiss=%" PRIu32 " publishFail=%" PRIu32
-               " unexpected=%" PRIu32 " badRecipient=%" PRIu32
-               " duplicate=%" PRIu32 " mismatch=%" PRIu32
-               " receiptTimeout=%" PRIu32 " poolTimeout=%" PRIu32
-               " egressTimeout=%" PRIu32,
-               _stats.publishAttempts, pendingCount(), _stats.completions,
-               _stats.maxReceiptLatencyMs, _stats.maxCompletionLatencyMs,
-               _stats.latencyTargetMisses, _stats.publishFailures,
-               _stats.unexpectedMessages, _stats.unexpectedRecipients,
-               _stats.duplicateReceipts, _stats.payloadMismatches,
-               _stats.receiptTimeouts, _stats.poolFreeTimeouts,
-               _stats.egressFreeTimeouts);
+
+        if (report.emit) {
+            _log_i("PubSubTest: attempts=%" PRIu32
+                   " pending=%zu complete=%" PRIu32
+                   " maxReceiptMs=%" PRIu32 " maxCompleteMs=%" PRIu32
+                   " targetMiss=%" PRIu32 " publishFail=%" PRIu32
+                   " unexpected=%" PRIu32 " badRecipient=%" PRIu32
+                   " duplicate=%" PRIu32 " mismatch=%" PRIu32
+                   " receiptTimeout=%" PRIu32 " poolTimeout=%" PRIu32
+                   " egressTimeout=%" PRIu32,
+                   report.stats.publishAttempts, report.pending,
+                   report.stats.completions, report.stats.maxReceiptLatencyMs,
+                   report.stats.maxCompletionLatencyMs,
+                   report.stats.latencyTargetMisses,
+                   report.stats.publishFailures,
+                   report.stats.unexpectedMessages,
+                   report.stats.unexpectedRecipients,
+                   report.stats.duplicateReceipts,
+                   report.stats.payloadMismatches,
+                   report.stats.receiptTimeouts,
+                   report.stats.poolFreeTimeouts,
+                   report.stats.egressFreeTimeouts);
+        }
     }
 
     [[nodiscard]] size_t pendingCount() const {
+        auto guard = _mutexGuard(mutexTimeoutMs, false);
+        return guard.locked() ? _pendingCount() : 0;
+    }
+
+    [[nodiscard]] Stats stats() const {
+        auto guard = _mutexGuard(mutexTimeoutMs, false);
+        return guard.locked() ? _stats : Stats{};
+    }
+
+  private:
+    [[nodiscard]] size_t _pendingCount() const {
         size_t pending = 0;
         for (const auto &expectation : _expectations) {
             if (expectation.occupied) {
@@ -269,10 +349,6 @@ class IntegrationHarness {
         }
         return pending;
     }
-
-    [[nodiscard]] const Stats &stats() const { return _stats; }
-
-  private:
     struct Expectation {
         bool occupied = false;
         Header header{};
@@ -284,6 +360,20 @@ class IntegrationHarness {
         size_t transportProbeCount = 0;
         uint32_t createdAtMs = 0;
         uint32_t lastReceiptAtMs = 0;
+    };
+
+    struct TimeoutEvent {
+        Header header{};
+        NodeMask missingRecipients = 0;
+        const char *poolName = nullptr;
+        std::array<const char *, maxTransportProbes> egressNames{};
+        size_t egressTimeoutCount = 0;
+    };
+
+    struct ReportSnapshot {
+        bool emit = false;
+        Stats stats{};
+        size_t pending = 0;
     };
 
     [[nodiscard]] static bool
@@ -344,8 +434,9 @@ class IntegrationHarness {
         ++_stats.completions;
     }
 
-    void _evaluateExpectations(uint32_t nowMs, uint32_t timeoutMs,
-                               uint32_t targetLatencyMs) {
+    void _evaluateExpectations(
+        uint32_t nowMs, uint32_t timeoutMs, uint32_t targetLatencyMs,
+        std::span<TimeoutEvent> timeoutEvents, size_t &timeoutEventCount) {
         for (auto &expectation : _expectations) {
             if (!expectation.occupied) {
                 continue;
@@ -366,26 +457,24 @@ class IntegrationHarness {
                 continue;
             }
 
+            TimeoutEvent *event = nullptr;
+            if (timeoutEventCount < timeoutEvents.size()) {
+                event = &timeoutEvents[timeoutEventCount++];
+                event->header = expectation.header;
+            }
+
             if (!receivedAll) {
                 ++_stats.receiptTimeouts;
-                _log_e("PubSubTest: receipt timeout for source %u messageId %u "
-                       "topic " SV_FMT " missing recipients mask 0x%08" PRIx32,
-                       static_cast<unsigned>(expectation.header.source),
-                       expectation.header.messageId,
-                       MAGIC_SV_ARG(Totem::Data::PubSub::Topic,
-                                    expectation.header.topic),
-                       _missingRecipients(expectation));
+                if (event != nullptr) {
+                    event->missingRecipients = _missingRecipients(expectation);
+                }
             }
 
             if (!poolFreed) {
                 ++_stats.poolFreeTimeouts;
-                _log_e("PubSubTest: pool release timeout for %s source %u "
-                       "messageId %u topic " SV_FMT,
-                       expectation.poolProbe.name,
-                       static_cast<unsigned>(expectation.header.source),
-                       expectation.header.messageId,
-                       MAGIC_SV_ARG(Totem::Data::PubSub::Topic,
-                                    expectation.header.topic));
+                if (event != nullptr) {
+                    event->poolName = expectation.poolProbe.name;
+                }
             }
 
             if (!egressFreed) {
@@ -393,13 +482,11 @@ class IntegrationHarness {
                     const auto &probe = expectation.transportProbes[i];
                     if (!probe.wasFreed(probe.ctx, expectation.header)) {
                         ++_stats.egressFreeTimeouts;
-                        _log_e("PubSubTest: egress release timeout for %s "
-                               "source %u messageId %u topic " SV_FMT,
-                               probe.name,
-                               static_cast<unsigned>(expectation.header.source),
-                               expectation.header.messageId,
-                               MAGIC_SV_ARG(Totem::Data::PubSub::Topic,
-                                            expectation.header.topic));
+                        if (event != nullptr &&
+                            event->egressTimeoutCount < event->egressNames.size()) {
+                            event->egressNames[event->egressTimeoutCount++] =
+                                probe.name;
+                        }
                     }
                 }
             }
@@ -411,6 +498,8 @@ class IntegrationHarness {
     std::array<Expectation, maxExpectations> _expectations{};
     Stats _stats{};
     uint32_t _lastReportAtMs = 0;
+
+    static constexpr uint32_t mutexTimeoutMs = 10;
 };
 
 class Consumer {

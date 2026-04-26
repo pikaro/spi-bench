@@ -3,9 +3,9 @@
 #include "CommandBackend/Interfaces/CommandDesc.hpp"
 #include "CommandBackend/Interfaces/ITransport.hpp"
 #include "Macros/Facade.hpp"
-#include "Platform/Uart.hpp"
+#include "Platform/Console.hpp"
 #include "StaticConfig/Command.hpp"
-#include "StaticConfig/Uart.hpp"
+#include "StaticConfig/Console.hpp"
 #include "Types/Error.hpp"
 #include <array>
 #include <cctype>
@@ -17,7 +17,7 @@
 
 namespace Totem::CommandBackend::detail::Transports {
 
-class UartTransport : public ITransport {
+class ConsoleTransport : public ITransport {
   public:
     static constexpr const char *name = "Transport::Serial";
 
@@ -26,14 +26,14 @@ class UartTransport : public ITransport {
     std::expected<CommandDesc::Tokens, ReturnCode> poll() override {
         _tokenCount = 0;
 
-        auto readResult = platform::Uart::read(_rxChunk);
+        auto readResult = platform::Console::read(_rxChunk);
         if (!readResult) {
             if (readResult.error() == ERR(NotFound)) {
                 return std::unexpected(ERR(NotFound));
             }
 
             FAIL(std::unexpected(readResult.error()),
-                 "Failed to read from UART in %s", name);
+                 "Failed to read from Console in %s", name);
         }
         const auto readBytes = *readResult;
 
@@ -162,7 +162,7 @@ class UartTransport : public ITransport {
         }
     }
 
-    std::array<uint8_t, UartConfig::maxReadLen> _rxChunk{};
+    std::array<uint8_t, ConsoleConfig::maxReadLen> _rxChunk{};
     std::array<char, CommandConfig::maxLineLen + 1> _line{};
     size_t _lineLen = 0;
 

@@ -4,6 +4,7 @@
 #include "Macros/Facade.hpp"
 #include "Mutex/Facade.hpp"
 #include <cstdint>
+#include <optional>
 #include <type_traits>
 
 namespace Totem::Core {
@@ -19,6 +20,18 @@ template <class Derived> class HasMutex {
   protected:
     void _setDefaultMutexTimeout(uint32_t timeoutMs) {
         defaultMutexTimeoutMs = timeoutMs;
+    }
+
+    [[nodiscard]] Totem::Mutex::MutexGuard
+    _mutexGuard(std::optional<uint32_t> timeoutMs = std::nullopt,
+                bool critical = true) const {
+        auto *mtx = _mutex.get();
+        ABORT_IF_NULL(mtx, "Mutex for %s cannot be null", _name);
+        return {
+            mtx,
+            ::platform::ms_to_ticks(timeoutMs.value_or(defaultMutexTimeoutMs)),
+            critical,
+        };
     }
 
     template <class F, class... Args>

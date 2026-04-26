@@ -3,7 +3,7 @@
 #include "LoggingBackend/Interfaces/Types.hpp"
 #include "Macros/Facade.hpp"
 #include "Platform/PlatformSelect.hpp"
-#include "StaticConfig/Uart.hpp"
+#include "StaticConfig/Console.hpp"
 #include "TaskController/Interfaces/Config.hpp"
 #include <algorithm>
 #include <array>
@@ -35,16 +35,16 @@ static constexpr auto supportedBaudRates = std::to_array<int>({
     921600,
 });
 
-struct UartConfig {
+struct ConsoleConfig {
     // Logging tolerates line delay, so prefer the driver's buffered TX path by
     // default and avoid forcing a full wire drain on every record.
     bool flush = false;
 
     [[nodiscard]] static bool validate() {
-        FAIL_IF(std::ranges::find(supportedBaudRates, ::UartConfig::baudRate) ==
+        FAIL_IF(std::ranges::find(supportedBaudRates, ::ConsoleConfig::baudRate) ==
                     supportedBaudRates.end(),
                 false, "Unsupported baud rate %d for %s",
-                ::UartConfig::baudRate);
+                ::ConsoleConfig::baudRate);
         return true;
     }
 };

@@ -1,0 +1,3 @@
+# PubSub harness scheduling caveat
+
+Keep `noCatchup = true` for PubSub task configs unless a clean runtime trace proves otherwise. The confirmed correctness regression in the single-device master harness was fixed core affinity for the PubSub node tasks: pinning the simulated topology to one CPU can backlog the small local link queues during boot traffic and cause send timeouts/task exits. Leave PubSub node task core affinity free in the harness. The current harness task priority is `3`; changing it should be treated as a separate measured experiment, not as the known crash root cause.

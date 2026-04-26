@@ -8,6 +8,7 @@ struct Config {
         .name = "PubSubNode",
         .stackSize = 9000,
         .intervalMs = 100,
+        .noCatchup = true,
         .useNotify = true,
         .notifyTimeoutMs = 10,
     };

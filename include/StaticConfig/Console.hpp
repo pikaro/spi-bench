@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
-struct UartConfig {
+struct ConsoleConfig {
     static constexpr int baudRate = 921600;
     static constexpr uint8_t uartNumber = 0;
     static constexpr size_t txBufferSize = 2048;

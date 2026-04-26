@@ -1,12 +1,12 @@
 #pragma once
 
 #include "LoggingBackend/detail/Aggregator.hpp"
-#include "LoggingBackend/detail/Outputs/UartOutput.hpp"
+#include "LoggingBackend/detail/Outputs/ConsoleOutput.hpp"
 
 namespace Totem::LoggingBackend {
 
 using detail::Aggregator;
 
-using detail::Outputs::UartOutput;
+using detail::Outputs::ConsoleOutput;
 
 } // namespace Totem::LoggingBackend

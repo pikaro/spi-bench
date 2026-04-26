@@ -155,28 +155,12 @@ class BaseTransport : public HasLifecycle<BaseTransport>,
                 // observed PubSub stack watermark, and member buffers add
                 // refactoring risk if transport call ownership ever widens
                 // beyond the current single-runner model.
-                auto sendBuffer = std::array<std::byte, bufferSize>{};
-                const auto frameSize =
-                    detail::SerDe::encodedSize(item->envelope.header);
-                if (frameSize > sendBuffer.size()) {
-                    return ERR(Overflow);
-                }
+                std::array<std::byte, bufferSize> sendBuffer;
+                FAIL_IF_UNEXPECTED_FWD(
+                    frameSize, _prepareFrameForSend(item, sendBuffer),
+                    "Failed to prepare queued frame for sending");
                 auto frame =
                     std::span<const std::byte>{sendBuffer.data(), frameSize};
-                if (item->envelope.owner == &_ingress &&
-                    _ingress.hasSerializedFrame(item->envelope.header)) {
-                    FAIL_IF_ERR_FWD(
-                        _ingress.getSerializedFrame(
-                            item->envelope.header,
-                            std::span<std::byte>{sendBuffer.data(), frameSize}),
-                        "Failed to reuse serialized ingress frame for sending");
-                } else {
-                    FAIL_IF_UNEXPECTED_FWD(
-                        encodedSize,
-                        detail::SerDe::serialize(item->envelope, sendBuffer),
-                        "Failed to serialize frame for sending");
-                    (void)encodedSize;
-                }
                 _log_d(SV_FMT ": sending %zu bytes for " MAGIC_PUBSUB_SV_FMT,
                        SV_ARG(_instanceName), frameSize,
                        MAGIC_PUBSUB_SV_ARG(item->envelope.header));
@@ -211,7 +195,7 @@ class BaseTransport : public HasLifecycle<BaseTransport>,
         size_t count = 0;
 
         while (ret.ok() && count < maxCount) {
-            auto receiveBuffer = std::array<std::byte, bufferSize>{};
+            std::array<std::byte, bufferSize> receiveBuffer;
             auto receiveResult = _receiveCallback(_transport, receiveBuffer);
 
             if (receiveResult) {
@@ -267,6 +251,8 @@ class BaseTransport : public HasLifecycle<BaseTransport>,
     ReturnCode
     pollInto(void *ctx, detail::PollIntoCallback callback,
              size_t maxCount = std::numeric_limits<size_t>::max()) override {
+        FAIL_IF_ERR_FWD(receive(maxCount),
+                        "Failed to receive transport ingress before polling");
         FAIL_IF_ERR_FWD(_observeAvailability(),
                         "Failed to observe transport availability");
         if (!_available()) {
@@ -294,6 +280,32 @@ class BaseTransport : public HasLifecycle<BaseTransport>,
     }
 
   protected:
+    std::expected<size_t, ReturnCode>
+    _prepareFrameForSend(detail::FrameHandle frameHandle,
+                         std::span<std::byte> sendBuffer) {
+        const auto frameSize =
+            detail::SerDe::encodedSize(frameHandle->envelope.header);
+        if (frameSize > sendBuffer.size()) {
+            return std::unexpected(ERR(Overflow));
+        }
+
+        if (frameHandle->envelope.owner == &_ingress &&
+            _ingress.hasSerializedFrame(frameHandle->envelope.header)) {
+            FAIL_IF_ERR_FWD_UNEXPECTED(
+                _ingress.getSerializedFrame(
+                    frameHandle->envelope.header,
+                    std::span<std::byte>{sendBuffer.data(), frameSize}),
+                "Failed to reuse serialized ingress frame for sending");
+        } else {
+            FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
+                encodedSize,
+                detail::SerDe::serialize(frameHandle->envelope, sendBuffer),
+                "Failed to serialize frame for sending");
+            (void)encodedSize;
+        }
+        return frameSize;
+    }
+
     ReturnCode _ack(const Envelope &envelope) {
         _log_d(SV_FMT ": ack " MAGIC_PUBSUB_SV_FMT, SV_ARG(_instanceName),
                MAGIC_PUBSUB_SV_ARG(envelope.header));

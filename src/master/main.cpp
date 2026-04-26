@@ -5,7 +5,7 @@
 #include "Macros/Facade.hpp"
 #include "MetricsBackend/Facade.hpp"
 #include "Monitoring/Facade.hpp"
-#include "Platform/Uart.hpp"
+#include "Platform/Console.hpp"
 #include "Platform/platform/PlatformESP32/Base.hpp"
 #include "PubSubBackend/Facade.hpp"
 #include "PubSubBackend/Interfaces/Config.hpp"
@@ -19,7 +19,6 @@
 #include "Services/Metrics.hpp"
 #include "Services/PubSub.hpp"
 #include "Support/CoreCommands.hpp"
-#include "TaskController/Interfaces/Config.hpp"
 #include "TaskControllerRegistry/Facade.hpp"
 #include "TestMessage.hpp"
 #include "Types/Error.hpp"
@@ -45,10 +44,10 @@ struct MetricsBackendBinding {
 Totem::TaskControllerRegistry::Registry taskRegistry;
 
 Totem::LoggingBackend::Aggregator aggregator(taskRegistry);
-Totem::LoggingBackend::UartOutput uartOutput;
+Totem::LoggingBackend::ConsoleOutput consoleOutput;
 
 Totem::CommandBackend::Controller commandController(taskRegistry);
-Totem::CommandBackend::UartTransport uartSource;
+Totem::CommandBackend::ConsoleTransport consoleSource;
 Totem::TaskControllerRegistry::SystemTaskSource systemTaskSource(taskRegistry);
 
 Totem::Monitoring::Monitoring monitoring(taskRegistry);
@@ -256,15 +255,10 @@ makePubSubConfig(const char *taskName, uint32_t intervalMs = 500,
         .task =
             {
                 .name = taskName,
-                .priority = 1,
-                .core =
-                    {
-                        .kind = Totem::TaskController::Config::CorePreference::
-                            Kind::Specific,
-                        .core = 1,
-                    },
+                .priority = 3,
                 .stackSize = 8192,
                 .intervalMs = intervalMs,
+                .noCatchup = true,
                 .useNotify = true,
                 .notifyTimeoutMs = notifyTimeoutMs,
                 .autoRestart = false,
@@ -274,15 +268,15 @@ makePubSubConfig(const char *taskName, uint32_t intervalMs = 500,
 
 // NOLINTNEXTLINE(readability-function-size)
 void setup() {
-    ABORT_IF_ERR_BEGIN(::platform::Uart::init());
+    ABORT_IF_ERR_BEGIN(::platform::Console::init());
 
     ABORT_IF_ERR_BEGIN(taskRegistry.begin());
 
-    ABORT_IF_ERR_BEGIN(uartOutput.begin());
+    ABORT_IF_ERR_BEGIN(consoleOutput.begin());
 
     ABORT_IF_ERR_BEGIN(commandController.begin());
-    ABORT_IF_ERR(commandController.addTransport(uartSource),
-                 "Failed to add UART transport to command controller");
+    ABORT_IF_ERR(commandController.addTransport(consoleSource),
+                 "Failed to add console transport to command controller");
     CommandRegistrarService::set(commandController.registrar());
 
     ABORT_IF_ERR_BEGIN(metricsBackend.begin());
@@ -291,8 +285,8 @@ void setup() {
                  "Failed to register core commands to command controller");
 
     ABORT_IF_ERR_BEGIN(aggregator.begin());
-    ABORT_IF_ERR(aggregator.addSink(uartOutput),
-                 "Failed to add UART sink to aggregator");
+    ABORT_IF_ERR(aggregator.addSink(consoleOutput),
+                 "Failed to add console sink to aggregator");
 
     LoggingService::set(aggregator);
 

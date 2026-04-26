@@ -6,7 +6,7 @@
 #include "LoggingBackend/detail/HasLogLevel.hpp"
 #include "LoggingBackend/detail/IRecordSink.hpp"
 #include "Macros/Facade.hpp"
-#include "Platform/Uart.hpp"
+#include "Platform/Console.hpp"
 #include "StaticConfig/Logging.hpp"
 #include "Types/Basic.hpp"
 #include "Types/Error.hpp"
@@ -93,16 +93,16 @@ constexpr const char *log_color_to_string(Color color) {
     }
 }
 
-class UartOutput : public HasLifecycle<UartOutput, UartConfig>,
-                   public HasLogLevel,
-                   public IRecordSink {
-    friend class HasLifecycle<UartOutput, UartConfig>;
-    friend struct LifecycleContract<UartOutput, UartConfig>;
+class ConsoleOutput : public HasLifecycle<ConsoleOutput, ConsoleConfig>,
+                      public HasLogLevel,
+                      public IRecordSink {
+    friend class HasLifecycle<ConsoleOutput, ConsoleConfig>;
+    friend struct LifecycleContract<ConsoleOutput, ConsoleConfig>;
 
   public:
-    UartOutput() : HasLogLevel(name) {}
+    ConsoleOutput() : HasLogLevel(name) {}
 
-    static constexpr const char *name = "Output::Uart";
+    static constexpr const char *name = "Output::Console";
 
     [[nodiscard]] std::string_view displayName() const override { return name; }
 
@@ -166,8 +166,8 @@ class UartOutput : public HasLifecycle<UartOutput, UartConfig>,
             num = static_cast<int>(buf.size() - 1);
         }
 
-        return ::platform::Uart::write(buf.data(), static_cast<size_t>(num),
-                                       config().flush);
+        return ::platform::Console::write(buf.data(), static_cast<size_t>(num),
+                                          config().flush);
     }
 
   private:
@@ -190,7 +190,7 @@ class UartOutput : public HasLifecycle<UartOutput, UartConfig>,
         _componentLogLevels{std::nullopt};
 };
 
-inline constexpr LifecycleContract<UartOutput, UartConfig>
-    _output_uart_lifecycle;
+inline constexpr LifecycleContract<ConsoleOutput, ConsoleConfig>
+    _output_console_lifecycle;
 
 } // namespace Totem::LoggingBackend::detail::Outputs

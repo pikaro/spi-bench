@@ -11,6 +11,7 @@
 #include <cstring>
 #include <expected>
 #include <span>
+#include <type_traits>
 #include <utility>
 
 #pragma push_macro("BIT_MASK")
@@ -41,9 +42,8 @@ class SerDe {
         auto crcSpan = out.subspan(headerSize + envelope.header.payloadSize,
                                    sizeof(uint32_t));
 
-        FAIL_IF_ERR_FWD_UNEXPECTED(
-            Codec<Header>::encode(envelope.header, headerSpan),
-            "Failed to encode header");
+        FAIL_IF_ERR_FWD_UNEXPECTED(encodeHeader(envelope.header, headerSpan),
+                                   "Failed to encode header");
 
         if (envelope.getPayload != nullptr) {
             FAIL_IF_ERR_FWD_UNEXPECTED(
@@ -86,8 +86,7 @@ class SerDe {
                 std::unexpected(ERR(CoreError, InvalidData)),
                 "Frame size is too small to contain header and CRC");
         auto headerSpan = frame.first(headerSize);
-        FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(header,
-                                          Codec<Header>::decode(headerSpan),
+        FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(header, decodeHeader(headerSpan),
                                           "Failed to decode header from frame");
         FAIL_IF(encodedSize(header) != frame.size(),
                 std::unexpected(ERR(CoreError, InvalidData)),
@@ -140,10 +139,81 @@ class SerDe {
         return headerSize + overheadSize + header.payloadSize;
     }
 
-    static constexpr size_t headerSize = Codec<Header>::encodedSize();
+    static constexpr size_t headerSize = sizeof(uint32_t) + sizeof(MessageId) +
+                                         sizeof(TopicId) + sizeof(NodeId) +
+                                         sizeof(TrafficClass) +
+                                         sizeof(uint16_t);
     static constexpr size_t overheadSize = sizeof(uint32_t);
 
   private:
+    static_assert(headerSize == Codec<Header>::encodedSize(),
+                  "Manual PubSub header codec must match generated codec");
+
+    template <typename T, bool IsEnum = std::is_enum_v<T>>
+    struct HeaderScalarStorage {
+        using Type = T;
+    };
+
+    template <typename T> struct HeaderScalarStorage<T, true> {
+        using Type = std::underlying_type_t<T>;
+    };
+
+    template <typename T>
+    static void _writeLe(std::span<std::byte> out, size_t &offset, T value) {
+        using RawT = typename HeaderScalarStorage<T>::Type;
+        using UnsignedT = std::make_unsigned_t<RawT>;
+        auto bits = static_cast<UnsignedT>(static_cast<RawT>(value));
+        for (size_t i = 0; i < sizeof(RawT); ++i) {
+            out[offset + i] = static_cast<std::byte>((bits >> (i * 8U)) &
+                                                     0xFFU);
+        }
+        offset += sizeof(RawT);
+    }
+
+    template <typename T>
+    static T _readLe(std::span<const std::byte> in, size_t &offset) {
+        using RawT = typename HeaderScalarStorage<T>::Type;
+        using UnsignedT = std::make_unsigned_t<RawT>;
+        UnsignedT bits{};
+        for (size_t i = 0; i < sizeof(RawT); ++i) {
+            bits |= static_cast<UnsignedT>(std::to_integer<uint8_t>(
+                        in[offset + i]))
+                    << (i * 8U);
+        }
+        offset += sizeof(RawT);
+        return static_cast<T>(static_cast<RawT>(bits));
+    }
+
+    static ReturnCode encodeHeader(const Header &header,
+                                   std::span<std::byte> out) {
+        FAIL_IF(out.size() < headerSize, ERR(CoreError, Overflow),
+                "Output buffer is too small for PubSub header");
+        size_t offset = 0;
+        _writeLe(out, offset, header.timestampMs);
+        _writeLe(out, offset, header.messageId);
+        _writeLe(out, offset, header.topic);
+        _writeLe(out, offset, header.source);
+        _writeLe(out, offset, header.trafficClass);
+        _writeLe(out, offset, header.payloadSize);
+        return OK();
+    }
+
+    static std::expected<Header, ReturnCode>
+    decodeHeader(std::span<const std::byte> in) {
+        FAIL_IF(in.size() < headerSize,
+                std::unexpected(ERR(CoreError, Underflow)),
+                "Input buffer is too small for PubSub header");
+        size_t offset = 0;
+        return Header{
+            .timestampMs = _readLe<uint32_t>(in, offset),
+            .messageId = _readLe<MessageId>(in, offset),
+            .topic = _readLe<TopicId>(in, offset),
+            .source = _readLe<::Totem::PubSubBackend::NodeId>(in, offset),
+            .trafficClass = _readLe<TrafficClass>(in, offset),
+            .payloadSize = _readLe<uint16_t>(in, offset),
+        };
+    }
+
     [[nodiscard]] static uint32_t
     _crcSum(const std::span<const std::byte> frame) {
         static const auto table = CRC::CRC_32().MakeTable();

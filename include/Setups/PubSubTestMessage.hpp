@@ -5,6 +5,8 @@
 #include <cstddef>
 #include <cstdint>
 
+namespace PubSubTest {
+
 struct WIRE_MSG Message {
     bool flag;
     int intVal;
@@ -14,3 +16,5 @@ struct WIRE_MSG Message {
     std::array<char, 32> strVal;
     std::array<std::byte, 16> byteArrayVal;
 };
+
+} // namespace PubSubTest

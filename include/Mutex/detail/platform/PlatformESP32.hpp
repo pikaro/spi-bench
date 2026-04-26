@@ -7,6 +7,7 @@
 #include "freertos/projdefs.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "portmacro.h"
 #include <expected>
 
 namespace Totem::Mutex::detail::platform {
@@ -31,6 +32,7 @@ struct Platform {
 
     static ReturnCode take_mutex(MutexHandle handle, Tick timeout) {
         if (xSemaphoreTake(handle, timeout) == pdTRUE) {
+            _log_d("Mutex taken by %s", pcTaskGetName(nullptr));
             return OK(CoreError);
         }
         return ERR(CoreError, Timeout);
@@ -43,17 +45,32 @@ struct Platform {
         return ERR(CoreError, OperationFailed);
     }
 
+    [[nodiscard]] static bool can_take_mutex(const char *ctx,
+                                             MutexHandle handle) {
+        if (handle == nullptr) {
+            _log_w("%s: Null mutex handle, skipping take", ctx);
+            return false;
+        }
+
+        if (xPortInIsrContext() != pdFALSE) {
+            _log_w("%s: In ISR context, cannot take mutex", ctx);
+            return false;
+        }
+
+        return true;
+    }
+
     [[nodiscard]] static const char *current_task_name() {
         return pcTaskGetName(nullptr);
     }
 
     [[nodiscard]] static const char *mutex_holder_name(MutexHandle handle) {
-        auto holder = xSemaphoreGetMutexHolder(handle);
+        auto *holder = xSemaphoreGetMutexHolder(handle);
         return holder != nullptr ? pcTaskGetName(holder) : "<none>";
     }
 
     [[nodiscard]] static bool held_by_current_task(MutexHandle handle) {
-        auto holder = xSemaphoreGetMutexHolder(handle);
+        auto *holder = xSemaphoreGetMutexHolder(handle);
         return holder != nullptr && holder == xTaskGetCurrentTaskHandle();
     }
 };

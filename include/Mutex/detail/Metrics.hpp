@@ -15,7 +15,13 @@ struct Metrics {
     };
 
     static constexpr MetricsBackend::MetricDesc timeoutsCounterDef = {
-        .name = "ingEvict",
+        .name = "timeouts",
+        .type = MetricsBackend::MetricType::Counter,
+        .unit = MetricsBackend::MetricUnit::None,
+    };
+
+    static constexpr MetricsBackend::MetricDesc failureCounterDef = {
+        .name = "failures",
         .type = MetricsBackend::MetricType::Counter,
         .unit = MetricsBackend::MetricUnit::None,
     };
@@ -23,10 +29,12 @@ struct Metrics {
     static Metrics create() {
         REGISTER_METRICS_GROUP("Mutex", group);
         REGISTER_METRIC("Mutex", timeoutsCounter, Counter, group);
+        REGISTER_METRIC("Mutex", failureCounter, Counter, group);
 
         return Metrics{
             .group = group,
             .timeoutsCounter = timeoutsCounter,
+            .failureCounter = failureCounter,
         };
     }
 
@@ -34,8 +42,13 @@ struct Metrics {
         return ::MetricsService::recorder().increment(timeoutsCounter);
     }
 
+    ReturnCode failure() const {
+        return ::MetricsService::recorder().increment(failureCounter);
+    }
+
     Totem::MetricsBackend::GroupHandle group;
     Totem::MetricsBackend::CounterHandle timeoutsCounter;
+    Totem::MetricsBackend::CounterHandle failureCounter;
 };
 
 inline Metrics &metrics() {

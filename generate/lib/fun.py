@@ -532,6 +532,11 @@ def write_file(path: pathlib.Path, contents: str) -> None:
     path.write_text(contents, encoding="ascii")
 
 
+def clean_generated_headers(out_dir: pathlib.Path) -> None:
+    for path in out_dir.glob("*.hpp"):
+        path.unlink()
+
+
 ExtractCallback = Callable[[dict, CommonEntry], EntryT]
 RenderSupportCallback = Callable[[], str]
 RenderCallback = Callable[[EntryT], str]
@@ -568,11 +573,11 @@ def generate(deps: Dependencies) -> int:
         names = find_annotated_record_names(header, deps.token)
         if not names:
             continue
-        for name in names:
-            for ast in ast_for_header(header, parse_cmd, dump_filter=name):
-                collect_entries(ast, deps.annotation, [], deps.extract, entries)
+        for ast in ast_for_header(header, parse_cmd):
+            collect_entries(ast, deps.annotation, [], deps.extract, entries)
 
     entries_sorted = sorted(entries.values(), key=lambda s: s.qualified_name)
+    clean_generated_headers(out_dir)
     write_file(out_dir / "Support.hpp", deps.render_support())
     write_file(out_dir / "All.hpp", render_all(entries_sorted, deps.group))
     for entry in entries_sorted:

@@ -111,6 +111,7 @@ class LocalSharedBusRouterTransport
         FAIL_IF(_peers[peerIndex] != nullptr, ERR(AlreadyExists),
                 "Shared-bus peer %u already attached", peer.peerId());
         _peers[peerIndex] = &peer;
+        _attachedPeerIndices[_attachedPeerCount++] = peerIndex;
         _attachedPeers |= peer.peerId();
         peer.setRouterWake(_pubSubNode, _wakeCallback);
         _log_i("%s: attached shared-bus peer %u as " SV_FMT, name,
@@ -211,10 +212,11 @@ class LocalSharedBusRouterTransport
         while (count < maxCount) {
             bool madeProgress = false;
             for (size_t scanned = 0;
-                 scanned < detail::maxPeerCount && count < maxCount;
+                 scanned < _attachedPeerCount && count < maxCount;
                  ++scanned) {
-                const auto index = static_cast<size_t>(
-                    (_receiveCursor + scanned) % detail::maxPeerCount);
+                const auto cursor = static_cast<size_t>(
+                    (_receiveCursor + scanned) % _attachedPeerCount);
+                const auto index = _attachedPeerIndices[cursor];
                 auto *peer = _peers[index];
                 if (peer == nullptr) {
                     continue;
@@ -248,7 +250,7 @@ class LocalSharedBusRouterTransport
                 if (handled) {
                     ++count;
                     madeProgress = true;
-                    _receiveCursor = (index + 1) % detail::maxPeerCount;
+                    _receiveCursor = (cursor + 1) % _attachedPeerCount;
                     continue;
                 }
                 FAIL_IF_UNEXPECTED_FWD(
@@ -259,7 +261,7 @@ class LocalSharedBusRouterTransport
                 if (!envelope.has_value()) {
                     ++count;
                     madeProgress = true;
-                    _receiveCursor = (index + 1) % detail::maxPeerCount;
+                    _receiveCursor = (cursor + 1) % _attachedPeerCount;
                     continue;
                 }
                 FAIL_IF_ERR_FWD(
@@ -271,7 +273,7 @@ class LocalSharedBusRouterTransport
                     "Failed to process shared-bus router ingress frame");
                 ++count;
                 madeProgress = true;
-                _receiveCursor = (index + 1) % detail::maxPeerCount;
+                _receiveCursor = (cursor + 1) % _attachedPeerCount;
             }
             if (!madeProgress) {
                 return OK();
@@ -341,7 +343,7 @@ class LocalSharedBusRouterTransport
                            static_cast<unsigned>(peer->peerId()));
                     pending.remainingPeers &=
                         static_cast<detail::PeerMask>(~peerBit);
-                    _sendCursor = (peerIndex + 1) % detail::maxPeerCount;
+                    _advanceSendCursor(peerIndex);
                     continue;
                 }
                 FAIL(deliverRet,
@@ -349,16 +351,17 @@ class LocalSharedBusRouterTransport
                      peer->peerId(), ERR_ARG(deliverRet));
             }
             pending.remainingPeers &= static_cast<detail::PeerMask>(~peerBit);
-            _sendCursor = (peerIndex + 1) % detail::maxPeerCount;
+            _advanceSendCursor(peerIndex);
         }
         return OK();
     }
 
     [[nodiscard]] std::expected<size_t, ReturnCode>
     _findNextPeerIndex(detail::PeerMask remainingPeers) {
-        for (size_t scanned = 0; scanned < detail::maxPeerCount; ++scanned) {
-            const auto index = static_cast<size_t>((_sendCursor + scanned) %
-                                                   detail::maxPeerCount);
+        for (size_t scanned = 0; scanned < _attachedPeerCount; ++scanned) {
+            const auto cursor = static_cast<size_t>(
+                (_sendCursor + scanned) % _attachedPeerCount);
+            const auto index = _attachedPeerIndices[cursor];
             const auto peerBit = static_cast<detail::PeerMask>(1U << index);
             if ((remainingPeers & peerBit) == 0) {
                 continue;
@@ -371,14 +374,24 @@ class LocalSharedBusRouterTransport
         return std::unexpected(ERR(NotFound));
     }
 
+    void _advanceSendCursor(size_t peerIndex) {
+        for (size_t i = 0; i < _attachedPeerCount; ++i) {
+            if (_attachedPeerIndices[i] == peerIndex) {
+                _sendCursor = (i + 1) % _attachedPeerCount;
+                return;
+            }
+        }
+    }
+
     [[nodiscard]] detail::PeerMask _availablePeers() const {
         auto availablePeers = static_cast<detail::PeerMask>(0);
-        for (size_t i = 0; i < detail::maxPeerCount; ++i) {
-            auto *peer = _peers[i];
+        for (size_t i = 0; i < _attachedPeerCount; ++i) {
+            const auto peerIndex = _attachedPeerIndices[i];
+            auto *peer = _peers[peerIndex];
             if (peer == nullptr || !peer->available()) {
                 continue;
             }
-            availablePeers |= static_cast<detail::PeerMask>(1U << i);
+            availablePeers |= static_cast<detail::PeerMask>(1U << peerIndex);
         }
         return availablePeers;
     }
@@ -397,6 +410,8 @@ class LocalSharedBusRouterTransport
     detail::IngressBuffer &_ingress;
 
     std::array<LocalSharedBusEdgeTransport *, detail::maxPeerCount> _peers{};
+    std::array<size_t, detail::maxPeerCount> _attachedPeerIndices{};
+    size_t _attachedPeerCount = 0;
     detail::PeerMask _attachedPeers = 0;
     detail::PeerMask _knownAvailablePeers = 0;
     size_t _receiveCursor = 0;

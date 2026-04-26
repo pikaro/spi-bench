@@ -253,3 +253,43 @@
 #define FAIL_IF_ASSIGN_UNEXPECTED_FWD_UNEXPECTED(var, expr, msg, ...)          \
     FAIL_IF_ASSIGN_UNEXPECTED_THEN(var, expr, return std::unexpected(_error_), \
                                    msg, ##__VA_ARGS__)
+
+// Fail if mutex take times out
+#define FAIL_IF_MUTEX_TIMEOUT_THEN(timeout, action, msg, ...)                  \
+    do {                                                                       \
+        auto guard = this->_mutexGuard(timeout);                               \
+        if (!guard.acquired()) {                                               \
+            INTERNAL_FAIL_IF_IMPL(true, "mutex timeout", action, msg,          \
+                                  ##__VA_ARGS__);                              \
+        }                                                                      \
+    } while (0)
+#define FAIL_IF_MUTEX_TIMEOUT(timeout, ret, msg, ...)                          \
+    FAIL_IF_MUTEX_TIMEOUT_THEN(timeout, return (ret), msg, ##__VA_ARGS__)
+#define FAIL_IF_MUTEX_TIMEOUT_VOID(timeout, msg, ...)                          \
+    FAIL_IF_MUTEX_TIMEOUT_THEN(timeout, return, msg, ##__VA_ARGS__)
+#define FAIL_IF_MUTEX_TIMEOUT_DEFAULT(ret, msg, ...)                           \
+    FAIL_IF_MUTEX_TIMEOUT_THEN(this->_defaultMutexTimeoutMs, return (ret),     \
+                               msg, ##__VA_ARGS__)
+#define FAIL_IF_MUTEX_TIMEOUT_DEFAULT_VOID(msg, ...)                           \
+    FAIL_IF_MUTEX_TIMEOUT_THEN(this->_defaultMutexTimeoutMs, return, msg,      \
+                               ##__VA_ARGS__)
+
+// Fail if mutex take times out
+#define FAIL_IF_SELF_MUTEX_TIMEOUT_THEN(timeout, action, msg, ...)             \
+    do {                                                                       \
+        auto guard = self->_mutexGuard(timeout);                               \
+        if (!guard.acquired()) {                                               \
+            INTERNAL_FAIL_IF_IMPL(true, "mutex timeout", action, msg,          \
+                                  ##__VA_ARGS__);                              \
+        }                                                                      \
+    } while (0)
+#define FAIL_IF_SELF_MUTEX_TIMEOUT(timeout, ret, msg, ...)                     \
+    FAIL_IF_SELF_MUTEX_TIMEOUT_THEN(timeout, return (ret), msg, ##__VA_ARGS__)
+#define FAIL_IF_SELF_MUTEX_TIMEOUT_VOID(timeout, msg, ...)                     \
+    FAIL_IF_SELF_MUTEX_TIMEOUT_THEN(timeout, return, msg, ##__VA_ARGS__)
+#define FAIL_IF_SELF_MUTEX_TIMEOUT_DEFAULT(ret, msg, ...)                      \
+    FAIL_IF_SELF_MUTEX_TIMEOUT_THEN(self->_defaultMutexTimeoutMs,              \
+                                    return (ret), msg, ##__VA_ARGS__)
+#define FAIL_IF_SELF_MUTEX_TIMEOUT_DEFAULT_VOID(msg, ...)                      \
+    FAIL_IF_SELF_MUTEX_TIMEOUT_THEN(self->_defaultMutexTimeoutMs, return, msg, \
+                                    ##__VA_ARGS__)

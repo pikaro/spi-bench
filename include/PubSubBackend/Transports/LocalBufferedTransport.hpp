@@ -75,14 +75,16 @@ class LocalBufferedTransport : public LocalTransport {
                frame.size(), MAGIC_PUBSUB_SV_ARG(header));
         FAIL_IF_ERR_FWD(LocalTransport::_send(header, frame),
                         "Failed to send frame over LocalTransport");
-        FAIL_IF_UNEXPECTED_FWD(storeRet, _egressBuffer.store(header, frame),
-                               "Failed to store frame in egress buffer for "
-                               "LocalBufferedTransport");
-        if (!storeRet) {
+        auto storeResult = _egressBuffer.store(header, frame);
+        if (storeResult == ERR(StorageError, Backpressure)) {
             _log_w("%s: dropped noncritical buffered frame with message ID %lu "
                    "under egress pressure",
                    name, static_cast<unsigned long>(header.messageId));
+            return OK();
         }
+        FAIL_IF_ERR_FWD(storeResult,
+                        "Failed to store frame in egress buffer for "
+                        "LocalBufferedTransport");
         return OK();
     }
 

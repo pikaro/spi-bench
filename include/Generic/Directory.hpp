@@ -156,14 +156,9 @@ class BaseDirectory
     template <typename Fn>
         requires(std::is_invocable_r_v<ReturnCode, Fn, Entry &>)
     ReturnCode withEntry(const EntryKey &entryKey, Fn &&fn) {
-        auto keyCref = std::cref(entryKey);
-        auto lambda = [this](const EntryKey &key_, auto &&fn_) -> ReturnCode {
-            return _withEntryImpl(
-                _entries, key_, std::forward<decltype(fn_)>(fn_), logComponent);
-        };
-        auto fnRef = std::ref(fn);
-        return this->_locked("Directory::withEntry", ERR(Timeout), lambda,
-                             keyCref, fnRef);
+        FAIL_IF_MUTEX_TIMEOUT_DEFAULT(ERR(Timeout), "Directory::withEntry");
+        return _withEntryImpl(_entries, entryKey,
+                              std::forward<decltype(fn)>(fn), logComponent);
     }
 
     template <typename Fn>
@@ -178,14 +173,10 @@ class BaseDirectory
         requires(
             std::is_invocable_r_v<ReturnCode, Fn, const EntryKey &, Entry &>)
     ReturnCode withAll(Fn &&fn, Filter &&filter) {
-        auto lambda = [this](auto &&fn_, auto &&filter_) -> ReturnCode {
-            return _withAllImpl(_entries, std::forward<decltype(fn_)>(fn_),
-                                filter_, logComponent);
-        };
-        auto fnRef = std::ref(fn);
-        auto filterRef = std::ref(filter);
-        return this->_locked("Directory::withAll", ERR(Timeout), lambda, fnRef,
-                             filterRef);
+        FAIL_IF_MUTEX_TIMEOUT_DEFAULT(ERR(Timeout), "Directory::withAll");
+        return _withAllImpl(_entries, std::forward<decltype(fn)>(fn),
+                            std::forward<decltype(filter)>(filter),
+                            logComponent);
     }
 
     template <typename Fn>
@@ -201,13 +192,10 @@ class BaseDirectory
     template <typename Fn>
         requires(std::is_invocable_r_v<ReturnCode, Fn, const Entry &>)
     ReturnCode withEntryConst(const EntryKey &entryKey, Fn &&fn) const {
-        auto keyCref = std::cref(entryKey);
-        auto lambda = [this](const EntryKey &key_, auto &&fn_) -> ReturnCode {
-            return _withEntryImpl(
-                _entries, key_, std::forward<decltype(fn_)>(fn_), logComponent);
-        };
-        return this->_lockedConst("Directory::withEntryConst", ERR(Timeout),
-                                  lambda, keyCref, std::forward<Fn>(fn));
+        FAIL_IF_MUTEX_TIMEOUT_DEFAULT(ERR(Timeout),
+                                      "Directory::withEntryConst");
+        return _withEntryImpl(_entries, entryKey,
+                              std::forward<decltype(fn)>(fn), logComponent);
     }
 
     template <typename Fn>
@@ -223,14 +211,10 @@ class BaseDirectory
         requires(std::is_invocable_r_v<ReturnCode, Fn, const EntryKey &,
                                        const Entry &>)
     ReturnCode withAllConst(Fn &&fn, Filter &&filter) const {
-        auto lambda = [this](auto &&fn_, auto &&filter_) -> ReturnCode {
-            return _withAllImpl(_entries, std::forward<decltype(fn_)>(fn_),
-                                filter_, logComponent);
-        };
-        auto fnRef = std::cref(fn);
-        auto filterRef = std::cref(filter);
-        return this->_lockedConst("Directory::withAllConst", ERR(Timeout),
-                                  lambda, fnRef, filterRef);
+        FAIL_IF_MUTEX_TIMEOUT_DEFAULT(ERR(Timeout), "Directory::withAllConst");
+        return _withAllImpl(_entries, std::forward<decltype(fn)>(fn),
+                            std::forward<decltype(filter)>(filter),
+                            logComponent);
     }
 
     template <typename Filter>
@@ -256,28 +240,12 @@ class BaseDirectory
     }
 
     std::expected<Entry, ReturnCode> extractOne(const EntryKey &entryKey) {
-        auto keyCref = std::cref(entryKey);
-        std::optional<Entry> out;
-
-        auto lambda = [this](const EntryKey &key_,
-                             std::optional<Entry> &out_) -> ReturnCode {
-            auto ret = _entries.extract(key_);
-            FAIL_IF_UNEXPECTED(item, ret, ret.error(),
-                               "Failed to extract directory entry %s->" SV_FMT,
-                               _ownerName, SV_ARG(_keyName(key_)));
-            out_.emplace(std::move(item));
-            return OK();
-        };
-
-        auto ret = this->_locked("Directory::extract", ERR(Timeout), lambda,
-                                 keyCref, std::ref(out));
-        FAIL_IF_ERR(ret, std::unexpected(ret),
-                    "Failed to extract directory entry %s->" SV_FMT, _ownerName,
-                    SV_ARG(_keyName(entryKey)));
-        FAIL_IF(!out.has_value(), std::unexpected(ERR(NotFound)),
-                "Directory entry %s->" SV_FMT " not found for extraction",
-                _ownerName, SV_ARG(_keyName(entryKey)));
-        return std::move(*out);
+        FAIL_IF_MUTEX_TIMEOUT_DEFAULT(ERR(Timeout), "Directory::extractOne");
+        auto ret = _entries.extract(entryKey);
+        FAIL_IF_UNEXPECTED(item, ret, ret.error(),
+                           "Failed to extract directory entry %s->" SV_FMT,
+                           _ownerName, SV_ARG(_keyName(entryKey)));
+        return std::move(item.value());
     }
 
     template <typename Filter>
@@ -285,38 +253,30 @@ class BaseDirectory
                                        const Entry &>)
     std::expected<EntryExtract, ReturnCode> extract(Filter filter) {
         EntryExtract out{};
+        EntryKeySnapshot snap{};
 
-        auto lambda = [this, &filter, &out]() -> ReturnCode {
-            EntryKeySnapshot snap{};
+        auto snapRet = _entries.forEach(
+            [&snap, &filter](const EntryKey &key_,
+                             const Entry &entry_) -> ReturnCode {
+                if (std::invoke(filter, key_, entry_)) {
+                    snap.keys[snap.count++] = key_;
+                }
+                return OK();
+            });
 
-            auto snapRet = _entries.forEach(
-                [&snap, &filter](const EntryKey &key_,
-                                 const Entry &entry_) -> ReturnCode {
-                    if (std::invoke(filter, key_, entry_)) {
-                        snap.keys[snap.count++] = key_;
-                    }
-                    return OK();
-                });
-            FAIL_IF_ERR(snapRet, snapRet,
-                        "Failed to snapshot entries for filtered extract on %s",
-                        _ownerName);
+        FAIL_IF_ERR(snapRet, snapRet,
+                    "Failed to snapshot entries for filtered extract on %s",
+                    _ownerName);
 
-            for (size_t i = 0; i < snap.count; ++i) {
-                auto extractRet = _entries.extract(snap.keys[i]);
-                FAIL_IF(!extractRet, extractRet.error(),
-                        "Failed to extract directory entry %s->" SV_FMT
-                        " during filtered extract",
-                        _ownerName, SV_ARG(_keyName(snap.keys[i])));
-                out.entries[out.count++] = std::move(extractRet.value());
-            }
-
-            return OK();
+        for (size_t i = 0; i < snap.count; ++i) {
+            auto extractRet = _entries.extract(snap.keys[i]);
+            FAIL_IF(!extractRet, extractRet.error(),
+                    "Failed to extract directory entry %s->" SV_FMT
+                    " during filtered extract",
+                    _ownerName, SV_ARG(_keyName(snap.keys[i])));
+            out.entries[out.count++] = std::move(extractRet.value());
         };
 
-        auto ret =
-            this->_locked("Directory::extract(filter)", ERR(Timeout), lambda);
-        FAIL_IF_ERR(ret, std::unexpected(ret),
-                    "Failed to extract directory entries for %s", _ownerName);
         return out;
     }
 
@@ -329,52 +289,32 @@ class BaseDirectory
     }
 
     ReturnCode remove(const EntryKey &entryKey) {
-        auto keyCref = std::cref(entryKey);
-        auto lambda = [this](const EntryKey &key_) -> ReturnCode {
-            auto ret = _entries.get(key_);
-            FAIL_IF_UNEXPECTED(item, ret, ret.error(),
-                               "Failed to get directory entry %s->" SV_FMT
-                               " for removal",
-                               _ownerName, SV_ARG(_keyName(key_)));
-            auto displayName = _entryName(key_, item.get());
-            if constexpr (Totem::Generic::detail::HasBeforeRemove<Derived>) {
-                FAIL_IF_ERR(this->beforeRemove(displayName, item.get()),
-                            ERR(OperationFailed),
-                            "BeforeRemove hook failed for %s->" SV_FMT,
-                            _ownerName, SV_ARG(displayName));
-            }
-            return _entries.remove(key_);
-        };
-
-        return this->_locked("Directory::remove", ERR(Timeout), lambda,
-                             keyCref);
+        FAIL_IF_MUTEX_TIMEOUT_DEFAULT(ERR(Timeout), "Directory::remove");
+        auto ret = _entries.get(entryKey);
+        FAIL_IF_UNEXPECTED(item, ret, ret.error(),
+                           "Failed to get directory entry %s->" SV_FMT
+                           " for removal",
+                           _ownerName, SV_ARG(_keyName(entryKey)));
+        auto displayName = _entryName(entryKey, item.get());
+        if constexpr (Totem::Generic::detail::HasBeforeRemove<Derived>) {
+            FAIL_IF_ERR(this->beforeRemove(displayName, item.get()),
+                        ERR(OperationFailed),
+                        "BeforeRemove hook failed for %s->" SV_FMT, _ownerName,
+                        SV_ARG(displayName));
+        }
+        return _entries.remove(entryKey);
     }
 
     [[nodiscard]] std::expected<bool, ReturnCode> empty() const {
-        enum class Result_ : uint8_t { Timeout, NotEmpty, Empty };
-        auto lambda = [this]() -> Result_ {
-            return _entries.empty() ? Result_::Empty : Result_::NotEmpty;
-        };
-        auto ret =
-            this->_lockedConst("Directory::empty", Result_::Timeout, lambda);
-        FAIL_IF(ret == Result_::Timeout, std::unexpected(ERR(Timeout)),
-                "Failed to check if directory for %s is empty", _ownerName);
-        return ret == Result_::Empty;
+        FAIL_IF_MUTEX_TIMEOUT_DEFAULT(std::unexpected(ERR(Timeout)),
+                                      "Directory::empty");
+        return _entries.empty();
     }
 
     [[nodiscard]] std::expected<size_t, ReturnCode> size() const {
-        struct Result_ {
-            size_t value;
-            bool timeout = false;
-        };
-        auto lambda = [this]() -> Result_ {
-            return Result_{.value = _entries.size(), .timeout = false};
-        };
-        auto ret = this->_lockedConst(
-            "Directory::size", Result_{.value = 0, .timeout = true}, lambda);
-        FAIL_IF(ret.timeout, std::unexpected(ERR(Timeout)),
-                "Failed to get directory size for %s", _ownerName);
-        return ret.value;
+        FAIL_IF_MUTEX_TIMEOUT_DEFAULT(std::unexpected(ERR(Timeout)),
+                                      "Directory::size");
+        return _entries.size();
     }
 
     [[nodiscard]] std::expected<bool, ReturnCode>
@@ -388,17 +328,9 @@ class BaseDirectory
 
     [[nodiscard]] std::expected<bool, ReturnCode>
     contains(const EntryKey &entryKey) const {
-        enum class Result_ : uint8_t { Timeout, NotFound, Found };
-        auto keyCref = std::cref(entryKey);
-        auto lambda = [this](const EntryKey &key_) -> Result_ {
-            return _entries.contains(key_) ? Result_::Found : Result_::NotFound;
-        };
-        auto ret = this->_lockedConst("Directory::contains", Result_::Timeout,
-                                      lambda, keyCref);
-        FAIL_IF(ret == Result_::Timeout, std::unexpected(ERR(Timeout)),
-                "Failed to check if directory for %s contains " SV_FMT,
-                _ownerName, SV_ARG(_keyName(entryKey)));
-        return ret == Result_::Found;
+        FAIL_IF_MUTEX_TIMEOUT_DEFAULT(std::unexpected(ERR(Timeout)),
+                                      "Directory::contains");
+        return _entries.contains(entryKey);
     }
 
     [[nodiscard]] bool isRegistrationLocked() const {
@@ -416,21 +348,16 @@ class BaseDirectory
             std::is_invocable_r_v<bool, Fn, const EntryKey &, const Entry &>)
     [[nodiscard]] std::expected<EntryKeySnapshot, ReturnCode>
     snapshotKeys(Fn &&filter, MinMax minMax = {}) const {
+        FAIL_IF_MUTEX_TIMEOUT_DEFAULT(std::unexpected(ERR(Timeout)),
+                                      "Directory::snapshotKeys");
         EntryKeySnapshot out{};
-        auto filterWrap = std::forward<Fn>(filter);
-        auto lambda = [this, &out](auto &&filter_) -> ReturnCode {
-            _snapshotKeysImpl(out, _entries, filter_);
-            return OK();
-        };
-        auto ret = this->_lockedConst("Directory::snapshotKeys", ERR(Timeout),
-                                      lambda, filterWrap);
-        FAIL_IF_ERR(ret, std::unexpected(ret),
-                    "Failed to snapshot directory entry keys for %s",
-                    _ownerName);
-        FAIL_IF(
-            out.count > minMax.max, std::unexpected(ERR(Overflow)),
-            "Snapshot of directory entry keys for %s exceeds maximum of %zu",
-            _ownerName, minMax.max);
+        _snapshotKeysImpl(out, _entries,
+                          std::forward<decltype(filter)>(filter));
+
+        FAIL_IF(out.count > minMax.max, std::unexpected(ERR(Overflow)),
+                "Snapshot of directory entry keys for %s exceeds maximum "
+                "of %zu",
+                _ownerName, minMax.max);
         FAIL_IF(out.count < minMax.min, std::unexpected(ERR(Underflow)),
                 "Snapshot of directory entry keys for %s has count %zu below "
                 "minimum of %zu",
@@ -441,29 +368,22 @@ class BaseDirectory
   protected:
     std::expected<EntryKey, ReturnCode> _addImpl(const EntryKey &entryKey,
                                                  Entry entry) {
-        auto keyCref = std::cref(entryKey);
-        auto lambda = [this](const EntryKey &key_,
-                             Entry &entry_) -> ReturnCode {
-            FAIL_IF(!_permitRegistration.load(std::memory_order_acquire),
-                    ERR(LifecycleError, InvalidState),
-                    "%s: Registration is currently not permitted", _ownerName);
-            auto displayName = _entryName(key_, entry_);
-            if constexpr (Totem::Generic::detail::HasBeforeAdd<Derived>) {
-                FAIL_IF_ERR(this->beforeAdd(displayName, entry_),
-                            ERR(OperationFailed),
-                            "BeforeAdd hook failed for %s->" SV_FMT, _ownerName,
-                            SV_ARG(displayName));
-            }
-            auto ret = _entries.insert(key_, std::move(entry_));
-            FAIL_IF_ERR(ret, ret,
-                        "Failed to add directory entry %s->" SV_FMT " for %s",
-                        _ownerName, SV_ARG(displayName), _ownerName);
-            return OK();
-        };
-        auto ret = this->_locked("Directory::add", ERR(Timeout), lambda,
-                                 keyCref, std::ref(entry));
-        FAIL_IF_ERR(ret, std::unexpected(ret), "Error adding entry %s->" SV_FMT,
-                    _ownerName, SV_ARG(_entryName(entryKey, entry)));
+        FAIL_IF_MUTEX_TIMEOUT_DEFAULT(std::unexpected(ERR(Timeout)),
+                                      "Directory::add");
+        FAIL_IF(!_permitRegistration.load(std::memory_order_acquire),
+                std::unexpected(ERR(LifecycleError, InvalidState)),
+                "%s: Registration is currently not permitted", _ownerName);
+        auto displayName = _entryName(entryKey, entry);
+        if constexpr (Totem::Generic::detail::HasBeforeAdd<Derived>) {
+            FAIL_IF_ERR(this->beforeAdd(displayName, entry),
+                        ERR(OperationFailed),
+                        "BeforeAdd hook failed for %s->" SV_FMT, _ownerName,
+                        SV_ARG(displayName));
+        }
+        FAIL_IF_ERR_FWD_UNEXPECTED(_entries.insert(entryKey, std::move(entry)),
+                                   "Failed to add directory entry %s->" SV_FMT
+                                   " for %s",
+                                   _ownerName, SV_ARG(displayName), _ownerName);
         return entryKey;
     }
 

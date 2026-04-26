@@ -1,16 +1,15 @@
 #pragma once
 
 #include "Base/HasMutex.hpp"
+#include "LoggingBackend/Interfaces/Types.hpp"
 #include "Macros/Facade.hpp"
 #include "Types/Error.hpp"
-#include "LoggingBackend/Interfaces/Types.hpp"
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <expected>
 #include <optional>
 #include <span>
 
@@ -30,8 +29,6 @@ class ByteArena : public HasMutex<Derived> {
     };
 
   public:
-    using StoreResult = std::expected<bool, ReturnCode>;
-
     explicit ByteArena(LogComponent logComponent)
         : logComponent(logComponent),
           _spans{Span{
@@ -42,91 +39,75 @@ class ByteArena : public HasMutex<Derived> {
             return OK();
         }
         auto cutoff = ::platform::get_time() - Config::maxRecordAgeMs;
-        auto lambda = [this, cutoff]() -> ReturnCode {
-            for (auto &slot : _slots) {
-                if (slot.occupied && slot.timestampMs < cutoff) {
-                    _log_w(
-                        "Cleaning up expired item from ByteArena at offset %zu",
-                        slot.offset);
-                    FAIL_IF_ERR_FWD(_releaseSlot(slot),
-                                    "Failed to release expired item from "
-                                    "ByteArena at offset %zu",
-                                    slot.offset);
-                }
+        FAIL_IF_MUTEX_TIMEOUT_DEFAULT(ERR(Timeout),
+                                      "Timed out locking ByteArena for clean");
+        for (auto &slot : _slots) {
+            if (slot.occupied && slot.timestampMs < cutoff) {
+                _log_w("Cleaning up expired item from ByteArena at offset %zu",
+                       slot.offset);
+                FAIL_IF_ERR_FWD(_releaseSlot(slot),
+                                "Failed to release expired item from "
+                                "ByteArena at offset %zu",
+                                slot.offset);
             }
-            return OK();
-        };
-        FAIL_IF_ERR_FWD(
-            this->_locked("ByteArena::clean", ERR(OperationFailed), lambda),
-            "Failed to clean buffer");
+        }
         return OK();
     }
 
-    StoreResult store(const T &stored, std::span<const std::byte> data) {
-        FAIL_IF(data.size() > Config::bufferSize,
-                std::unexpected(ERR(InvalidArgument)),
+    ReturnCode store(const T &stored, std::span<const std::byte> data) {
+        FAIL_IF(data.size() > Config::bufferSize, ERR(InvalidArgument),
                 "Payload size exceeds maximum allowed size");
-        bool wasStored = false;
-        auto lambda = [this, &stored, &data, &wasStored]() -> ReturnCode {
-            FAIL_IF(_hasRecord(stored), ERR(AlreadyExists),
-                    "Record already exists for stored item");
-            while (true) {
-                auto spanIdx = _findFreeSpan(data.size());
-                auto slotIdx = _findFreeSlot();
-                if (spanIdx.has_value() && slotIdx.has_value()) {
-                    auto &span = _spans[*spanIdx];
-                    auto &slot = _slots[*slotIdx];
-                    auto storeRet =
-                        _storeRecord(*spanIdx, slot, span, stored, data);
-                    if (storeRet.ok()) {
-                        slot.timestampMs = ::platform::get_time();
-                        _log_d("%s: stored %zu bytes at offset %zu",
-                               Derived::name, data.size(), slot.offset);
-                        wasStored = true;
-                        return OK();
-                    }
-                    FAIL_IF(storeRet != ERR(Overflow), storeRet,
-                            "Failed to store record for stored item");
-                }
-
-                if (!_isCritical(stored)) {
-                    _log_w("%s: dropping noncritical record under arena "
-                           "pressure",
-                           Derived::name);
-                    FAIL_IF_ERR_FWD(_onDropNoncritical(stored),
-                                    "Failed to record noncritical arena drop");
-                    wasStored = false;
+        FAIL_IF_MUTEX_TIMEOUT_DEFAULT(
+            ERR(Timeout), "Timed out locking ByteArena for store of item");
+        FAIL_IF(_hasRecord(stored), ERR(AlreadyExists),
+                "Record already exists for stored item");
+        while (true) {
+            auto spanIdx = _findFreeSpan(data.size());
+            auto slotIdx = _findFreeSlot();
+            if (spanIdx.has_value() && slotIdx.has_value()) {
+                auto &span = _spans[*spanIdx];
+                auto &slot = _slots[*slotIdx];
+                auto storeRet =
+                    _storeRecord(*spanIdx, slot, span, stored, data);
+                if (storeRet.ok()) {
+                    slot.timestampMs = ::platform::get_time();
+                    _log_d("%s: stored %zu bytes at offset %zu", Derived::name,
+                           data.size(), slot.offset);
                     return OK();
                 }
-
-                auto evictIdx = _findOldestDroppableSlot();
-                if (!evictIdx.has_value()) {
-                    _log_w("%s: rejecting critical record because no "
-                           "noncritical arena record can be evicted",
-                           Derived::name);
-                    FAIL_IF_ERR_FWD(_onRejectCritical(stored),
-                                    "Failed to record critical arena "
-                                    "rejection");
-                    FAIL(ERR(Overflow), "No space available for critical "
-                                        "record");
-                }
-
-                const auto evicted = _slots[*evictIdx].stored;
-                _log_w("%s: evicting oldest noncritical record at offset %zu "
-                       "to admit critical record",
-                       Derived::name, _slots[*evictIdx].offset);
-                FAIL_IF_ERR_FWD(_releaseSlot(_slots[*evictIdx]),
-                                "Failed to evict noncritical record for "
-                                "critical store");
-                FAIL_IF_ERR_FWD(_onEvictNoncritical(evicted),
-                                "Failed to record noncritical arena "
-                                "eviction");
+                FAIL_IF(storeRet != ERR(Overflow), storeRet,
+                        "Failed to store record for stored item");
             }
-        };
-        FAIL_IF_ERR_FWD_UNEXPECTED(
-            this->_locked("ByteArena::store", ERR(OperationFailed), lambda),
-            "Failed to store record for stored item");
-        return wasStored;
+
+            if (!_isCritical(stored)) {
+                _log_w("%s: dropping noncritical record under arena "
+                       "pressure",
+                       Derived::name);
+                FAIL_IF_ERR_FWD(_onDropNoncritical(stored),
+                                "Failed to record noncritical arena drop");
+                return ERR(StorageError, Backpressure);
+            }
+
+            auto evictIdx = _findOldestDroppableSlot();
+            if (!evictIdx.has_value()) {
+                _log_w("%s: rejecting critical record because no "
+                       "noncritical arena record can be evicted",
+                       Derived::name);
+                FAIL_IF_ERR_FWD(_onRejectCritical(stored),
+                                "Failed to record critical arena rejection");
+                FAIL(ERR(Overflow), "No space available for critical record");
+            }
+
+            const auto evicted = _slots[*evictIdx].stored;
+            _log_w("%s: evicting oldest noncritical record at offset %zu "
+                   "to admit critical record",
+                   Derived::name, _slots[*evictIdx].offset);
+            FAIL_IF_ERR_FWD(_releaseSlot(_slots[*evictIdx]),
+                            "Failed to evict noncritical record for "
+                            "critical store");
+            FAIL_IF_ERR_FWD(_onEvictNoncritical(evicted),
+                            "Failed to record noncritical arena eviction");
+        }
     }
 
     static ReturnCode getRaw(void *arena, const T &stored, size_t offset,
@@ -137,21 +118,16 @@ class ByteArena : public HasMutex<Derived> {
 
     ReturnCode getRaw(const T &stored, size_t offset,
                       std::span<std::byte> out) const {
-        auto lambda = [this, &stored, &out, offset]() -> ReturnCode {
-            for (const auto &slot : _slots) {
-                if (slot.occupied && slot.stored == stored) {
-                    std::memcpy(out.data(),
-                                _buffer.data() + slot.offset + offset,
-                                out.size());
-                    return OK();
-                }
+        FAIL_IF_MUTEX_TIMEOUT_DEFAULT(
+            ERR(Timeout), "Timed out locking ByteArena for getRaw of item");
+        for (const auto &slot : _slots) {
+            if (slot.occupied && slot.stored == stored) {
+                std::memcpy(out.data(), _buffer.data() + slot.offset + offset,
+                            out.size());
+                return OK();
             }
-            return ERR(NotFound);
-        };
-        FAIL_IF_ERR_FWD(this->_lockedConst("ByteArena::getRaw",
-                                           ERR(OperationFailed), lambda),
-                        "Failed to get raw payload for stored item");
-        return OK();
+        }
+        return ERR(NotFound);
     }
 
     static ReturnCode release(void *arena, const T &stored) {
@@ -160,20 +136,16 @@ class ByteArena : public HasMutex<Derived> {
     }
 
     ReturnCode release(const T &stored) {
-        auto lambda = [this, &stored]() -> ReturnCode {
-            for (auto &slot : _slots) {
-                if (slot.occupied && slot.stored == stored) {
-                    _log_d("%s: releasing record at offset %zu", Derived::name,
-                           slot.offset);
-                    return _releaseSlot(slot);
-                }
+        FAIL_IF_MUTEX_TIMEOUT_DEFAULT(
+            ERR(Timeout), "Timed out locking ByteArena for release of item");
+        for (auto &slot : _slots) {
+            if (slot.occupied && slot.stored == stored) {
+                _log_d("%s: releasing record at offset %zu", Derived::name,
+                       slot.offset);
+                return _releaseSlot(slot);
             }
-            return ERR(NotFound);
-        };
-        FAIL_IF_ERR_FWD(
-            this->_locked("ByteArena::release", ERR(OperationFailed), lambda),
-            "Failed to release record for stored item");
-        return OK();
+        }
+        return ERR(NotFound);
     }
 
     /**
@@ -183,20 +155,9 @@ class ByteArena : public HasMutex<Derived> {
      * log a NotFound error when the record has already been released.
      */
     [[nodiscard]] bool contains(const T &stored) const {
-        bool found = false;
-        auto lambda = [this, &stored, &found]() -> ReturnCode {
-            found = _hasRecord(stored);
-            return OK();
-        };
-        auto ret =
-            this->_lockedConst("ByteArena::contains", ERR(OperationFailed),
-                               lambda);
-        if (!ret.ok()) {
-            _log_e("Failed to check ByteArena record existence: " ERR_FMT,
-                   ERR_ARG(ret));
-            return false;
-        }
-        return found;
+        FAIL_IF_MUTEX_TIMEOUT_DEFAULT(
+            false, "Timed out locking ByteArena for contains check of item");
+        return _hasRecord(stored);
     }
 
   protected:

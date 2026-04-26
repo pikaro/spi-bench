@@ -27,10 +27,8 @@ class EgressBuffer : public ByteArena<EgressBuffer<Config>, Header, Config> {
 
     static constexpr const char *name = "PubSub::EgressBuffer";
 
-    std::expected<bool, ReturnCode> store(const Header &header,
-                                          std::span<const std::byte> frame) {
-        FAIL_IF(frame.size() != SerDe::encodedSize(header),
-                std::unexpected(ERR(InvalidArgument)),
+    ReturnCode store(const Header &header, std::span<const std::byte> frame) {
+        FAIL_IF(frame.size() != SerDe::encodedSize(header), ERR(InvalidArgument),
                 "Payload size does not match frame size");
         _log_d("%s: store frame of %zu bytes for " MAGIC_PUBSUB_SV_FMT, name,
                frame.size(), MAGIC_PUBSUB_SV_ARG(header));

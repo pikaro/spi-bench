@@ -79,7 +79,7 @@ regeneration.
 
 There is currently no unit-test or host-side simulation harness.
 
-`src/master/main.cpp` now includes an on-device PubSub integration harness that
+`include/Setups/PubSubTest.hpp` provides an on-device PubSub integration harness that
 tracks expected recipients, message-pool release, and transport egress release
 for the active test topology. The harness waits for a configured warm-up window
 before publishing test traffic so subscription replay and simulated transport

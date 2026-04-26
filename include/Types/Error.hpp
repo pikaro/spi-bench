@@ -6,6 +6,7 @@
 enum class ErrorDomain : uint8_t {
     Core,
     Lifecycle,
+    Storage,
     PubSub,
     Spi,
     Command,
@@ -26,6 +27,12 @@ enum class CoreError : uint8_t {
     InvalidData,
     Overflow,
     Underflow,
+};
+
+enum class StorageError : uint8_t {
+    Unknown = 0,
+    Ok,
+    Backpressure,
 };
 
 enum class PubSubError : uint8_t {
@@ -89,6 +96,9 @@ struct [[nodiscard]] ReturnCode {
     static constexpr ReturnCode from(CoreError err) {
         return from<CoreError>(ErrorDomain::Core, err);
     }
+    static constexpr ReturnCode from(StorageError err) {
+        return from<StorageError>(ErrorDomain::Storage, err);
+    }
     static constexpr ReturnCode from(PubSubError err) {
         return from<PubSubError>(ErrorDomain::PubSub, err);
     }
@@ -106,6 +116,8 @@ struct [[nodiscard]] ReturnCode {
         switch (domain) {
         case ErrorDomain::Core:
             return error_name<CoreError>(code);
+        case ErrorDomain::Storage:
+            return error_name<StorageError>(code);
         case ErrorDomain::PubSub:
             return error_name<PubSubError>(code);
         case ErrorDomain::Spi:

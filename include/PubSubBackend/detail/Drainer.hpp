@@ -80,6 +80,13 @@ class Drainer {
     }
 
   private:
+    struct TransportTarget {
+        ITransport *transporter = nullptr;
+        TransportDispatch dispatch{};
+        TransportId transportId = 0;
+        std::string_view name{};
+    };
+
     ReturnCode _publishFromQueue() {
         Envelope item;
         auto ret = OK();
@@ -132,30 +139,11 @@ class Drainer {
         return ret;
     }
 
-    std::expected<FrameHandle, ReturnCode>
-    _storeFrame(const Envelope &envelope,
-                std::optional<IngressContext> ingressContext = std::nullopt) {
+    std::expected<FrameHandle, ReturnCode> _storeFrame(const Envelope &envelope,
+                                                       TransportMask mask,
+                                                       uint8_t pendingCount) {
         StoredFrame frame;
         frame.envelope = envelope;
-        TransportMask mask = 0;
-        uint8_t pendingCount = 0;
-        (void)_transporters.withAll(
-            [&](const TransporterKey &,
-                const TransporterEntry &entry) -> ReturnCode {
-                auto dispatch =
-                    Publisher::dispatchFor(entry, envelope, ingressContext);
-                if (!dispatch) {
-                    return OK();
-                }
-                mask |= entry.transportId;
-                ++pendingCount;
-                return OK();
-            });
-        if (pendingCount == 0) {
-            _log_d("Drainer: no interested transports for " MAGIC_PUBSUB_SV_FMT,
-                   MAGIC_PUBSUB_SV_ARG(envelope.header));
-            return std::unexpected(ERR(NotFound));
-        }
         frame.pendingMask = mask;
         frame.pendingCount = pendingCount;
         int16_t stored = -1;
@@ -175,6 +163,39 @@ class Drainer {
         return &_inFlightFrames[static_cast<size_t>(stored)];
     }
 
+    std::expected<size_t, ReturnCode>
+    _collectTransportTargets(
+        const Envelope &item, std::optional<IngressContext> ingressContext,
+        std::span<TransportTarget> targets, TransportMask &mask,
+        uint8_t &pendingCount) {
+        size_t targetCount = 0;
+        mask = 0;
+        pendingCount = 0;
+        FAIL_IF_ERR_FWD_UNEXPECTED(
+            _transporters.withAll(
+                [&](const TransporterKey &,
+                    const TransporterEntry &entry) -> ReturnCode {
+                    auto dispatch =
+                        Publisher::dispatchFor(entry, item, ingressContext);
+                    if (!dispatch) {
+                        return OK();
+                    }
+                    FAIL_IF(targetCount >= targets.size(), ERR(Overflow),
+                            "Too many PubSub transport fanout targets");
+                    targets[targetCount++] = TransportTarget{
+                        .transporter = entry.transporter,
+                        .dispatch = *dispatch,
+                        .transportId = entry.transportId,
+                        .name = entry.name,
+                    };
+                    mask |= entry.transportId;
+                    ++pendingCount;
+                    return OK();
+                }),
+            "Failed to collect transport targets for PubSub frame");
+        return targetCount;
+    }
+
     ReturnCode
     _publishFrame(const Envelope &item,
                   std::optional<IngressContext> ingressContext = std::nullopt) {
@@ -184,24 +205,44 @@ class Drainer {
                ingressContext.has_value() ? " from transport ingress" : "");
         ret.combine(_controlPlane.handle(item, ingressContext));
         ret.combine(_publisher.publishToSubscribers(item));
-        auto storeResult = _storeFrame(item, ingressContext);
+        std::array<TransportTarget, Spec::Limits::maxTransports> targets{};
+        TransportMask pendingMask = 0;
+        uint8_t pendingCount = 0;
+        FAIL_IF_UNEXPECTED_FWD(
+            targetCount,
+            _collectTransportTargets(item, ingressContext, targets, pendingMask,
+                                     pendingCount),
+            "Failed to route PubSub frame to transports");
+        if (targetCount == 0) {
+            _log_d("Drainer: releasing " MAGIC_PUBSUB_SV_FMT
+                   " without transport fanout",
+                   MAGIC_PUBSUB_SV_ARG(item.header));
+            FAIL_IF_ERR_FWD(item.ack(),
+                            "Failed to release message for topic " SV_FMT
+                            " with no subscribers or transports",
+                            MAGIC_SV_ARG(Spec::Topic, item.header.topic));
+            return ret;
+        }
+
+        auto storeResult = _storeFrame(item, pendingMask, pendingCount);
         if (!storeResult) {
-            if (storeResult.error() == ERR(NotFound)) {
-                _log_d("Drainer: releasing " MAGIC_PUBSUB_SV_FMT
-                       " without transport fanout",
-                       MAGIC_PUBSUB_SV_ARG(item.header));
-                FAIL_IF_ERR_FWD(item.ack(),
-                                "Failed to release message for topic " SV_FMT
-                                " with no subscribers or transports",
-                                MAGIC_SV_ARG(Spec::Topic, item.header.topic));
-                return ret;
-            }
             FAIL(storeResult.error(),
                  "Failed to store in-flight message: " ERR_FMT,
                  ERR_ARG(storeResult.error()));
         }
-        ret.combine(
-            _publisher.publishToTransports(*storeResult, ingressContext));
+        for (size_t i = 0; i < targetCount; ++i) {
+            const auto &target = targets[i];
+            _log_d("Drainer: enqueue to transport " SV_FMT
+                   " (%u) for " MAGIC_PUBSUB_SV_FMT,
+                   SV_ARG(target.name), target.transportId,
+                   MAGIC_PUBSUB_SV_ARG(item.header));
+            FAIL_IF_ERR_FWD(
+                target.transporter->enqueue(*storeResult, target.dispatch),
+                "Failed to enqueue message to transport " SV_FMT
+                " for topic " SV_FMT,
+                SV_ARG(target.name),
+                MAGIC_SV_ARG(Spec::Topic, item.header.topic));
+        }
         return ret;
     }
 

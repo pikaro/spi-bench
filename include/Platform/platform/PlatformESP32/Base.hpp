@@ -48,4 +48,14 @@ inline void end_critical_section(Spinlock &lock) { portEXIT_CRITICAL(&lock); }
 
 inline static constexpr auto CoreCount = portNUM_PROCESSORS;
 
+inline bool is_multithreading() {
+    return xTaskGetSchedulerState() == taskSCHEDULER_RUNNING;
+}
+
+inline void wait_for_ready() {
+    while (xTaskGetSchedulerState() != taskSCHEDULER_RUNNING) {
+        delay(ms_to_ticks(10));
+    }
+}
+
 } // namespace platform

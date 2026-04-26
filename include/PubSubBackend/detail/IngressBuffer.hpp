@@ -72,14 +72,14 @@ class IngressBuffer : public ByteArenaImpl {
             FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
                 data, SerDe::deserializeRaw(frame),
                 "Failed to deserialize frame for payload-only storage");
-            FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
-                stored, store(data.first, data.second),
-                "Failed to store deserialized frame for "
-                MAGIC_PUBSUB_SV_FMT,
-                MAGIC_PUBSUB_SV_ARG(data.first));
-            if (!stored) {
+            auto storeResult = store(data.first, data.second);
+            if (storeResult == ERR(StorageError, Backpressure)) {
                 return std::optional<Envelope>{};
             }
+            FAIL_IF_ERR_FWD_UNEXPECTED(
+                storeResult,
+                "Failed to store deserialized frame for " MAGIC_PUBSUB_SV_FMT,
+                MAGIC_PUBSUB_SV_ARG(data.first));
             return std::optional<Envelope>{Envelope{
                 .header = data.first,
                 .owner = this,
@@ -87,13 +87,14 @@ class IngressBuffer : public ByteArenaImpl {
                 .release = release,
             }};
         }
-        FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
-            stored, ByteArena::store(header, frame),
-            "Failed to store serialized frame for " MAGIC_PUBSUB_SV_FMT,
-            MAGIC_PUBSUB_SV_ARG(header));
-        if (!stored) {
+        auto storeResult = ByteArena::store(header, frame);
+        if (storeResult == ERR(StorageError, Backpressure)) {
             return std::optional<Envelope>{};
         }
+        FAIL_IF_ERR_FWD_UNEXPECTED(
+            storeResult,
+            "Failed to store serialized frame for " MAGIC_PUBSUB_SV_FMT,
+            MAGIC_PUBSUB_SV_ARG(header));
         _rememberSerialized(header);
         return std::optional<Envelope>{Envelope{
             .header = header,
@@ -103,15 +104,13 @@ class IngressBuffer : public ByteArenaImpl {
         }};
     }
 
-    std::expected<bool, ReturnCode> store(const Envelope &envelope,
-                                          std::span<const std::byte> payload) {
+    ReturnCode store(const Envelope &envelope,
+                     std::span<const std::byte> payload) {
         return store(envelope.header, payload);
     }
 
-    std::expected<bool, ReturnCode> store(const Header &header,
-                                          std::span<const std::byte> payload) {
-        FAIL_IF(payload.size() != header.payloadSize,
-                std::unexpected(ERR(InvalidArgument)),
+    ReturnCode store(const Header &header, std::span<const std::byte> payload) {
+        FAIL_IF(payload.size() != header.payloadSize, ERR(InvalidArgument),
                 "Payload size does not match size in header");
         _forgetSerialized(header);
         _log_d("%s: store payload of %zu bytes for " MAGIC_PUBSUB_SV_FMT, name,
@@ -146,8 +145,8 @@ class IngressBuffer : public ByteArenaImpl {
                 MAGIC_PUBSUB_SV_ARG(header));
         if (hasSerializedFrame(header)) {
             FAIL_IF_ERR_FWD(_ensureSerializedValidated(header),
-                            "Failed to validate serialized ingress frame for "
-                            MAGIC_PUBSUB_SV_FMT,
+                            "Failed to validate serialized ingress frame "
+                            "for " MAGIC_PUBSUB_SV_FMT,
                             MAGIC_PUBSUB_SV_ARG(header));
             return ByteArena::getRaw(header, SerDe::headerSize + offset, out);
         }
@@ -162,12 +161,10 @@ class IngressBuffer : public ByteArenaImpl {
                                   std::span<std::byte> out) const {
         const auto frameSize = SerDe::encodedSize(header);
         FAIL_IF(out.size() < frameSize, ERR(InvalidArgument),
-                "Serialized frame buffer too small for "
-                MAGIC_PUBSUB_SV_FMT,
+                "Serialized frame buffer too small for " MAGIC_PUBSUB_SV_FMT,
                 MAGIC_PUBSUB_SV_ARG(header));
         FAIL_IF_NOT(hasSerializedFrame(header), ERR(NotFound),
-                    "Serialized frame not retained for "
-                    MAGIC_PUBSUB_SV_FMT,
+                    "Serialized frame not retained for " MAGIC_PUBSUB_SV_FMT,
                     MAGIC_PUBSUB_SV_ARG(header));
         return ByteArena::getRaw(header, 0, out.first(frameSize));
     }
@@ -227,8 +224,7 @@ class IngressBuffer : public ByteArenaImpl {
             record.validated = false;
             return;
         }
-        _log_d("%s: serialized ingress metadata full for "
-               MAGIC_PUBSUB_SV_FMT,
+        _log_d("%s: serialized ingress metadata full for " MAGIC_PUBSUB_SV_FMT,
                name, MAGIC_PUBSUB_SV_ARG(header));
     }
 
@@ -240,17 +236,18 @@ class IngressBuffer : public ByteArenaImpl {
 
     ReturnCode _ensureSerializedValidated(const Header &header) const {
         auto recordIndex = _serializedRecordIndex(header);
-        FAIL_IF_NOT(recordIndex.has_value(), ERR(NotFound),
-                    "Serialized ingress metadata missing for "
-                    MAGIC_PUBSUB_SV_FMT,
-                    MAGIC_PUBSUB_SV_ARG(header));
+        FAIL_IF_NOT(
+            recordIndex.has_value(), ERR(NotFound),
+            "Serialized ingress metadata missing for " MAGIC_PUBSUB_SV_FMT,
+            MAGIC_PUBSUB_SV_ARG(header));
         auto &record = _serializedRecords[*recordIndex];
         if (record.validated) {
             return OK();
         }
-        auto frameBuffer = std::array<std::byte, SerDe::headerSize +
-                                                 Spec::Limits::maxPayloadSize +
-                                                 SerDe::overheadSize>{};
+        auto frameBuffer =
+            std::array<std::byte, SerDe::headerSize +
+                                      Spec::Limits::maxPayloadSize +
+                                      SerDe::overheadSize>{};
         auto frameSize = SerDe::encodedSize(header);
         auto frameSpan = std::span<std::byte>{frameBuffer.data(), frameSize};
         FAIL_IF_ERR_FWD(ByteArena::getRaw(header, 0, frameSpan),

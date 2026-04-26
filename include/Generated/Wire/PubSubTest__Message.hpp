@@ -1,13 +1,13 @@
 #pragma once
 
 #include "Generated/Wire/Support.hpp"
-#include "TestMessage.hpp"
+#include "Setups/PubSubTestMessage.hpp"
 #include <tuple>
 
 namespace Totem::Generated::Wire {
 
-template <> struct FieldList<::Message> {
-    using Type = ::Message;
+template <> struct FieldList<::PubSubTest::Message> {
+    using Type = ::PubSubTest::Message;
     static constexpr auto fields = std::make_tuple(
         Field<&Type::flag>{"flag"},
         Field<&Type::intVal>{"intVal"},

@@ -2,6 +2,7 @@
 
 #include "Concepts/Base.hpp"
 #include "Macros/Facade.hpp"
+#include "Mutex/detail/Metrics.hpp"
 #include "PlatformSelect.hpp"
 #include "freertos/FreeRTOS.h" // IWYU pragma: keep
 #include "freertos/semphr.h"
@@ -17,25 +18,31 @@ template <class Derived> class ScopedMutexGuard final {
         static_assert(IsNamedEntity<Derived>,
                       "HasMutex requires Derived to be a named entity");
 
-        if (_handle == nullptr) {
-            _log_d("%s: Null mutex handle, skipping take", _name);
+        if (!::platform::is_multithreading()) {
+            // If not multithreading, no need to take mutex
+            _log_d("%s: Not in multithreading context, skipping mutex take",
+                   _name);
+            _acquired = true;
             return;
         }
 
-        if (xTaskGetSchedulerState() != taskSCHEDULER_RUNNING) {
-            _log_w("%s: Scheduler not running, cannot take mutex", _name);
-            return;
+        if (!Platform::can_take_mutex(_name, _handle)) {
+            // NOTE: Can NOT record failure here! Recording a failure metric
+            //       requires taking the mutex
+            FAIL_VOID("Mutex %s cannot be taken by current task", _name);
         }
 
-        if (::platform::in_isr()) {
-            _log_w("%s: In ISR context, cannot take mutex", _name);
-            return;
+        auto takeResult = Platform::take_mutex(_handle, ticksToWait);
+        if (!takeResult) {
+            if (takeResult == ERR(Timeout)) {
+                _recordTimeout();
+                FAIL_VOID("Timed out taking mutex %s", _name);
+            }
+            _recordFailure();
+            FAIL_VOID("Failed to take mutex %s: " ERR_FMT, _name,
+                      ERR_ARG(takeResult));
         }
 
-        _log_d("%s: Mutex take by %s", _name, pcTaskGetName(nullptr));
-
-        FAIL_IF_ERR_VOID(Platform::take_mutex(_handle, ticksToWait),
-                         "Failed to take mutex %s", _name);
         _acquired = true;
     }
 
@@ -70,6 +77,26 @@ template <class Derived> class ScopedMutexGuard final {
             _acquired = false;
             const char *name = Derived::name;
             _log_d("%s: Mutex released by %s", name, pcTaskGetName(nullptr));
+        }
+    }
+
+    void _recordTimeout() const noexcept {
+        // Only record metrics if scheduler is running to avoid circular
+        // dependency during static initialization
+        if (xTaskGetSchedulerState() == taskSCHEDULER_RUNNING) {
+            if (!metrics().timeout()) {
+                _log_e("Failed to record mutex timeout metric for %s", _name);
+            }
+        }
+    }
+
+    void _recordFailure() const noexcept {
+        // Only record metrics if scheduler is running to avoid circular
+        // dependency during static initialization
+        if (xTaskGetSchedulerState() == taskSCHEDULER_RUNNING) {
+            if (!metrics().failure()) {
+                _log_e("Failed to record mutex failure metric for %s", _name);
+            }
         }
     }
 

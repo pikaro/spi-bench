@@ -76,7 +76,7 @@ Current harness expectations:
 - `expectationTimeoutMs = 50`
 - `harnessWarmupMs = 2000`
 
-Current startup staggering in `src/master/main.cpp`:
+Current startup staggering in `include/Setups/PubSubTest.hpp`:
 
 - A1: `5ms`
 - A2: `10ms`
@@ -142,7 +142,7 @@ Implemented:
 Relevant files:
 
 - `src/master/main.cpp`
-- `src/master/PubSubTest.hpp`
+- `include/Setups/PubSubTest.hpp`
 - `docs/overview.md`
 
 ### Performance Work Already Landed

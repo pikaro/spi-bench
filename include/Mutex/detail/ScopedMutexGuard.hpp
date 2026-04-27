@@ -4,9 +4,6 @@
 #include "Macros/Facade.hpp"
 #include "Mutex/detail/Metrics.hpp"
 #include "PlatformSelect.hpp"
-#include "freertos/FreeRTOS.h" // IWYU pragma: keep
-#include "freertos/semphr.h"
-#include "freertos/task.h"
 
 namespace Totem::Mutex::detail {
 
@@ -76,14 +73,15 @@ template <class Derived> class ScopedMutexGuard final {
             (void)Platform::give_mutex(_handle);
             _acquired = false;
             const char *name = Derived::name;
-            _log_d("%s: Mutex released by %s", name, pcTaskGetName(nullptr));
+            _log_d("%s: Mutex released by %s", name,
+                   Platform::current_task_name());
         }
     }
 
     void _recordTimeout() const noexcept {
         // Only record metrics if scheduler is running to avoid circular
         // dependency during static initialization
-        if (xTaskGetSchedulerState() == taskSCHEDULER_RUNNING) {
+        if (::platform::is_multithreading()) {
             if (!metrics().timeout()) {
                 _log_e("Failed to record mutex timeout metric for %s", _name);
             }
@@ -93,7 +91,7 @@ template <class Derived> class ScopedMutexGuard final {
     void _recordFailure() const noexcept {
         // Only record metrics if scheduler is running to avoid circular
         // dependency during static initialization
-        if (xTaskGetSchedulerState() == taskSCHEDULER_RUNNING) {
+        if (::platform::is_multithreading()) {
             if (!metrics().failure()) {
                 _log_e("Failed to record mutex failure metric for %s", _name);
             }

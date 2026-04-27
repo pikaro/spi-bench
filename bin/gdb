@@ -13,6 +13,9 @@ case "$ENV" in
 master)
     GDB=~/.platformio/packages/tool-xtensa-esp-elf-gdb/bin/xtensa-esp-elf-gdb-no-python
     ;;
+slave)
+    GDB=~/.platformio/packages/tool-riscv32-esp-elf-gdb/bin/riscv32-esp-elf-gdb-no-python
+    ;;
 *)
     echo "Unknown environment"
     exit 1

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "FreeRTOSConfig.h"
+#include "esp_log.h"
 #include "freertos/FreeRTOS.h" // IWYU pragma: keep
 #include "freertos/idf_additions.h"
 #include "freertos/projdefs.h"
@@ -56,6 +57,10 @@ inline void wait_for_ready() {
     while (xTaskGetSchedulerState() != taskSCHEDULER_RUNNING) {
         delay(ms_to_ticks(10));
     }
+}
+
+inline void early_log_error(const char *tag, const char *msg) {
+    ESP_EARLY_LOGE(tag, "%s", msg);
 }
 
 } // namespace platform

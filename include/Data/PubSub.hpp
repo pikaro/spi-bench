@@ -52,7 +52,14 @@ template <> struct NodeTraits<NodeName::Master> {
 template <> struct NodeTraits<NodeName::Media> {
     static constexpr NodeId nodeId = NodeId::Media;
 
-    using Transport = SPIOnlyTransport;
+    // FIXME: UNDO
+    enum class Transport : uint8_t {
+        None = 0,
+        SPI = 1U << 0,
+        WebSocket = 1U << 1,
+        RS485 = 1U << 2,
+    };
+    // using Transport = SPIOnlyTransport;
     using Limits = PubSubConfig;
 };
 

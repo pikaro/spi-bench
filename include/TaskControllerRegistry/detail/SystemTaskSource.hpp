@@ -3,7 +3,6 @@
 #include "Macros/Facade.hpp"
 #include "PlatformSelect.hpp"
 #include "StaticConfig/TaskRegistry.hpp"
-#include "Support/Basic.hpp"
 #include "TaskController/Interfaces/TaskRuntimeSnapshot.hpp"
 #include "TaskControllerRegistry/Interfaces/ITaskSource.hpp"
 #include "TaskControllerRegistry/Interfaces/TaskSourceFeatures.hpp"
@@ -11,7 +10,6 @@
 #include "Types/Error.hpp"
 #include <array>
 #include <cstdint>
-#include <cstring>
 #include <expected>
 #include <optional>
 #include <string_view>
@@ -55,12 +53,11 @@ class SystemTaskSource : public ITaskSource {
 
         for (size_t i = 0; i < count; ++i) {
             const auto &taskStatus = _taskStatuses[i];
-            auto handle = reinterpret_cast<uintptr_t>(taskStatus.xHandle);
+            auto handle = Platform::get_handle(taskStatus);
             if (_registry.isManagedTaskHandle(handle)) {
                 continue;
             }
-            auto runTimeMs =
-                Platform::runtime_counter_to_ms(taskStatus.ulRunTimeCounter);
+            auto runTimeMs = Platform::get_run_time_ms(taskStatus);
             auto previousRunTimeMs = _findPreviousRuntimeMs(handle);
 
             float runTimeTotalPct = 0.0F;
@@ -81,24 +78,21 @@ class SystemTaskSource : public ITaskSource {
                 continue;
             }
 
-            auto taskNameLen = bounded_strlen(taskStatus.pcTaskName,
-                                              ::platform::MaxTaskNameLen);
             auto snapshot = TaskController::TaskRuntimeSnapshot{
                 .timestamp = timestamp,
                 .timestampDelta = timestampDelta,
-                .name = std::string_view(taskStatus.pcTaskName, taskNameLen),
+                .name = Platform::get_task_name(taskStatus),
                 .sourceName = {},
                 .nativeHandle = handle,
                 .hasEverStarted = true,
                 .lastStopResult = std::nullopt,
                 .state = TaskController::State::Running,
                 .platformState = *platformState,
-                .coreId = static_cast<int8_t>(taskStatus.xCoreID),
-                .currentPriority =
-                    static_cast<uint8_t>(taskStatus.uxCurrentPriority),
+                .coreId = Platform::get_core_id(taskStatus),
+                .currentPriority = Platform::get_priority(taskStatus),
                 .runTimeTotalPct = runTimeTotalPct,
                 .runTimeDeltaPct = runTimeDeltaPct,
-                .stackLowestFree = taskStatus.usStackHighWaterMark,
+                .stackLowestFree = Platform::get_stack_watermark(taskStatus),
                 .stackUsedPct = 0.0F,
                 .config = nullptr,
             };

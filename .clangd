@@ -11,13 +11,7 @@ CompileFlags:
 If:
   PathMatch: [^src/slave/.*]
 CompileFlags:
-  CompilationDatabase: compiledb/slave1
-  BuiltinHeaders: QueryDriver
----
-If:
-  PathMatch: [^src/listener/.*]
-CompileFlags:
-  CompilationDatabase: compiledb/listener
+  CompilationDatabase: compiledb/slave
   BuiltinHeaders: QueryDriver
 ---
 If:

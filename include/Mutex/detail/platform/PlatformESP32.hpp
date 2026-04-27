@@ -61,6 +61,18 @@ struct Platform {
     }
 
     [[nodiscard]] static const char *current_task_name() {
+        if (xPortInIsrContext() != pdFALSE) {
+            return "<ISR>";
+        }
+        if (xTaskGetCurrentTaskHandle() == nullptr) {
+            return "<none>";
+        }
+        if (pcTaskGetName(nullptr) == nullptr) {
+            return "<unnamed>";
+        }
+        if (xTaskGetSchedulerState() != taskSCHEDULER_RUNNING) {
+            return "<static>";
+        }
         return pcTaskGetName(nullptr);
     }
 

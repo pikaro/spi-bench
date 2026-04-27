@@ -31,7 +31,6 @@
     "openocd_target": "esp32s3.cfg"
   },
   "frameworks": [
-    "arduino",
     "espidf"
   ],
   "name": "Waveshare ESP32S3 Zero",
@@ -42,6 +41,6 @@
     "require_upload_port": true,
     "speed": 921600
   },
-  "url": "https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/hw-reference/esp32s3/user-guide-devkitc-1.html",
+  "url": "https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/hw-reference/esp32s3/user-guide-devkitm-1.html",
   "vendor": "Espressif"
 }

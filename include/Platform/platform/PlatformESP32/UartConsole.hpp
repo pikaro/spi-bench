@@ -13,12 +13,20 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <optional>
 #include <span>
 
 namespace platform {
 
+struct Pins {
+    std::optional<Pin> txPin = std::nullopt;
+    std::optional<Pin> rxPin = std::nullopt;
+    std::optional<Pin> rtsPin = std::nullopt;
+    std::optional<Pin> ctsPin = std::nullopt;
+};
+
 struct Console {
-    static ReturnCode init() {
+    static ReturnCode init(Pins pins = {}) {
         const uart_config_t uart_config = {
             .baud_rate = ::ConsoleConfig::baudRate,
             .data_bits = UART_DATA_8_BITS,
@@ -42,8 +50,10 @@ struct Console {
         FAIL_IF_ESP(uart_param_config(_uartNumber, &uart_config),
                     ERR(OperationFailed),
                     "Failed to configure UART parameters");
-        FAIL_IF_ESP(uart_set_pin(_uartNumber, UART_TX_PIN, UART_RX_PIN,
-                                 UART_RTS_PIN, UART_CTS_PIN),
+        FAIL_IF_ESP(uart_set_pin(_uartNumber, _pinOrNoChange(pins.txPin),
+                                 _pinOrNoChange(pins.rxPin),
+                                 _pinOrNoChange(pins.rtsPin),
+                                 _pinOrNoChange(pins.ctsPin)),
                     ERR(OperationFailed), "Failed to set UART pins");
         return OK();
     }
@@ -91,6 +101,13 @@ struct Console {
     }
 
   private:
+    static int _pinOrNoChange(std::optional<Pin> pin) {
+        if (pin.has_value()) {
+            return static_cast<int>(pin.value());
+        }
+        return GPIO_NUM_0;
+    }
+
     static_assert(::ConsoleConfig::uartNumber < UART_NUM_MAX,
                   "UART number must be less than UART_NUM_MAX");
     static constexpr uart_port_t _uartNumber =

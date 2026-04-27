@@ -1,17 +1,30 @@
-#include "freertos/idf_additions.h"
-#include "freertos/projdefs.h"
+#include "Macros/Facade.hpp"
+#include "Setups/Core.hpp"
+#include "Setups/PubSubTest.hpp"
 
-void setup() {}
+// #include "Wire/Rs485/Facade.hpp"
+// #include "Wire/Spi/Facade.hpp"
+
+CoreSetup core{};
+PubSubTestSetup pubSubTestSetup{core.taskRegistry};
+
+// NOLINTNEXTLINE(readability-function-size)
+void setup() {
+    core.setup();
+    pubSubTestSetup.setup();
+    _log_i("Setup complete");
+}
 
 extern "C" {
 void app_main(void);
 }
 
-TickType_t lastWakeTime;
-
 void app_main() {
     setup();
     for (;;) {
-        xTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(100));
+        const auto nowMs = ::platform::get_time();
+        (void)core.work(nowMs);
+        (void)pubSubTestSetup.work(nowMs);
+        ::platform::delay(::platform::ms_to_ticks(publishIntervalMs));
     }
 }

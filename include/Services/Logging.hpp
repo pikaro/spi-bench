@@ -6,7 +6,6 @@
 #include "Macros/internal/Format.hpp"
 #include "Platform/PlatformSelect.hpp"
 #include "Types/Error.hpp"
-#include "esp_log.h"
 #include <atomic>
 #include <cstdarg>
 #include <cstdint>
@@ -29,8 +28,8 @@ struct NullLogger : public ILogger {
     }
 
     ReturnCode send(const LogRecord &record) override {
-        // FIXME: Abstract
-        ESP_EARLY_LOGE(MAGIC_CHR(record.component), "%s", record.msg.data());
+        ::platform::early_log_error(MAGIC_CHR(record.component),
+                                    record.msg.data());
         return OK(CoreError);
     }
 

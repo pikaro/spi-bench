@@ -1,4 +1,4 @@
-#RS485 Wire Layer
+# RS485 Wire Layer
 
 `include/Wire/Rs485/detail/` separates the point-to-point RS485 stack into
 small layers:
@@ -14,9 +14,9 @@ small layers:
 
 Frame semantics are intentionally split:
 
-- `Data` expects a link `Ack` / `Nack`. This is the path intended for a future
-  PubSub RS485 transport; the transport can release its egress buffer when the
-  RS485 write callback receives the link ack.
+- `Data` expects a link `Ack` / `Nack`. This is the path used by the PubSub
+  RS485 transport; the transport can release its egress buffer when the RS485
+  write callback receives the link ack.
 - `Request` expects a `Response` and does not add an intermediate link ack.
   This is the low-overhead path for time-sensitive protocols such as Clock
   synchronization.
@@ -67,7 +67,7 @@ treated as stale input and discarded instead of sequence-checked against the new
 connection.
 
 The second header discriminator is `Totem::Wire::PayloadType`, which identifies
-the higher-level payload owner such as `Clock` or future `PubSub`. Consumers can
+the higher-level payload owner such as `Clock` or `PubSub`. Consumers can
 register a `FrameHandler` with an RS485 node instead of repeatedly submitting
 read requests.
 

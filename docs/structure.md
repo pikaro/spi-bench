@@ -6,8 +6,10 @@ areas.
 
 ## Compiler diagnostics
 
-- `main.cpp.cpp.sarif` in the project root contains the latest compiler
-    diagnostics in SARIF format.
+- `main.cpp.cpp.sarif` in the project root may contain compiler diagnostics in
+    SARIF format when a build or IDE integration produced one. Treat it as a
+    diagnostic artifact to inspect when command-line output is truncated, not as
+    authoritative source state.
 
 ## Top-Level Layout
 
@@ -36,6 +38,29 @@ by the current PlatformIO environment.
 - The generated outputs are produced through `make wire` and `make bindings`
 - Prefer regenerating these files through the documented command flow instead of
     editing generated output directly
+
+## Component Boundaries
+
+Components generally use three header boundaries:
+
+- `Foo/Facade.hpp` is the curated public entry point. It selectively exports
+    concrete public classes and aliases from the component without making every
+    implementation header part of the public API.
+- `Foo/Interfaces/` is a lightweight public surface for externally named types,
+    config, handles, contracts, or interfaces that consumers need without
+    including the full facade. Do not create this folder preemptively; small
+    components may not need it.
+- `Foo/detail/` contains implementation details, helpers, storage, schedulers,
+    parsers, and component-owned platform glue. External code should not include
+    detail headers unless it is intentionally working inside that component
+    boundary.
+
+Top-level shared interface folders exist when multiple components need the same
+concept. For example, `include/Wire/Interfaces/` contains request/result and
+payload types shared by wire implementations such as RS485 and future SPI.
+Component-specific config can stay in `detail/` if callers only pass it inline
+at construction, as RS485 currently does. Move such types to an `Interfaces/`
+folder only when external code needs to name or store them independently.
 
 ## Editing Guidance
 

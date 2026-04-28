@@ -37,13 +37,6 @@ first implementation without rediscovering the same design constraints.
 
 ## Proposed File Layout
 
-- `include/Types/Spi.hpp`
-  - platform-agnostic SPI config and event types
-  - bus id, mode, clock rate, DMA alignment constants, transaction result
-- `include/Platform/Spi.hpp`
-  - platform selector facade
-- `include/Platform/platform/PlatformESP32/Spi.hpp`
-  - ESP-IDF SPI master/slave wrappers
 - `include/Wire/Spi/detail/`
   - `Config.hpp`
   - `Pdu.hpp`
@@ -55,6 +48,9 @@ first implementation without rediscovering the same design constraints.
   - `Slave.hpp`
   - `Scheduler.hpp`
   - `AttentionLine.hpp` if the RS485 helper is not reusable
+  - `PlatformSelect.hpp`
+  - `Types.hpp`
+  - `platform/PlatformESP32.hpp`
 - `include/Wire/Spi/Facade.hpp`
   - public `Totem::Wire::Spi::Master` and `Slave`
 - `include/PubSubBackend/Transports/SpiTransport.hpp`
@@ -62,9 +58,18 @@ first implementation without rediscovering the same design constraints.
 - `include/Setups/PubSubSpiTest.hpp`
   - first hardware test harness
 
-## Platform Abstraction
+Do not add `Wire/Spi/Interfaces/` unless external code needs to name or store
+SPI-specific public types independently of `Facade.hpp`. Reuse
+`Wire/Interfaces/` for cross-wire request/result and payload concepts.
 
-### `Types/Spi.hpp`
+## Component-Owned Platform Abstraction
+
+SPI should not start as a top-level `Platform/` abstraction. UART sits there
+because multiple components use it. SPI is expected to be owned by the SPI wire
+transport, so hardware-specific code should live under
+`Wire/Spi/detail/platform/` until another component genuinely needs it.
+
+### `Wire/Spi/detail/Types.hpp`
 
 Define compact platform-agnostic data types:
 
@@ -89,10 +94,11 @@ Define compact platform-agnostic data types:
   - error
   - overflow / missed transaction for slave mode if exposed by ESP-IDF
 
-Keep `Types/Spi.hpp` independent from ESP-IDF. It may use `::platform::Pin`
-like `Types/Uart.hpp` and `Types/Gpio.hpp`.
+Keep `Wire/Spi/detail/Types.hpp` independent from ESP-IDF. It may use
+`::platform::Pin` like other hardware-facing component configs, but it should
+not include ESP-IDF headers.
 
-### `platform::SpiMasterBus`
+### `detail::platform::SpiMasterBus`
 
 Responsibilities:
 
@@ -120,7 +126,7 @@ Blocking transfer is acceptable initially because the master scheduler task is
 the bus owner. Move to async only if profiling shows transfer blocking harms
 latency elsewhere.
 
-### `platform::SpiSlaveDevice`
+### `detail::platform::SpiSlaveDevice`
 
 Responsibilities:
 
@@ -561,14 +567,14 @@ PubSub tracing so the compiler can discard disabled trace paths.
 
 ### Phase 1: Platform SPI Foundation
 
-1. Add `Types/Spi.hpp`.
-2. Add `Platform/Spi.hpp` selector.
-3. Implement `platform::SpiMasterBus` for ESP32:
+1. Add `Wire/Spi/detail/Types.hpp`.
+2. Add `Wire/Spi/detail/PlatformSelect.hpp`.
+3. Implement `detail::platform::SpiMasterBus` for ESP32:
    - bus init/deinit
    - add device
    - blocking DMA transfer
    - timeout/error mapping
-4. Implement `platform::SpiSlaveDevice` for ESP32:
+4. Implement `detail::platform::SpiSlaveDevice` for ESP32:
    - slave init/deinit
    - queue/wait transfer
    - completion event mapping
@@ -752,7 +758,8 @@ Clock sync:
 
 ## Design Principles To Preserve
 
-- Keep hardware-specific code in platform wrappers.
+- Keep hardware-specific SPI code in `Wire/Spi/detail/platform` wrappers unless
+  a second non-SPI component needs the same abstraction.
 - Keep wire protocol independent from PubSub.
 - Keep PubSub transport independent from ESP-IDF.
 - Use static storage and explicit ownership.

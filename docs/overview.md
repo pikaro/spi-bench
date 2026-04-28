@@ -16,12 +16,12 @@ events and render their own LED segment locally.
 
 ## Current Scope
 
-- `env:master` is the active PlatformIO environment and the default target for
-    day-to-day work.
-- Other PlatformIO environments currently serve as templates and placeholders
-    for upcoming multi-device PubSub testing.
-- When a task does not explicitly mention multi-device work, assume `master` is
-    the only target that must remain buildable.
+- `env:master` and `env:slave` are both active targets for current RS485 and
+    PubSub-over-RS485 work.
+- `env:orig` builds the master source root for the classic ESP32 board variant.
+- When a task touches shared wire, PubSub, Clock, or platform abstractions,
+    build both `master` and `slave` unless the task is explicitly scoped to one
+    environment.
 
 ## Design Intent
 
@@ -51,6 +51,11 @@ organized as follows:
 - `src/master/`, `src/slave/`, `src/listener/`: environment-specific execution
     roots selected by build configuration
 - `bin/`: project helper scripts used during build and code generation
+
+Component header boundaries are described in [structure.md](structure.md):
+`Facade.hpp` is the curated public entry point, `Interfaces/` is only for
+lightweight public types that external code needs to name directly, and
+`detail/` owns implementation internals.
 
 ## Build Model
 
@@ -124,9 +129,9 @@ PubSub task configurations use notify wakeups so local publishes and transport
 ingress can run before the next periodic poll. Catch-up polling is disabled for
 PubSub tasks because missed periodic ticks should not create extra zero-delay
 work when the task is already being driven by explicit notifications. The
-single-device harness leaves PubSub node task core affinity free; pinning the
-simulated topology to one CPU has caused boot-time queue backlog and task
-failures.
+single-device simulator harness leaves PubSub node task core affinity free;
+pinning the simulated topology to one CPU has caused boot-time queue backlog and
+task failures.
 
 See [pubsub.md](pubsub.md) for the current PubSub architecture and development
 guidance.

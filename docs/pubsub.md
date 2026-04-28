@@ -80,9 +80,10 @@ received envelope. PubSub control-plane subscription events may still be
 created before clock sync so link discovery can complete; those frames carry a
 zero microsecond timestamp when no synced clock is available.
 
-## Local Harness
+## Harnesses
 
-`src/master/main.cpp` currently instantiates the target topology on one device:
+`include/Setups/PubSubTest.hpp` provides a single-device local shared-bus
+simulator. Earlier SPI topology experiments instantiated:
 
 - master with one shared-bus SPI router
 - A1, A2, A3, A4, and bridge C as SPI shared-bus edges
@@ -98,6 +99,12 @@ they immediately release it after queueing bytes into a link. That pattern adds
 locks, scans, copies, and static storage without representing the final wire
 driver.
 
+The active hardware harness for current work is
+`include/Setups/PubSubRs485Test.hpp`, instantiated by both `src/master/main.cpp`
+and `src/slave/main.cpp`. It uses the real RS485 wire transport between one
+master and one slave, records aggregate throughput/latency stats, and is the
+reference harness for PubSub-over-RS485 behavior.
+
 ## Scheduling Rules
 
 PubSub tasks are event-driven. They should use task notifications for early
@@ -105,15 +112,16 @@ wakeups and should not run at the same priority as the harness publisher:
 
 - set `useNotify = true`
 - set `noCatchup = true`
-- keep the current master harness PubSub task priority at `3`
-- leave PubSub node task core affinity free in the single-device harness
+- keep the active PubSub harness task priority at `3`
+- leave PubSub node task core affinity free in harnesses unless a measurement
+  proves a better placement
 - keep periodic intervals for watchdog and baseline polling only
 
 Pinning all PubSub node tasks to one core is a known-bad experiment in this
-harness. It concentrates the simulated topology on one CPU, backlogs the small
-local link queues during boot traffic, and can make PubSub tasks fail on queue
-send timeouts. Keep affinity free unless a clean measurement proves a different
-placement is better.
+single-device local simulator. It concentrates the simulated topology on one
+CPU, backlogs the small local link queues during boot traffic, and can make
+PubSub tasks fail on queue send timeouts. Keep affinity free unless a clean
+measurement proves a different placement is better.
 
 ## Performance Guidance
 

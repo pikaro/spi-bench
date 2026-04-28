@@ -3,8 +3,8 @@
 #include "LoggingBackend/Interfaces/Types.hpp"
 #include "Macros/Facade.hpp"
 #include "MetricsBackend/Interfaces/Types.hpp"
-#include "Services/Metrics.hpp"
-#include "Types/Error.hpp"
+#include "Services/Metrics.hpp" // IWYU pragma: keep
+#include "StaticConfig/Metrics.hpp"
 
 namespace Totem::Mutex::detail {
 
@@ -38,17 +38,15 @@ struct Metrics {
         };
     }
 
-    ReturnCode timeout() const {
-        return ::MetricsService::recorder().increment(timeoutsCounter);
-    }
-
-    ReturnCode failure() const {
-        return ::MetricsService::recorder().increment(failureCounter);
-    }
+    void timeout() const { METRIC_INCR(timeoutsCounter, 1); }
+    void failure() const { METRIC_INCR(failureCounter, 1); }
 
     Totem::MetricsBackend::GroupHandle group;
     Totem::MetricsBackend::CounterHandle timeoutsCounter;
     Totem::MetricsBackend::CounterHandle failureCounter;
+
+    static constexpr bool enabled =
+        MetricCollection::enabled && MetricCollection::mutex;
 };
 
 inline Metrics &metrics() {

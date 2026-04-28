@@ -15,6 +15,7 @@
 #include "Types/Signal.hpp"
 #include "Types/Uart.hpp"
 #include "Wire/Rs485/detail/AttentionLine.hpp"
+#include "Wire/Rs485/detail/Metrics.hpp"
 #include "Wire/Interfaces/Request.hpp"
 #include "Wire/Rs485/detail/Pdu.hpp"
 #include "Wire/Rs485/detail/Trace.hpp"
@@ -111,7 +112,16 @@ class Node : public HasLifecycle<Derived, ConfT>,
     }
 
   protected:
+    int64_t _beginTaskStep() {
+        metrics().addTaskStep();
+        return ::platform::get_time_us();
+    }
+
+    void _endTaskStep(int64_t startedAtUs) { _finishTaskStep(startedAtUs); }
+
     ReturnCode _onBegin() {
+        (void)metrics();
+
         _log_i("RS485 node initialized on UART %u with baud rate %u",
                this->config().uartConfig.uartNumber,
                static_cast<uint32_t>(this->config().uartConfig.baudRate));
@@ -220,9 +230,11 @@ class Node : public HasLifecycle<Derived, ConfT>,
     }
 
     ReturnCode _pollIncoming() {
+        metrics().addPoll();
         auto headerResult = _transceiver.pollHeader();
         if (!headerResult) {
             if (headerResult.error() == ERR(CoreError, NotFound)) {
+                metrics().addEmptyPoll();
                 return OK();
             }
             if (headerResult.error() == ERR(CoreError, InvalidState)) {
@@ -244,7 +256,12 @@ class Node : public HasLifecycle<Derived, ConfT>,
             return headerResult.error();
         }
         auto header = *headerResult;
-        log_trace_packet("poll.header", header, Derived::name);
+        return _handleIncomingHeader(header);
+    }
+
+    ReturnCode _handleIncomingHeader(const Header &header) {
+        metrics().addReceivedFrame();
+        log_trace_packet("rx.header", header, Derived::name);
         if (!ready() && header.type != FrameType::Hello) {
             _log_w("Discarding stale RS485 frame during handshake in %s",
                    Derived::name);
@@ -267,6 +284,8 @@ class Node : public HasLifecycle<Derived, ConfT>,
         switch (header.type) {
         case FrameType::Nop:
             return _receiveNop(header);
+        case FrameType::Grant:
+            return _receiveGrant(header);
         case FrameType::Hello:
             return this->derived()._onHello(header);
         case FrameType::Heartbeat:
@@ -328,7 +347,7 @@ class Node : public HasLifecycle<Derived, ConfT>,
             _lastHeartbeatSentMs = nowMs;
             _heartbeatSequence = sentHeader.sequenceNumber;
             auto responseResult =
-                _transceiver.receiveHeader(transactionResponseTimeoutMs);
+                _receiveSynchronousHeader(transactionResponseTimeoutMs);
             if (!responseResult) {
                 _heartbeatAwaitingResponse = true;
                 _transceiver.resetTurn();
@@ -361,6 +380,7 @@ class Node : public HasLifecycle<Derived, ConfT>,
     }
 
     void _resetConnection(const char *reason) {
+        metrics().addReset();
         _log_w("Resetting RS485 connection for %s: %s", Derived::name, reason);
         _state.store(NodeState::Initial, std::memory_order_release);
         (void)_transceiver.discardRx();
@@ -389,6 +409,7 @@ class Node : public HasLifecycle<Derived, ConfT>,
 
     ReturnCode _onTaskNotify(Signal signal) {
         if (signal == Signal::Rs485Attention) {
+            metrics().addAttentionWake();
             _attentionRequested.store(true, std::memory_order_release);
         }
         return OK();
@@ -398,6 +419,7 @@ class Node : public HasLifecycle<Derived, ConfT>,
         auto *self = static_cast<Node *>(owner);
         switch (event.type) {
         case UartEventType::Data:
+            metrics().addUartDataWake();
             return self->_wake(Signal::UartData);
         case UartEventType::Overflow:
             return self->_wake(Signal::UartOverflow);
@@ -458,6 +480,14 @@ class Node : public HasLifecycle<Derived, ConfT>,
                                      PayloadType::Raw, nullptr,
                                      FrameTurn::Reaction),
             "Failed to send RS485 nop response for %s", Derived::name);
+        return OK();
+    }
+
+    ReturnCode _receiveGrant(const Header &header) {
+        FAIL_IF(header.responseTo != 0 || header.payloadLength != 0,
+                ERR(CoreError, InvalidData),
+                "RS485 grant must not carry a response or payload in %s",
+                Derived::name);
         return OK();
     }
 
@@ -547,6 +577,7 @@ class Node : public HasLifecycle<Derived, ConfT>,
                         Derived::name);
 
         Header sentHeader{};
+        metrics().addTxDataFrame();
         auto ret =
             _transceiver.sendFrame(FrameType::Data, item.request.payloadType,
                                    item.request.data, 0, &sentHeader);
@@ -556,7 +587,7 @@ class Node : public HasLifecycle<Derived, ConfT>,
         }
 
         auto responseResult =
-            _transceiver.receiveHeader(transactionResponseTimeoutMs);
+            _receiveSynchronousHeader(transactionResponseTimeoutMs);
         if (!responseResult) {
             return _failWrite(item, responseResult.error(),
                               "data response read failed");
@@ -588,21 +619,45 @@ class Node : public HasLifecycle<Derived, ConfT>,
     ReturnCode _nopStep() {
         const auto nowMs = ::platform::get_time();
         const bool attentionRequested = _consumeAttentionRequest();
+        if constexpr (Derived::sendsHeartbeat) {
+            if (!attentionRequested) {
+                return OK();
+            }
+        }
         if (!attentionRequested &&
             static_cast<uint32_t>(nowMs - _lastNopSentMs) < nopIntervalMs) {
             return OK();
         }
         _lastNopSentMs = nowMs;
+        if constexpr (Derived::sendsHeartbeat) {
+            return _sendTurnGrant();
+        }
         return _sendNopExchange();
+    }
+
+    ReturnCode _sendTurnGrant() {
+        Header sentHeader{};
+        metrics().addTxGrant();
+        FAIL_IF_ERR_FWD(_transceiver.sendGrant(&sentHeader),
+                        "Failed to send RS485 grant for %s", Derived::name);
+        log_trace_packet("grant.sent", sentHeader, Derived::name);
+        auto headerResult =
+            _receiveSynchronousHeader(transactionResponseTimeoutMs);
+        if (!headerResult) {
+            _transceiver.resetTurn();
+            return OK();
+        }
+        return _handleIncomingHeader(*headerResult);
     }
 
     ReturnCode _sendNopExchange() {
         Header sentHeader{};
+        metrics().addTxNop();
         FAIL_IF_ERR_FWD(_transceiver.sendControl(FrameType::Nop, 0,
                                                  PayloadType::Raw, &sentHeader),
                         "Failed to send RS485 nop for %s", Derived::name);
         auto responseResult =
-            _transceiver.receiveHeader(transactionResponseTimeoutMs);
+            _receiveSynchronousHeader(transactionResponseTimeoutMs);
         if (!responseResult) {
             _transceiver.resetTurn();
             return OK();
@@ -636,6 +691,7 @@ class Node : public HasLifecycle<Derived, ConfT>,
                              ? FrameType::Poll
                              : FrameType::Request;
         int64_t sentAtUs = 0;
+        metrics().addTxExchange();
         auto ret = _transceiver.sendFrame(frameType, item.request.payloadType,
                                           item.request.request, 0, &sentHeader,
                                           FrameTurn::Initiated, &sentAtUs);
@@ -645,7 +701,7 @@ class Node : public HasLifecycle<Derived, ConfT>,
         }
 
         auto responseResult =
-            _transceiver.receiveHeader(transactionResponseTimeoutMs);
+            _receiveSynchronousHeader(transactionResponseTimeoutMs);
         if (!responseResult) {
             return _failExchange(item, responseResult.error(),
                                  "exchange response read failed");
@@ -671,7 +727,7 @@ class Node : public HasLifecycle<Derived, ConfT>,
         }
 
         auto payloadResult =
-            _transceiver.receivePayload(response, item.request.response);
+            _receiveSynchronousPayload(response, item.request.response);
         if (!payloadResult) {
             return _failExchange(item, payloadResult.error(),
                                  "exchange payload read failed");
@@ -777,7 +833,24 @@ class Node : public HasLifecycle<Derived, ConfT>,
                 std::unexpected(ERR(CoreError, InvalidArgument)),
                 "RS485 payload length %u exceeds scratch size %zu for %s",
                 header.payloadLength, _rxPayload.size(), Derived::name);
-        return _transceiver.receivePayload(header, _rxPayload);
+        return _receiveSynchronousPayload(header, _rxPayload);
+    }
+
+    std::expected<Header, ReturnCode>
+    _receiveSynchronousHeader(uint32_t timeoutMs) {
+        metrics().addSyncHeaderRead();
+        auto result = _transceiver.receiveHeader(timeoutMs);
+        if (!result && result.error() == ERR(CoreError, Timeout)) {
+            metrics().addSyncHeaderTimeout();
+        }
+        return result;
+    }
+
+    std::expected<uint16_t, ReturnCode>
+    _receiveSynchronousPayload(const Header &header,
+                               std::span<std::byte> buffer) {
+        metrics().addSyncPayloadRead();
+        return _transceiver.receivePayload(header, buffer);
     }
 
     FrameHandler *_findHandler(PayloadType payloadType) {
@@ -864,6 +937,14 @@ class Node : public HasLifecycle<Derived, ConfT>,
             }
             auto asserted = _attention.asserted();
             return asserted.has_value() && *asserted;
+        }
+    }
+
+    void _finishTaskStep(int64_t startedAtUs) {
+        const auto nowUs = ::platform::get_time_us();
+        if (nowUs >= startedAtUs) {
+            const auto elapsedUs = static_cast<uint32_t>(nowUs - startedAtUs);
+            metrics().recordStepDuration(elapsedUs);
         }
     }
 

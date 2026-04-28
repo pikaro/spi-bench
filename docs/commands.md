@@ -54,7 +54,7 @@ Implementation notes:
 
 - `master` is the only actively maintained environment for routine work at
     present
-- `listener`, `slave1`, and `slave2` remain as templates for upcoming
-    multi-device PubSub testing
+- `slave` is available for the current RS485 slave node; other slave/listener
+    environments are not present in this checkout
 
 Use other environments only when the task explicitly involves that work

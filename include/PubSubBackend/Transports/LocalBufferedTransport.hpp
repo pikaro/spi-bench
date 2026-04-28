@@ -25,15 +25,18 @@ struct LocalTransportEgressByteArenaConfig {
     }
 
     static ReturnCode onEvictNoncritical(const Header &) {
-        return detail::metrics().addEgressEvictedNoncritical();
+        detail::metrics().addEgressEvictedNoncritical();
+        return OK();
     }
 
     static ReturnCode onDropNoncritical(const Header &) {
-        return detail::metrics().addEgressDroppedNoncritical();
+        detail::metrics().addEgressDroppedNoncritical();
+        return OK();
     }
 
     static ReturnCode onRejectCritical(const Header &) {
-        return detail::metrics().addEgressRejectedCritical();
+        detail::metrics().addEgressRejectedCritical();
+        return OK();
     }
 };
 

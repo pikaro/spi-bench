@@ -14,15 +14,18 @@ struct IRegistrar {
     virtual ~IRegistrar() = default;
 
     virtual std::expected<GroupHandle, ReturnCode>
-    addGroup(std::reference_wrapper<const MetricGroupDesc> groupDesc) = 0;
+    addGroup(std::reference_wrapper<const MetricGroupDesc> groupDesc,
+             bool enabled) = 0;
 
     virtual std::expected<CounterHandle, ReturnCode>
     addCounter(MetricGroupKey groupKey,
-               std::reference_wrapper<const MetricDesc> metricDesc) = 0;
+               std::reference_wrapper<const MetricDesc> metricDesc,
+               bool enabled) = 0;
 
     virtual std::expected<GaugeHandle, ReturnCode>
     addGauge(MetricGroupKey groupKey,
-             std::reference_wrapper<const MetricDesc> metricDesc) = 0;
+             std::reference_wrapper<const MetricDesc> metricDesc,
+             bool enabled) = 0;
 };
 
 struct IRecorder {

@@ -1,15 +1,19 @@
 #pragma once
 
 #include "Macros/Facade.hpp"
+#include "Platform/platform/PlatformESP32/Base.hpp"
+#include "PubSubBackend/Interfaces/Envelope.hpp"
+#include "PubSubBackend/Interfaces/Wire.hpp"
 #include "PubSubBackend/Transports/BaseTransport.hpp"
+#include "PubSubBackend/detail/SerDe.hpp"
 #include "PubSubBackend/detail/Trace.hpp"
 #include "PubSubBackend/detail/Types.hpp"
 #include "Queue/Facade.hpp"
 #include "Types/Error.hpp"
-#include "Types/Signal.hpp"
 #include "Wire/Interfaces/Request.hpp"
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <expected>
 #include <limits>
@@ -86,8 +90,8 @@ template <class Link> class Rs485Transport : public BaseTransport {
         return _findInFlight(header) == nullptr;
     }
 
-    ReturnCode send(size_t maxCount = std::numeric_limits<size_t>::max())
-        override {
+    ReturnCode
+    send(size_t maxCount = std::numeric_limits<size_t>::max()) override {
         FAIL_IF_INACTIVE_ERR("Cannot work inactive transport %s",
                              _instanceName);
         FAIL_IF_ERR_FWD(_observeAvailability(),
@@ -111,16 +115,15 @@ template <class Link> class Rs485Transport : public BaseTransport {
                     return OK();
                 }
                 FAIL(receiveRet,
-                     "Failed to receive frame from RS485 transport queue: "
-                     ERR_FMT,
+                     "Failed to receive frame from RS485 transport "
+                     "queue: " ERR_FMT,
                      ERR_ARG(receiveRet));
             }
 
             auto frameSizeResult = _prepareFrameForSend(item, slot->data);
             if (!frameSizeResult) {
                 _log_w(SV_FMT
-                       ": dropping unserializable PubSub message %u: "
-                       ERR_FMT,
+                       ": dropping unserializable PubSub message %u: " ERR_FMT,
                        SV_ARG(_instanceName), item->envelope.header.messageId,
                        ERR_ARG(frameSizeResult.error()));
                 auto ackRet = _ack(item->envelope);
@@ -135,8 +138,7 @@ template <class Link> class Rs485Transport : public BaseTransport {
                 continue;
             }
             auto frameSize = *frameSizeResult;
-            detail::log_trace_packet("rs485.tx.prepared",
-                                     item->envelope.header,
+            detail::log_trace_packet("rs485.tx.prepared", item->envelope.header,
                                      _instanceName.data());
             slot->envelope = item->envelope;
             slot->header = item->envelope.header;
@@ -147,20 +149,18 @@ template <class Link> class Rs485Transport : public BaseTransport {
             auto request = Wire::WriteRequest{
                 .owner = slot,
                 .payloadType = Wire::PayloadType::PubSub,
-                .data = std::span<const std::byte>{slot->data.data(),
-                                                   slot->size},
+                .data =
+                    std::span<const std::byte>{slot->data.data(), slot->size},
                 .onComplete = _onWireWriteComplete,
             };
             auto sendRet = _link.send(request);
             if (!sendRet.ok()) {
                 slot->occupied = false;
                 FAIL(sendRet,
-                     "Failed to enqueue PubSub frame on RS485 link: "
-                     ERR_FMT,
+                     "Failed to enqueue PubSub frame on RS485 link: " ERR_FMT,
                      ERR_ARG(sendRet));
             }
-            detail::log_trace_packet("rs485.tx.queued",
-                                     item->envelope.header,
+            detail::log_trace_packet("rs485.tx.queued", item->envelope.header,
                                      _instanceName.data());
             ++count;
         }
@@ -171,7 +171,8 @@ template <class Link> class Rs485Transport : public BaseTransport {
     static BaseTransportDependencies
     _makeBaseDeps(Rs485Transport *self,
                   Rs485TransportDependencies<Link> &deps) {
-        auto baseDeps = deps.withBaseDeps(self, _sendCallback, _receiveCallback);
+        auto baseDeps =
+            deps.withBaseDeps(self, _sendCallback, _receiveCallback);
         baseDeps.availableCallback = _availableCallback;
         return baseDeps;
     }
@@ -238,10 +239,9 @@ template <class Link> class Rs485Transport : public BaseTransport {
         detail::log_trace_frame("rs485.wire.ingress", payload,
                                 detail::SerDe::peekHeader,
                                 _instanceName.data());
-        FAIL_IF_ERR_FWD(
-            Totem::Queue::Platform::send(_rxFrameQueue, &rxFrame,
-                                         queueSendTimeoutTicks),
-            "Failed to enqueue RS485 PubSub ingress frame");
+        FAIL_IF_ERR_FWD(Totem::Queue::Platform::send(_rxFrameQueue, &rxFrame,
+                                                     queueSendTimeoutTicks),
+                        "Failed to enqueue RS485 PubSub ingress frame");
         FAIL_IF_ERR_FWD(_wake(), "Failed to wake PubSub after RS485 ingress");
         return OK();
     }

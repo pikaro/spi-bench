@@ -80,9 +80,7 @@ template <class Derived> class ScopedMutexGuard final {
         // Only record metrics if scheduler is running to avoid circular
         // dependency during static initialization
         if (::platform::is_multithreading()) {
-            if (!metrics().timeout()) {
-                _log_e("Failed to record mutex timeout metric for %s", _name);
-            }
+            metrics().timeout();
         }
     }
 
@@ -90,9 +88,7 @@ template <class Derived> class ScopedMutexGuard final {
         // Only record metrics if scheduler is running to avoid circular
         // dependency during static initialization
         if (::platform::is_multithreading()) {
-            if (!metrics().failure()) {
-                _log_e("Failed to record mutex failure metric for %s", _name);
-            }
+            metrics().failure();
         }
     }
 

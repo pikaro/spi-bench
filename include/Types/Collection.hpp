@@ -97,6 +97,8 @@ template <typename Tag, class KeyT, class Friend> class StrongHandle {
 
     const KeyType &key() const { return _key; }
 
+    static constexpr StrongHandle null() { return StrongHandle{KeyType{}}; }
+
   private:
     friend Friend;
 

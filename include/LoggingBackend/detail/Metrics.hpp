@@ -3,8 +3,8 @@
 #include "LoggingBackend/Interfaces/Types.hpp"
 #include "Macros/Facade.hpp"
 #include "MetricsBackend/Interfaces/Types.hpp"
-#include "Services/Metrics.hpp"
-#include "Types/Error.hpp"
+#include "Services/Metrics.hpp" // IWYU pragma: keep
+#include "StaticConfig/Metrics.hpp"
 #include <cstdint>
 
 namespace Totem::LoggingBackend::detail {
@@ -26,13 +26,13 @@ struct Metrics {
     static constexpr MetricDesc processedRecordsDef = {
         .name = "processd",
         .type = MetricType::Gauge,
-        .unit = MetricUnit::Items,
+        .unit = MetricUnit::None,
     };
 
     static constexpr MetricDesc droppedRecordsDef = {
         .name = "droppedR",
         .type = MetricType::Gauge,
-        .unit = MetricUnit::Items,
+        .unit = MetricUnit::None,
     };
 
     static Metrics create() {
@@ -47,17 +47,18 @@ struct Metrics {
         };
     }
 
-    ReturnCode setDropped(uint32_t count) const {
-        return ::MetricsService::recorder().set(droppedRecords, count);
-    }
+    void setDropped(uint32_t count) const { METRIC_SET(droppedRecords, count); }
 
-    ReturnCode setProcessed(uint32_t count) const {
-        return ::MetricsService::recorder().set(processedRecords, count);
+    void setProcessed(uint32_t count) const {
+        METRIC_SET(processedRecords, count);
     }
 
     GroupHandle group;
     GaugeHandle processedRecords;
     GaugeHandle droppedRecords;
+
+    static constexpr bool enabled =
+        MetricCollection::enabled && MetricCollection::logging;
 };
 
 } // namespace Totem::LoggingBackend::detail

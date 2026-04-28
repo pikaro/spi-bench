@@ -41,14 +41,18 @@ class Slave : public Node<Slave, SlaveConfig, TransceiverMode::ReadWrite> {
 
   private:
     ReturnCode _onTaskStep() {
+        const auto taskStepStartedAtUs = this->_beginTaskStep();
         if (!ready()) {
             auto ret = _pollIncoming();
+            this->_endTaskStep(taskStepStartedAtUs);
             if (!ret.ok() && ret != ERR(CoreError, NotFound)) {
                 return ret;
             }
             return OK();
         }
-        return _runReadyTransactions();
+        auto ret = _runReadyTransactions();
+        this->_endTaskStep(taskStepStartedAtUs);
+        return ret;
     }
 
     static const LogComponent logComponent =

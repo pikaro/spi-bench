@@ -6,7 +6,6 @@
 #include "Services/Metrics.hpp"
 #include "Store.hpp"
 #include "Types/Error.hpp"
-#include "MetricsBackend/Interfaces/Types.hpp"
 #include <expected>
 #include <functional>
 
@@ -18,7 +17,11 @@ class Registrar : public IRegistrar {
 
     std::expected<GroupHandle, ReturnCode>
     // Take a reference wrapper to reject temporaries
-    addGroup(std::reference_wrapper<const MetricGroupDesc> desc) override {
+    addGroup(std::reference_wrapper<const MetricGroupDesc> desc,
+             bool enabled) override {
+        if (!enabled) {
+            return GroupHandle::null();
+        }
         const auto &descRef = desc.get();
         FAIL_IF_ERR_FWD_UNEXPECTED(
             descRef.validate(),
@@ -32,7 +35,11 @@ class Registrar : public IRegistrar {
 
     std::expected<CounterHandle, ReturnCode>
     addCounter(MetricGroupKey groupKey,
-               std::reference_wrapper<const MetricDesc> desc) override {
+               std::reference_wrapper<const MetricDesc> desc,
+               bool enabled) override {
+        if (!enabled) {
+            return CounterHandle::null();
+        }
         const auto &descRef = desc.get();
         FAIL_IF(descRef.type != MetricType::Counter,
                 std::unexpected(ERR(InvalidArgument)),
@@ -48,7 +55,11 @@ class Registrar : public IRegistrar {
 
     std::expected<GaugeHandle, ReturnCode>
     addGauge(MetricGroupKey groupKey,
-             std::reference_wrapper<const MetricDesc> desc) override {
+             std::reference_wrapper<const MetricDesc> desc,
+             bool enabled) override {
+        if (!enabled) {
+            return GaugeHandle::null();
+        }
         const auto &descRef = desc.get();
         FAIL_IF(descRef.type != MetricType::Gauge,
                 std::unexpected(ERR(InvalidArgument)),

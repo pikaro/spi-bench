@@ -27,10 +27,15 @@ Frame semantics are intentionally split:
   handshake. The slave responds with a `Heartbeat` correlated through
   `responseTo`; either side resets to handshake mode when the peer misses three
   heartbeat windows.
-- `Nop` is a zero-payload skip marker. A node sends it when it owns an
-  initiating write slot but has no data/exchange/heartbeat to send. The peer
-  responds with a correlated `Nop`, allowing both sides to advance the shared
-  bus cycle without relying on timing-only slot skips.
+- `Grant` is a zero-payload, one-way turn marker sent by the master when the
+  attention line says a slave has queued traffic. It advances the split turn
+  from master write directly to slave write, avoiding a dummy response before
+  the slave's real frame.
+- `Nop` is a zero-payload turn marker. The master no longer sends periodic idle
+  nops while the attention line is quiet. A slave can still send `Nop` when it
+  owns an initiating write slot but has no data/exchange to send, allowing the
+  master to advance back to its write slot after handshake, heartbeat, or
+  master-originated traffic.
 
 The transceiver enforces an explicit split turn cycle. A master starts in
 `WriteRequest`, then reads the reaction, then reads the peer's request, then
@@ -44,6 +49,9 @@ wrapper maps driver events to platform-agnostic `UartEventType` values and
 invokes registered callbacks from a small event task. RS485 registers a callback
 that wakes its task with `UartData`, `UartOverflow`, or `UartError`, so inbound
 frames do not wait for the periodic task interval before being polled.
+The RS485 runner keeps a slower periodic cadence for watchdog coverage and
+handshake/heartbeat housekeeping; normal traffic should be driven by UART and
+attention notifications rather than by a tight polling loop.
 
 RS485 can also use an active-low attention GPIO as a side-band wake signal. The
 slave drives this line with an open-drain output while it has queued traffic;

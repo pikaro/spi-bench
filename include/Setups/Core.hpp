@@ -4,6 +4,7 @@
 #include "LoggingBackend/Facade.hpp"
 #include "Macros/Facade.hpp"
 #include "MetricsBackend/Facade.hpp"
+#include "Mutex/detail/Metrics.hpp"
 #include "Monitoring/Facade.hpp"
 #include "Platform/Console.hpp"
 #include "Services/Commands.hpp"
@@ -34,6 +35,7 @@ struct CoreSetup {
         CommandRegistrarService::set(commandController.registrar());
 
         ABORT_IF_ERR_BEGIN(metricsBackend.begin());
+        (void)Totem::Mutex::detail::metrics();
 
         ABORT_IF_ERR(register_core_commands(),
                      "Failed to register core commands to command controller");

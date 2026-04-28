@@ -13,6 +13,7 @@
 #include "PubSubBackend/detail/ControlPlane.hpp"
 #include "PubSubBackend/detail/Drainer.hpp"
 #include "PubSubBackend/detail/IngressBuffer.hpp"
+#include "PubSubBackend/detail/Metrics.hpp"
 #include "PubSubBackend/detail/Publisher.hpp"
 #include "PubSubBackend/detail/SerDe.hpp"
 #include "PubSubBackend/detail/SubscriberDirectory.hpp"
@@ -189,6 +190,8 @@ class Node : public HasLifecycle<Node, Config>,
 
   private:
     ReturnCode _onBegin() {
+        (void)metrics();
+
         auto taskHooks = TaskController::TaskHooks::bind(*this);
 
         FAIL_IF_ERR_FWD(_beginTaskController(config().task),

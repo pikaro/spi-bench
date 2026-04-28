@@ -79,14 +79,31 @@ template <TransceiverMode Mode> class TurnStateMachine {
         return _state.step();
     }
 
-    ReturnCode markRead() {
+    ReturnCode markWriteGrant() {
+        FAIL_IF_NOT(_state.is(TransceiverState::WriteRequest),
+                    ERR(CoreError, InvalidState),
+                    "RS485 turn cannot grant while in state " SV_FMT,
+                    MAGIC_SV_ARG(_state.current()));
+        FAIL_IF_ERR_FWD(_state.step(), "Failed to advance grant write turn");
+        return _state.step();
+    }
+
+    ReturnCode markRead(FrameType type) {
         const auto state = current();
         FAIL_IF(state != TransceiverState::ReadRequest &&
                     state != TransceiverState::ReadReaction,
                 ERR(CoreError, InvalidState),
                 "RS485 turn cannot read while in state %u",
                 static_cast<unsigned>(state));
-        return _state.step();
+        FAIL_IF(type == FrameType::Grant && state != TransceiverState::ReadRequest,
+                ERR(CoreError, InvalidState),
+                "RS485 grant cannot be read while in state %u",
+                static_cast<unsigned>(state));
+        FAIL_IF_ERR_FWD(_state.step(), "Failed to advance read turn");
+        if (type == FrameType::Grant) {
+            return _state.step();
+        }
+        return OK();
     }
 
   private:
@@ -176,6 +193,23 @@ class Transceiver {
         return sendFrame(type, payloadType, {}, responseTo, sentHeader, turn);
     }
 
+    ReturnCode sendGrant(Header *sentHeader = nullptr) {
+        FAIL_IF_ERR_FWD(_turn.markWriteGrant(),
+                        "RS485 turn rejected grant for %s", _ownerName);
+        auto header = Header::make(FrameType::Grant, PayloadType::Raw, 0, 0);
+        FAIL_IF_ERR_FWD(writeHeader(header),
+                        "Failed to write RS485 grant header for %s",
+                        _ownerName);
+        FAIL_IF_ERR_FWD(
+            _uart.waitTxComplete(
+                _uartConfig.timeoutFromBytes(Header::headerSize) * 2),
+            "Failed to drain RS485 grant for %s", _ownerName);
+        if (sentHeader != nullptr) {
+            *sentHeader = header;
+        }
+        return OK();
+    }
+
     std::expected<Header, ReturnCode> pollHeader() {
         FAIL_IF_NOT(_turn.canRead(),
                     std::unexpected(ERR(CoreError, InvalidState)),
@@ -209,7 +243,7 @@ class Transceiver {
         FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
             header, headerResult, "Failed to parse RS485 frame header for %s",
             _ownerName);
-        FAIL_IF_ERR_FWD_UNEXPECTED(_turn.markRead(),
+        FAIL_IF_ERR_FWD_UNEXPECTED(_turn.markRead(header.type),
                                    "Failed to advance RS485 read turn for %s",
                                    _ownerName);
         return header;

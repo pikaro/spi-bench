@@ -32,15 +32,18 @@ struct IngressByteArenaConfig {
     }
 
     static ReturnCode onEvictNoncritical(const Header & /*unused*/) {
-        return metrics().addIngressEvictedNoncritical();
+        metrics().addIngressEvictedNoncritical();
+        return OK();
     }
 
     static ReturnCode onDropNoncritical(const Header & /*unused*/) {
-        return metrics().addIngressDroppedNoncritical();
+        metrics().addIngressDroppedNoncritical();
+        return OK();
     }
 
     static ReturnCode onRejectCritical(const Header & /*unused*/) {
-        return metrics().addIngressRejectedCritical();
+        metrics().addIngressRejectedCritical();
+        return OK();
     }
 };
 

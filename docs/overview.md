@@ -59,8 +59,8 @@ organized as follows:
     source subtree
 - `src/CMakeLists.txt` maps PlatformIO environments to source roots:
     - `master` -> `src/master`
-    - `listener` -> `src/listener`
-    - `slave1` and `slave2` -> `src/slave`
+    - `orig` -> `src/master`
+    - `slave` -> `src/slave`
 
 ### SDKConfig
 

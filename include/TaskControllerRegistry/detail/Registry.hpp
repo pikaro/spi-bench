@@ -40,19 +40,14 @@ class Registry : public HasLifecycle<Registry>,
         auto ret = _directory.add(sourceKey, source, info);
         FAIL_IF(!ret, ret.error(), "Failed to register task source " SV_FMT,
                 SV_ARG(info.displayName));
-        FAIL_IF_ERR_FWD(
-            _metrics.addTask(),
-            "Failed to update metrics for registering task source " SV_FMT,
-            SV_ARG(info.displayName));
+        _metrics.addTask();
         return OK();
     }
 
     ReturnCode deregisterSource(const SourceKey &sourceKey) override {
         auto ret = _directory.remove(sourceKey);
         FAIL_IF_ERR(ret, ret, "Failed to deregister task source");
-        FAIL_IF_ERR_FWD(
-            _metrics.removeTask(),
-            "Failed to update metrics for deregistering task source");
+        _metrics.removeTask();
         return OK();
     }
 
@@ -123,9 +118,7 @@ class Registry : public HasLifecycle<Registry>,
         });
 
         FAIL_IF_ERR_FWD(ret, "Failed to reap tasks for registry");
-        FAIL_IF_ERR_FWD(
-            _metrics.addReaped(reapedCount),
-            "Failed to update metrics for reaping tasks in registry");
+        _metrics.addReaped(reapedCount);
         return OK();
     }
 

@@ -46,3 +46,5 @@ constexpr bool has_flag(T value, Enum flag) {
     }
     return i;
 }
+
+template <typename... Ts> constexpr void ignore_unused(Ts &&.../*unused*/) {}

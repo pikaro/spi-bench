@@ -3,8 +3,8 @@
 #include "LoggingBackend/Interfaces/Types.hpp"
 #include "Macros/Facade.hpp"
 #include "MetricsBackend/Interfaces/Types.hpp"
-#include "Services/Metrics.hpp"
-#include "Types/Error.hpp"
+#include "Services/Metrics.hpp" // IWYU pragma: keep
+#include "StaticConfig/Metrics.hpp"
 #include <cstddef>
 
 namespace Totem::TaskControllerRegistry::detail {
@@ -40,21 +40,16 @@ struct Metrics {
         };
     }
 
-    ReturnCode addTask() const {
-        return ::MetricsService::recorder().increment(controllerCount);
-    }
-
-    ReturnCode removeTask() const {
-        return ::MetricsService::recorder().decrement(controllerCount);
-    }
-
-    ReturnCode addReaped(size_t count) const {
-        return ::MetricsService::recorder().increment(reapedCount, count);
-    }
+    void addTask() const { METRIC_INCR(controllerCount, 1); }
+    void removeTask() const { METRIC_DECR(controllerCount, 1); }
+    void addReaped(size_t count) const { METRIC_INCR(reapedCount, count); }
 
     Totem::MetricsBackend::GroupHandle group;
     Totem::MetricsBackend::CounterHandle controllerCount;
     Totem::MetricsBackend::CounterHandle reapedCount;
+
+    static constexpr bool enabled =
+        MetricCollection::enabled && MetricCollection::taskControllerRegistry;
 };
 
 } // namespace Totem::TaskControllerRegistry::detail

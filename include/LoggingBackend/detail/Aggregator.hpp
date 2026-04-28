@@ -149,8 +149,8 @@ class BINDING Aggregator : public HasLifecycle<Aggregator, AggregatorConfig>,
             }
             ++drained;
         }
-        (void)_metrics.setProcessed(processedRecords);
-        (void)_metrics.setDropped(droppedRecords);
+        _metrics.setProcessed(processedRecords);
+        _metrics.setDropped(droppedRecords);
         return OK();
     }
 

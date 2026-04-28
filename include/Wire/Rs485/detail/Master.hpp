@@ -45,12 +45,16 @@ class Master
 
   private:
     ReturnCode _onTaskStep() {
+        const auto taskStepStartedAtUs = this->_beginTaskStep();
         if (!ready()) {
-            FAIL_IF_ERR_FWD(_handshakeStep(),
-                            "Failed RS485 master handshake step");
+            auto ret = _handshakeStep();
+            this->_endTaskStep(taskStepStartedAtUs);
+            FAIL_IF_ERR_FWD(ret, "Failed RS485 master handshake step");
             return OK();
         }
-        return _runReadyTransactions();
+        auto ret = _runReadyTransactions();
+        this->_endTaskStep(taskStepStartedAtUs);
+        return ret;
     }
 
     ReturnCode _handshakeStep() {

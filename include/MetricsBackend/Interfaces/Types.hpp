@@ -1,6 +1,8 @@
 #pragma once
 
+#include "Macros/Facade.hpp"
 #include "Types/Collection.hpp"
+#include "Types/Error.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
@@ -18,7 +20,6 @@ enum class MetricType : uint8_t { Counter, Gauge };
 enum class MetricUnit : uint8_t {
     None = 0,
     Bytes,
-    Items,
     Milliseconds,
     Microseconds,
     Percent,
@@ -35,8 +36,6 @@ constexpr std::string_view metric_unit_to_string(MetricUnit unit) {
         return "";
     case MetricUnit::Bytes:
         return "B";
-    case MetricUnit::Items:
-        return "it";
     case MetricUnit::Milliseconds:
         return "ms";
     case MetricUnit::Microseconds:

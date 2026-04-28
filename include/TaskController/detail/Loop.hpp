@@ -37,10 +37,7 @@ class Loop {
         auto loopResult = _loop();
 
         auto stopResult = _shutdown();
-        if (!_metrics.stopped()) {
-            _log_w("Failed to record stopped metric for runner %s: " ERR_FMT,
-                   _config.name, ERR_ARG(stopResult));
-        }
+        _metrics.stopped();
 
         if (!stopResult.ok()) {
             if (loopResult.isClean()) {
@@ -82,10 +79,7 @@ class Loop {
 
         _log_i("Runner %s started", _config.name);
 
-        if (!_metrics.started()) {
-            _log_w("Failed to record started metric for runner %s",
-                   _config.name);
-        }
+        _metrics.started();
 
         return {};
     }

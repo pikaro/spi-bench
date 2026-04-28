@@ -3,8 +3,8 @@
 #include "LoggingBackend/Interfaces/Types.hpp"
 #include "Macros/Facade.hpp"
 #include "MetricsBackend/Interfaces/Types.hpp"
-#include "Services/Metrics.hpp"
-#include "Types/Error.hpp"
+#include "Services/Metrics.hpp" // IWYU pragma: keep
+#include "StaticConfig/Metrics.hpp"
 #include <cstddef>
 
 namespace Totem::PubSubBackend::detail {
@@ -25,37 +25,37 @@ struct Metrics {
     static constexpr MetricDesc ingressEvictedNoncriticalDef = {
         .name = "ingEvict",
         .type = MetricType::Counter,
-        .unit = MetricUnit::Items,
+        .unit = MetricUnit::None,
     };
 
     static constexpr MetricDesc ingressDroppedNoncriticalDef = {
         .name = "ingDropd",
         .type = MetricType::Counter,
-        .unit = MetricUnit::Items,
+        .unit = MetricUnit::None,
     };
 
     static constexpr MetricDesc ingressRejectedCriticalDef = {
         .name = "ingRejec",
         .type = MetricType::Counter,
-        .unit = MetricUnit::Items,
+        .unit = MetricUnit::None,
     };
 
     static constexpr MetricDesc egressEvictedNoncriticalDef = {
         .name = "egrEvict",
         .type = MetricType::Counter,
-        .unit = MetricUnit::Items,
+        .unit = MetricUnit::None,
     };
 
     static constexpr MetricDesc egressDroppedNoncriticalDef = {
         .name = "egrDropd",
         .type = MetricType::Counter,
-        .unit = MetricUnit::Items,
+        .unit = MetricUnit::None,
     };
 
     static constexpr MetricDesc egressRejectedCriticalDef = {
         .name = "egrRejec",
         .type = MetricType::Counter,
-        .unit = MetricUnit::Items,
+        .unit = MetricUnit::None,
     };
 
     static Metrics create() {
@@ -78,34 +78,28 @@ struct Metrics {
         };
     }
 
-    ReturnCode addIngressEvictedNoncritical(size_t count = 1) const {
-        return ::MetricsService::recorder().increment(ingressEvictedNoncritical,
-                                                      count);
+    void addIngressEvictedNoncritical(size_t count = 1) const {
+        METRIC_INCR(ingressEvictedNoncritical, count);
     }
 
-    ReturnCode addIngressDroppedNoncritical(size_t count = 1) const {
-        return ::MetricsService::recorder().increment(ingressDroppedNoncritical,
-                                                      count);
+    void addIngressDroppedNoncritical(size_t count = 1) const {
+        METRIC_INCR(ingressDroppedNoncritical, count);
     }
 
-    ReturnCode addIngressRejectedCritical(size_t count = 1) const {
-        return ::MetricsService::recorder().increment(ingressRejectedCritical,
-                                                      count);
+    void addIngressRejectedCritical(size_t count = 1) const {
+        METRIC_INCR(ingressRejectedCritical, count);
     }
 
-    ReturnCode addEgressEvictedNoncritical(size_t count = 1) const {
-        return ::MetricsService::recorder().increment(egressEvictedNoncritical,
-                                                      count);
+    void addEgressEvictedNoncritical(size_t count = 1) const {
+        METRIC_INCR(egressEvictedNoncritical, count);
     }
 
-    ReturnCode addEgressDroppedNoncritical(size_t count = 1) const {
-        return ::MetricsService::recorder().increment(egressDroppedNoncritical,
-                                                      count);
+    void addEgressDroppedNoncritical(size_t count = 1) const {
+        METRIC_INCR(egressDroppedNoncritical, count);
     }
 
-    ReturnCode addEgressRejectedCritical(size_t count = 1) const {
-        return ::MetricsService::recorder().increment(egressRejectedCritical,
-                                                      count);
+    void addEgressRejectedCritical(size_t count = 1) const {
+        METRIC_INCR(egressRejectedCritical, count);
     }
 
     GroupHandle group;
@@ -115,6 +109,9 @@ struct Metrics {
     CounterHandle egressEvictedNoncritical;
     CounterHandle egressDroppedNoncritical;
     CounterHandle egressRejectedCritical;
+
+    static constexpr bool enabled =
+        MetricCollection::enabled && MetricCollection::pubSub;
 };
 
 inline Metrics &metrics() {

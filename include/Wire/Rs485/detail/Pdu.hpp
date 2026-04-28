@@ -9,7 +9,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
-#include <optional>
 #include <span>
 
 #pragma push_macro("BIT_MASK")
@@ -32,6 +31,7 @@ enum class FrameType : uint8_t {
     Heartbeat = 0x06,
     Ack = 0x07,
     Nack = 0x08,
+    Grant = 0x09,
 };
 
 static_assert(sizeof(FrameType) == 1, "FrameType must be 1 byte");
@@ -52,8 +52,8 @@ struct Header {
         sizeof(sequenceNumber) + sizeof(responseTo) + sizeof(payloadLength);
     static constexpr size_t headerSize = _headerCheckedSize + sizeof(crc8);
 
-    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
     static Header make(FrameType type, PayloadType payloadType,
+                       // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
                        uint16_t payloadLength, uint8_t responseTo = 0) {
         Header frame{};
         frame.type = type;

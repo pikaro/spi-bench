@@ -111,10 +111,10 @@ template <typename State, auto Transitions> class StateMachine {
     }
 
     ReturnCode transitionTo(State next) {
-        FAIL_IF_UNEXPECTED_FWD(
-            expectedCurrent, previousStateFor(next),
-            "Failed to get expected current state for " SV_FMT " in %s",
-            MAGIC_SV_ARG(next), _ownerName);
+        auto expectedCurrent = previousStateFor(next);
+        FAIL_IF(expectedCurrent == State::Invalid, ERR(CoreError, InvalidState),
+                "Failed to get expected current state for " SV_FMT " in %s",
+                MAGIC_SV_ARG(next), _ownerName);
 
         FAIL_IF_NOT_STATE(_state, expectedCurrent, next, "%s", _ownerName);
 
@@ -126,15 +126,18 @@ template <typename State, auto Transitions> class StateMachine {
                 ERR(CoreError, InvalidState), "already in end state " SV_FMT,
                 MAGIC_SV_ARG(*_endState));
 
-        FAIL_IF_UNEXPECTED_FWD(next, nextFor(current()),
-                               "Failed to get next state for " SV_FMT " in %s",
-                               MAGIC_SV_ARG(current()), _ownerName);
+        auto next = nextStateFor(current());
+        FAIL_IF(next == State::Invalid, ERR(CoreError, InvalidState),
+                "Failed to get next state for " SV_FMT " in %s",
+                MAGIC_SV_ARG(current()), _ownerName);
 
-        FAIL_IF_NOT_STATE(_state, previousStateFor(next).value(), next, "%s",
+        FAIL_IF_NOT_STATE(_state, previousStateFor(next), next, "%s",
                           _ownerName);
 
         return OK();
     }
+
+    void reset() { _state.store(_startState, std::memory_order_release); }
 
   private:
     const char *_ownerName;

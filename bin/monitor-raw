@@ -1,0 +1,29 @@
+#!/bin/bash
+
+if [ -z "$1" ]; then
+    echo "Usage: $0 <port> [baud]"
+    exit 1
+fi
+
+case $1 in
+0)
+    export DEV=/dev/cu.usbmodem01234567891
+    ;;
+1)
+    export DEV=/dev/cu.usbmodem01234567893
+    ;;
+*)
+    echo "Invalid port number: $1"
+    exit 1
+    ;;
+esac
+
+BAUD="${2:-921600}"
+
+if [ "${BAUD}" = "h" ]; then
+    BAUD=921600
+elif [ "${BAUD}" = "l" ]; then
+    BAUD=115200
+fi
+
+pio device monitor -b "${BAUD}" --port "$DEV" --raw

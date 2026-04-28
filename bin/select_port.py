@@ -172,12 +172,13 @@ def main() -> None:
 
 try:
     globals()["Import"]("env")
-except (ImportError, KeyError, NameError):
+except ImportError, KeyError, NameError:
     eval_output = True
 
 if (
     "COMMAND_LINE_TARGETS" not in globals()
     or "upload" in globals()["COMMAND_LINE_TARGETS"]
     or "uploadfs" in globals()["COMMAND_LINE_TARGETS"]
+    or "reset" in globals()["COMMAND_LINE_TARGETS"]
 ):
     main()

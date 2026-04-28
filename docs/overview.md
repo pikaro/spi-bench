@@ -46,6 +46,8 @@ organized as follows:
 - `include/Platform/` and `include/*/detail/platform/`: platform selection and
     platform-specific implementations
 - `include/Generated/Wire/`: generated wire-format support code
+- `include/Wire/Rs485/`: point-to-point RS485 wire layer; see
+    [wire-rs485.md](wire-rs485.md)
 - `src/master/`, `src/slave/`, `src/listener/`: environment-specific execution
     roots selected by build configuration
 - `bin/`: project helper scripts used during build and code generation

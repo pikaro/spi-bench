@@ -37,13 +37,21 @@ struct UartConfig {
         if (maxReadLen == 0) {
             return false;
         }
+        if (uartNumber > 0) {
+            if (!pins.txPin.has_value() || !pins.rxPin.has_value()) {
+                return false;
+            }
+        }
         return true;
     }
 
     [[nodiscard]] constexpr uint32_t timeoutFromBytes(size_t len) const {
-        return (10     // 8N1 framing = 10 bits per byte
-                * 1000 // Convert to ms
-                / static_cast<uint32_t>(baudRate)) // Time per byte in ms
-               * static_cast<uint32_t>(len);
+        if (len == 0) {
+            return 0;
+        }
+        constexpr uint32_t bitsPerByte = 10; // 8N1 framing
+        const auto baud = static_cast<uint32_t>(baudRate);
+        const auto bitMs = bitsPerByte * 1000 * static_cast<uint32_t>(len);
+        return (bitMs + baud - 1) / baud;
     }
 };

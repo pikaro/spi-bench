@@ -111,6 +111,7 @@ inline constexpr LogComponent logComponent = LogComponent::System;
 
 struct LogRecord {
     uint32_t ts;
+    uint32_t tsSynced;
     LogComponent component;
     LogLevel level;
     std::array<char, logMaxLength> msg;

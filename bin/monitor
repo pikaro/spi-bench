@@ -10,10 +10,23 @@ fi
 ENV="$1"
 BAUD="${2:-921600}"
 
+if [ "${BAUD}" = "h" ]; then
+    BAUD=921600
+elif [ "${BAUD}" = "l" ]; then
+    BAUD=115200
+fi
+
 GIT_ROOT="$(git rev-parse --show-toplevel)"
 . "${GIT_ROOT}/.venv/bin/activate"
 
 eval "$("${BASH_SOURCE%/*}/select_port.py" "$ENV")"
+
+if [ "${RESET:-}" = "true" ]; then
+    pio run -e "${ENV}" --target "reset"
+elif [ "${UPLOAD:-}" = "true" ]; then
+    pio run -e "${ENV}" --target "upload"
+fi
+
 pio device monitor -b "${BAUD}" --raw --port "$UPLOAD_PORT"
 
 # --filter "exclude timestamp" --filter "exclude level" --filter "exclude source" --filter "exclude line"

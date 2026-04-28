@@ -24,6 +24,10 @@ struct Sequence {
             std::memory_order_acquire);
     }
 
+    void reset(uint8_t num = 0) {
+        _sequenceNumber.store(num, std::memory_order_release);
+    }
+
   private:
     std::atomic<uint8_t> _sequenceNumber = 0;
 };

@@ -20,13 +20,15 @@
 namespace Totem::Wire::Rs485::detail {
 
 using Totem::Wire::detail::Sequence;
-static Sequence sequence{};
+inline Sequence sequence{};
 
 enum class FrameType : uint8_t {
     Data = 0x01,
     Hello = 0x02,
-    Start = 0x03,
-    Stop = 0x04,
+    Request = 0x03,
+    Response = 0x04,
+    Poll = 0x05,
+    Heartbeat = 0x06,
     Ack = 0x07,
     Nack = 0x08,
 };
@@ -38,36 +40,42 @@ static_assert(sizeof(uint16_t) == 2, "uint16_t must be 2 bytes");
 struct Header {
     static constexpr uint8_t preamble = 0xAA;
     FrameType type;
+    PayloadType payloadType;
     uint8_t sequenceNumber;
+    uint8_t responseTo;
     uint16_t payloadLength;
     uint8_t crc8;
 
     static constexpr size_t _headerCheckedSize =
-        sizeof(preamble) + sizeof(type) + sizeof(sequenceNumber) +
-        sizeof(payloadLength);
+        sizeof(preamble) + sizeof(type) + sizeof(payloadType) +
+        sizeof(sequenceNumber) + sizeof(responseTo) + sizeof(payloadLength);
     static constexpr size_t headerSize = _headerCheckedSize + sizeof(crc8);
 
     // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-    static Header make(FrameType type, uint16_t payloadLength) {
+    static Header make(FrameType type, PayloadType payloadType,
+                       uint16_t payloadLength, uint8_t responseTo = 0) {
         Header frame{};
         frame.type = type;
+        frame.payloadType = payloadType;
         frame.sequenceNumber = sequence.next();
+        frame.responseTo = responseTo;
         frame.payloadLength = payloadLength;
         frame.crc8 = frame.crcSum();
         return frame;
     }
 
-    static Header hello() { return make(FrameType::Hello, 0); }
+    static Header hello(uint8_t responseTo = 0) {
+        return make(FrameType::Hello, PayloadType::Raw, 0, responseTo);
+    }
 
-    static Header start() { return make(FrameType::Start, 0); }
+    static Header ack(const Header &received) {
+        return make(FrameType::Ack, received.payloadType, 0,
+                    received.sequenceNumber);
+    }
 
-    static Header stop() { return make(FrameType::Stop, 0); }
-
-    static std::expected<Header, ReturnCode> fromRequest(WriteRequest req) {
-        FAIL_IF(!req.validate(),
-                std::unexpected(ERR(CoreError, InvalidArgument)),
-                "Invalid write request for frame");
-        return make(FrameType::Data, static_cast<uint16_t>(req.data.size()));
+    static Header nack(const Header &received) {
+        return make(FrameType::Nack, received.payloadType, 0,
+                    received.sequenceNumber);
     }
 
     [[nodiscard]] std::array<uint8_t, _headerCheckedSize>
@@ -75,7 +83,9 @@ struct Header {
         return {
             preamble,
             static_cast<uint8_t>(type),
+            static_cast<uint8_t>(payloadType),
             sequenceNumber,
+            responseTo,
             static_cast<uint8_t>(payloadLength & 0xFF),
             static_cast<uint8_t>((payloadLength >> 8) & 0xFF),
         };
@@ -85,7 +95,9 @@ struct Header {
         return {
             preamble,
             static_cast<uint8_t>(type),
+            static_cast<uint8_t>(payloadType),
             sequenceNumber,
+            responseTo,
             static_cast<uint8_t>(payloadLength & 0xFF),
             static_cast<uint8_t>((payloadLength >> 8) & 0xFF),
             crc8,
@@ -98,16 +110,18 @@ struct Header {
             return std::unexpected(ERR(CoreError, InvalidArgument));
         }
         Header header{};
-        FAIL_IF(header.preamble != bytes[0], std::unexpected(ERR(Corrupted)),
+        FAIL_IF(Header::preamble != bytes[0], std::unexpected(ERR(Corrupted)),
                 "Invalid frame preamble: expected 0x%02X but got 0x%02X",
-                header.preamble, bytes[0]);
+                Header::preamble, bytes[0]);
         header.type = static_cast<FrameType>(bytes[1]);
-        header.sequenceNumber = bytes[2];
+        header.payloadType = static_cast<PayloadType>(bytes[2]);
+        header.sequenceNumber = bytes[3];
+        header.responseTo = bytes[4];
         header.payloadLength =
-            static_cast<uint16_t>(static_cast<uint16_t>(bytes[3]) |
-                                  (static_cast<uint16_t>(bytes[4]) << 8));
-        header.crc8 = bytes[5];
-        FAIL_IF_ERR_FWD_UNEXPECTED(header.validateReceived(),
+            static_cast<uint16_t>(static_cast<uint16_t>(bytes[5]) |
+                                  (static_cast<uint16_t>(bytes[6]) << 8));
+        header.crc8 = bytes[7];
+        FAIL_IF_ERR_FWD_UNEXPECTED(header.validateCrc(),
                                    "Failed to validate received frame header");
         return header;
     }
@@ -119,12 +133,9 @@ struct Header {
         return CRC::Calculate(bytes.data(), bytes.size(), table);
     }
 
-    [[nodiscard]] ReturnCode validateReceived() const {
+    [[nodiscard]] ReturnCode validateCrc() const {
         if (preamble != 0xAA) {
             return ERR(Corrupted);
-        }
-        if (!sequence.received(sequenceNumber)) {
-            return ERR(SequenceError);
         }
         if (crcSum() != crc8) {
             return ERR(CrcError);
@@ -132,20 +143,11 @@ struct Header {
         return OK();
     }
 
-    [[nodiscard]] constexpr std::optional<FrameType>
-    expectedResponseType() const {
-        switch (type) {
-        case FrameType::Hello:
-            return FrameType::Hello;
-        case FrameType::Data:
-            return FrameType::Ack;
-        case FrameType::Start:
-        case FrameType::Stop:
-        case FrameType::Ack:
-        case FrameType::Nack:
-        default:
-            return std::nullopt;
+    [[nodiscard]] ReturnCode validateSequence() const {
+        if (!sequence.received(sequenceNumber)) {
+            return ERR(SequenceError);
         }
+        return OK();
     }
 };
 

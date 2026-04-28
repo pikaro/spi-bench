@@ -5,10 +5,10 @@
 #include "Macros/internal/Error.hpp"
 #include "Macros/internal/Format.hpp"
 #include "Platform/PlatformSelect.hpp"
+#include "Services/Clock.hpp"
 #include "Types/Error.hpp"
 #include <atomic>
 #include <cstdarg>
-#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <optional>
@@ -59,9 +59,7 @@ class LoggingService {
         _backend.store(&backend, std::memory_order_release);
     }
 
-    static ILogger &get() {
-        return *_backend.load(std::memory_order_acquire);
-    }
+    static ILogger &get() { return *_backend.load(std::memory_order_acquire); }
 
     [[nodiscard]] static bool
     loggingFor(LogLevel level,
@@ -117,7 +115,8 @@ class LoggingService {
         }
 
         record = LogRecord{};
-        record.ts = static_cast<uint32_t>(::platform::get_tick());
+        record.ts = ::platform::get_time();
+        record.tsSynced = ClockService::get().nowMs();
         record.component = component;
         record.level = level;
 

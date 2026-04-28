@@ -127,7 +127,7 @@ class ConsoleOutput : public HasLifecycle<ConsoleOutput, ConsoleConfig>,
         std::array<char, maxFormattedSize> buf{};
 
         static constexpr char logFmt[] =
-            "%s%s%s (%s%" PRIu32 "%s) <%s%s%s>: %s%s%s\n";
+            "%s%s%s (%s%" PRIu32 "%s) (%s%" PRIu32 "%s) <%s%s%s>: %s%s%s\n";
 
         Color rst = Color::None;
         Color tsColor = Color::None;
@@ -149,11 +149,12 @@ class ConsoleOutput : public HasLifecycle<ConsoleOutput, ConsoleConfig>,
         const auto *lvColorS = log_color_to_string(lvColor);
         const auto *msgColorS = log_color_to_string(msgColor);
 
-        int num = std::snprintf(buf.data(), buf.size(), logFmt, lvColorS,
-                                log_level_to_string(record.level), rstS,
-                                tsColorS, record.ts, rstS, tagColorS,
-                                log_component_to_string(record.component), rstS,
-                                msgColorS, record.msg.data(), rstS);
+        int num =
+            std::snprintf(buf.data(), buf.size(), logFmt, lvColorS,
+                          log_level_to_string(record.level), rstS, tsColorS,
+                          record.ts, rstS, tsColorS, record.tsSynced, rstS,
+                          tagColorS, log_component_to_string(record.component),
+                          rstS, msgColorS, record.msg.data(), rstS);
 
         if (num < 0) {
             return ERR(CoreError, OperationFailed);
@@ -177,15 +178,19 @@ class ConsoleOutput : public HasLifecycle<ConsoleOutput, ConsoleConfig>,
     static ReturnCode _onEnd() { return OK(); }
 
     static constexpr size_t maxFormattedSize =
-        10 + // Timestamp max length in characters (assuming 32-bit unsigned
-             // int)
-        2 +  // Space and bracket open
+        logTagLength +   // Tag max size
+        (2 * (           //
+                 3 +     // Space and brace open / close
+                 10      // Timestamp max length (32b -> 10 digits)
+                 )) +    //
+        2 +              // Space and bracket open
         logLevelLength + // Log level string max length
         3 +              // Bracket close, space, and angle bracket open
-        logTagLength +   // Tag max size
         3 +              // Angle bracket close, colon, and space
         logMaxLength +
-        (LoggingConfig::useColor ? (4 * 2 * 5) : 0); // Message max size
+        (LoggingConfig::useColor
+             ? (5 * 2 * 5) // 5 groups, 2 colors each, 5 chars per color
+             : 0);
 
     LogLevel _logLevel = LogLevel::Info;
     std::array<std::optional<LogLevel>, magic_enum::enum_count<LogComponent>()>

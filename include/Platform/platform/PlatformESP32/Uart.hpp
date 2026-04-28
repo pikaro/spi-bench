@@ -88,6 +88,14 @@ class Uart {
         return OK();
     }
 
+    std::expected<size_t, ReturnCode> available() const {
+        size_t available = 0;
+        FAIL_IF_ESP(uart_get_buffered_data_len(_uartNumber(), &available),
+                    std::unexpected(ERR(OperationFailed)),
+                    "Failed to get UART buffered data length");
+        return available;
+    }
+
     std::expected<size_t, ReturnCode>
     read(std::span<std::byte> buffer,
          std::optional<uint32_t> timeoutMs = std::nullopt) {
@@ -116,6 +124,29 @@ class Uart {
 
         if (ret == 0) {
             return std::unexpected(ERR(NotFound));
+        }
+
+        return static_cast<size_t>(ret);
+    }
+
+    std::expected<size_t, ReturnCode> readExact(std::span<std::byte> buffer,
+                                                uint32_t timeoutMs) {
+        if (buffer.empty()) {
+            return std::unexpected(ERR(InvalidArgument));
+        }
+
+        auto ret = uart_read_bytes(_uartNumber(), buffer.data(), buffer.size(),
+                                   pdMS_TO_TICKS(timeoutMs));
+
+        FAIL_IF(ret < 0, std::unexpected(ERR(OperationFailed)),
+                "Failed to read from UART");
+
+        if (ret == 0) {
+            return std::unexpected(ERR(Timeout));
+        }
+
+        if (ret != static_cast<int>(buffer.size())) {
+            return std::unexpected(ERR(Timeout));
         }
 
         return static_cast<size_t>(ret);

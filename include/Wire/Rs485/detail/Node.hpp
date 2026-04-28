@@ -5,20 +5,26 @@
 #include "Concepts/Base.hpp"
 #include "Macros/Facade.hpp"
 #include "Platform/PlatformSelect.hpp"
-#include "Platform/platform/PlatformESP32/Uart.hpp"
 #include "Queue/Facade.hpp"
 #include "StaticConfig/UartNode.hpp"
+#include "TaskController/Interfaces/Config.hpp"
 #include "TaskController/Interfaces/IRegistry.hpp"
 #include "TaskController/Interfaces/TaskHooks.hpp"
+#include "TaskController/Interfaces/Types.hpp"
 #include "Types/Error.hpp"
 #include "Types/Signal.hpp"
 #include "Types/Uart.hpp"
 #include "Wire/Interfaces/Request.hpp"
+#include "Wire/Rs485/detail/Pdu.hpp"
 #include "Wire/Rs485/detail/Transceiver.hpp"
 #include "Wire/Rs485/detail/Types.hpp"
+#include <array>
 #include <atomic>
 #include <concepts>
+#include <cstddef>
 #include <cstdint>
+#include <expected>
+#include <span>
 
 namespace Totem::Wire::Rs485::detail {
 
@@ -26,20 +32,22 @@ template <class Derived, typename ConfT>
 class Node : public HasLifecycle<Derived, ConfT>,
              public HasTaskController<Derived, ConfT> {
 
-    struct RxQueueItem {
-        ReadRequestHandle handle;
-        ReadRequest request;
-    };
-
     struct TxQueueItem {
         WriteRequestHandle handle;
         WriteRequest request;
     };
 
+    struct ExchangeQueueItem {
+        ExchangeRequestHandle handle;
+        TransactionKind kind;
+        ExchangeRequest request;
+    };
+
     static_assert(
         requires(ConfT &obj) {
             { obj.uartConfig } -> std::same_as<UartConfig &>;
-        }, "Node type must have a uartConfig member of type UartConfig");
+            { obj.task } -> std::same_as<Totem::TaskController::Config &>;
+        }, "Node config must provide uartConfig and task members");
 
   public:
     DELETE_COPY(Node)
@@ -47,27 +55,51 @@ class Node : public HasLifecycle<Derived, ConfT>,
 
     explicit Node(TaskController::IRegistry &registry)
         : HasTaskController<Derived, ConfT>(registry),
-          _transceiver(this->name, this->_transceiverMode) {}
+          _transceiver(Derived::name) {}
 
     ReturnCode send(const WriteRequest &request) {
         FAIL_IF_NOT(ready(), ERR(CoreError, InvalidState),
-                    "Cannot send data before node is synced in %s", this->name);
+                    "Cannot send data before node is synced in %s",
+                    Derived::name);
         FAIL_IF_ERR_FWD(_enqueueSend(request),
-                        "Failed to send write request for %s", this->name);
+                        "Failed to enqueue write request for %s",
+                        Derived::name);
         return OK();
     }
 
-    ReturnCode read(ReadRequest &request) {
+    ReturnCode exchange(const ExchangeRequest &request) {
         FAIL_IF_NOT(ready(), ERR(CoreError, InvalidState),
-                    "Cannot read data before node is synced in %s", this->name);
-        FAIL_IF_ERR_FWD(_enqueueRead(request),
-                        "Failed to send read request for %s", this->name);
+                    "Cannot exchange before node is synced in %s",
+                    Derived::name);
+        FAIL_IF_ERR_FWD(_enqueueExchange(TransactionKind::Request, request),
+                        "Failed to enqueue exchange request for %s",
+                        Derived::name);
         return OK();
+    }
+
+    ReturnCode poll(const ExchangeRequest &request) {
+        FAIL_IF_NOT(ready(), ERR(CoreError, InvalidState),
+                    "Cannot poll before node is synced in %s", Derived::name);
+        FAIL_IF_ERR_FWD(_enqueueExchange(TransactionKind::Poll, request),
+                        "Failed to enqueue poll request for %s", Derived::name);
+        return OK();
+    }
+
+    ReturnCode registerHandler(const FrameHandler &handler) {
+        FAIL_IF(!handler.validate(), ERR(CoreError, InvalidArgument),
+                "Invalid RS485 frame handler registration for %s",
+                Derived::name);
+        for (auto &slot : _handlers) {
+            if (slot.owner == nullptr) {
+                slot = handler;
+                return OK();
+            }
+        }
+        return ERR(CoreError, OutOfMemory);
     }
 
     [[nodiscard]] bool ready() const {
-        return static_cast<uint8_t>(_state.load(std::memory_order_acquire)) >=
-               static_cast<uint8_t>(NodeState::Synced);
+        return _state.load(std::memory_order_acquire) == NodeState::Synced;
     }
 
   protected:
@@ -76,21 +108,20 @@ class Node : public HasLifecycle<Derived, ConfT>,
                this->config().uartConfig.uartNumber,
                static_cast<uint32_t>(this->config().uartConfig.baudRate));
 
-        auto taskHooks = TaskController::TaskHooks::bind(*this);
+        FAIL_IF(this->config().uartConfig.uartNumber == 0,
+                ERR(CoreError, InvalidArgument), "UART number 0 is reserved");
 
-        FAIL_IF_ERR_FWD(_beginTaskController(this->config().task),
-                        "Failed to begin task controller for %s", this->name);
+        auto taskHooks = TaskController::TaskHooks::bind(this->derived());
+
+        FAIL_IF_ERR_FWD(this->_beginTaskController(this->config().task),
+                        "Failed to begin task controller for %s",
+                        Derived::name);
 
         auto taskAddResult =
             this->_taskController.addTask(this->config().task.name, taskHooks);
         FAIL_IF_UNEXPECTED(task, taskAddResult, taskAddResult.error(),
-                           "Failed to bind task hooks for %s", this->name);
-
-        auto rxQueueResult = Totem::Queue::Platform::create(_rxQueueStorage);
-        FAIL_IF_UNEXPECTED_FWD(rxQueue, rxQueueResult,
-                               "Failed to create Rx queue: " ERR_FMT,
-                               ERR_ARG(rxQueueResult.error()));
-        _rxQueue = rxQueue;
+                           "Failed to bind task hooks for %s", Derived::name);
+        _task = task;
 
         auto txQueueResult = Totem::Queue::Platform::create(_txQueueStorage);
         FAIL_IF_UNEXPECTED_FWD(txQueue, txQueueResult,
@@ -98,115 +129,470 @@ class Node : public HasLifecycle<Derived, ConfT>,
                                ERR_ARG(txQueueResult.error()));
         _txQueue = txQueue;
 
+        auto exchangeQueueResult =
+            Totem::Queue::Platform::create(_exchangeQueueStorage);
+        FAIL_IF_UNEXPECTED_FWD(exchangeQueue, exchangeQueueResult,
+                               "Failed to create exchange queue: " ERR_FMT,
+                               ERR_ARG(exchangeQueueResult.error()));
+        _exchangeQueue = exchangeQueue;
+
         FAIL_IF_ERR_FWD(_transceiver.init(this->config().uartConfig),
-                        "Failed to initialize transceiver for %s", this->name);
+                        "Failed to initialize transceiver for %s",
+                        Derived::name);
 
         FAIL_IF_ERR_FWD(
             this->_taskController.startTask(task, this->config().task),
-            "Failed to start task for %s", this->name);
+            "Failed to start task for %s", Derived::name);
         return OK();
     }
 
     ReturnCode _onEnd() {
         auto ret = OK();
-
-        if (auto result =
-                ::platform::Uart::deinit(this->config().uartConfig.uartNumber);
-            !result.ok()) {
-            _log_e("Failed to deinitialize UART for RS485 node: " ERR_FMT,
-                   ERR_ARG(result));
-            ret.combine(result);
-        }
-
-        if (_rxQueue != nullptr) {
-            ret.combine(Totem::Queue::Platform::destroy(_rxQueue));
-            _rxQueue = nullptr;
-        }
+        _task = 0;
 
         if (_txQueue != nullptr) {
             ret.combine(Totem::Queue::Platform::destroy(_txQueue));
             _txQueue = nullptr;
         }
 
-        if (auto result = this->_transceiver.deinit(); !result.ok()) {
+        if (_exchangeQueue != nullptr) {
+            ret.combine(Totem::Queue::Platform::destroy(_exchangeQueue));
+            _exchangeQueue = nullptr;
+        }
+
+        if (auto result = _transceiver.deinit(); !result.ok()) {
             _log_e("Failed to deinitialize transceiver for %s: " ERR_FMT,
-                   this->name, ERR_ARG(result));
+                   Derived::name, ERR_ARG(result));
             ret.combine(result);
         }
 
         return ret;
     }
 
-    ReturnCode _enqueueSend(const WriteRequest &request) {
-        FAIL_IF_INACTIVE_ERR("Uart not initialized for writing in %s",
-                             this->name);
-        FAIL_IF(!request.validate(), ERR(CoreError, InvalidArgument),
-                "Invalid write request");
-        _log_d("Sending frame with payload length %u", request.data.size());
-        FAIL_IF_ERR_FWD(Totem::Queue::Platform::send(_txQueue, &request),
-                        "Failed to send write request to Tx queue for %s",
-                        this->name);
-        FAIL_IF_ERR_FWD(_wake(),
-                        "Failed to wake task for new data in Tx queue for %s",
-                        this->name);
+    ReturnCode _runReadyTransactions() {
+        if (!ready()) {
+            return OK();
+        }
+        FAIL_IF_ERR_FWD(_pollIncoming(), "Failed to poll incoming frame for %s",
+                        Derived::name);
+        FAIL_IF_ERR_FWD(_heartbeatStep(), "Failed heartbeat step for %s",
+                        Derived::name);
+        if (!ready() || _heartbeatAwaitingResponse) {
+            return OK();
+        }
+        FAIL_IF_ERR_FWD(_processOneSend(), "Failed to process send for %s",
+                        Derived::name);
+        FAIL_IF_ERR_FWD(_processOneExchange(),
+                        "Failed to process exchange for %s", Derived::name);
+        FAIL_IF_ERR_FWD(_pollIncoming(), "Failed to poll incoming frame for %s",
+                        Derived::name);
+        return OK();
     }
 
-    ReturnCode _enqueueRead(ReadRequest &request) {
-        FAIL_IF_INACTIVE_ERR("Uart not initialized for reading in %s",
-                             this->name);
-        FAIL_IF(!request.validate(), ERR(CoreError, InvalidArgument),
-                "Invalid read request");
-        _log_d("Reading frame with max payload length %u", request.data.size());
-        FAIL_IF_ERR_FWD(Totem::Queue::Platform::send(_rxQueue, &request),
-                        "Failed to send read request to Rx queue for %s",
-                        this->name);
-        FAIL_IF_ERR_FWD(_wake(),
-                        "Failed to wake task for new data in Rx queue for %s",
-                        this->name);
+    ReturnCode _pollIncoming() {
+        auto headerResult = _transceiver.pollHeader();
+        if (!headerResult) {
+            if (headerResult.error() == ERR(CoreError, NotFound)) {
+                return OK();
+            }
+            if (headerResult.error() == ERR(WireError, Corrupted) ||
+                headerResult.error() == ERR(WireError, CrcError)) {
+                _log_w("Discarding invalid RS485 input for %s: " ERR_FMT,
+                       Derived::name, ERR_ARG(headerResult.error()));
+                (void)_transceiver.discardRx();
+                _resetConnection("corrupted input");
+                return OK();
+            }
+            return headerResult.error();
+        }
+        auto header = *headerResult;
+        if (header.type != FrameType::Hello) {
+            auto sequenceResult = header.validateSequence();
+            if (!sequenceResult.ok()) {
+                _log_w("Invalid RS485 sequence in %s; resetting link: "
+                       ERR_FMT,
+                       Derived::name, ERR_ARG(sequenceResult));
+                (void)_transceiver.discardRx();
+                _resetConnection("sequence error");
+                return OK();
+            }
+        }
+
+        switch (header.type) {
+        case FrameType::Hello:
+            return this->derived()._onHello(header);
+        case FrameType::Heartbeat:
+            return _receiveHeartbeat(header);
+        case FrameType::Data:
+            return _receiveData(header);
+        case FrameType::Request:
+        case FrameType::Poll:
+            return _receiveRequest(header);
+        case FrameType::Ack:
+        case FrameType::Nack:
+        case FrameType::Response:
+        default:
+            return ERR(CoreError, InvalidState);
+        }
+    }
+
+    ReturnCode _sendHello(uint8_t responseTo = 0) {
+        Header sentHeader{};
+        FAIL_IF_ERR_FWD(_transceiver.sendControl(FrameType::Hello, responseTo,
+                                                 PayloadType::Raw, &sentHeader),
+                        "Failed to send RS485 hello for %s", Derived::name);
+        _lastHelloSequence = sentHeader.sequenceNumber;
+        return OK();
     }
 
     ReturnCode _wake() {
-        FAIL_IF_ERR_FWD(this->_taskController.notifyTask(_task, Signal::Ping),
-                        "Failed to notify task of new data in for %s",
-                        this->name);
+        FAIL_IF(_task == 0, ERR(CoreError, InvalidState),
+                "Cannot wake unregistered RS485 task for %s", Derived::name);
+        return this->_taskController.signalTask(_task, Signal::Ping);
+    }
+
+    ReturnCode _heartbeatStep() {
+        const auto nowMs = ::platform::get_time();
+        if constexpr (Derived::sendsHeartbeat) {
+            if (static_cast<uint32_t>(nowMs - _lastHeartbeatSentMs) <
+                heartbeatIntervalMs) {
+                return OK();
+            }
+
+            if (_heartbeatAwaitingResponse) {
+                ++_missedHeartbeats;
+                _log_w("Missed RS485 heartbeat %u/%u for %s",
+                       _missedHeartbeats, maxMissedHeartbeats, Derived::name);
+                if (_missedHeartbeats >= maxMissedHeartbeats) {
+                    _resetConnection("heartbeat timeout");
+                    return OK();
+                }
+            }
+
+            Header sentHeader{};
+            FAIL_IF_ERR_FWD(_transceiver.sendControl(
+                                FrameType::Heartbeat, 0, PayloadType::Raw,
+                                &sentHeader),
+                            "Failed to send RS485 heartbeat for %s",
+                            Derived::name);
+            _lastHeartbeatSentMs = nowMs;
+            _heartbeatAwaitingResponse = true;
+            _heartbeatSequence = sentHeader.sequenceNumber;
+        } else {
+            if (_lastHeartbeatReceivedMs == 0) {
+                return OK();
+            }
+            if (static_cast<uint32_t>(nowMs - _lastHeartbeatReceivedMs) >=
+                heartbeatIntervalMs * (maxMissedHeartbeats + 1)) {
+                _resetConnection("heartbeat timeout");
+            }
+        }
         return OK();
     }
 
-    static ReturnCode _ignoreWriteCallback(const WriteResult &result) {
-        auto *self = static_cast<Derived *>(result.owner);
-        return self->_onWriteComplete(result);
+    void _resetConnection(const char *reason) {
+        _log_w("Resetting RS485 connection for %s: %s", Derived::name, reason);
+        _state.store(NodeState::Initial, std::memory_order_release);
+        _heartbeatAwaitingResponse = false;
+        _heartbeatSequence = 0;
+        _missedHeartbeats = 0;
+        _lastHeartbeatReceivedMs = 0;
+        _lastHeartbeatSentMs = 0;
+        _lastHelloSequence = 0;
     }
 
-    ReturnCode _ignoreOnWriteComplete(const WriteResult &result) {
-        FAIL_IF_ERR_FWD(result.result, "Write request failed for %s",
-                        this->name);
-        _log_d("Write request completed successfully, bytes written: %u",
-               result.length);
-        return OK();
-    }
-
-    static ReturnCode _readCallback(const ReadResult &result) {
-        auto *self = static_cast<Derived *>(result.owner);
-        return self->_onReadComplete(result);
+    void _deferHeartbeat() {
+        _lastHeartbeatSentMs = ::platform::get_time();
+        _lastHeartbeatReceivedMs = _lastHeartbeatSentMs;
+        _heartbeatAwaitingResponse = false;
+        _heartbeatSequence = 0;
+        _missedHeartbeats = 0;
     }
 
     static ReturnCode _onTaskNotify(Signal /*signal*/) { return OK(); }
+
+    std::atomic<NodeState> _state{NodeState::Initial};
+    uint8_t _lastHelloSequence = 0;
+
+    static constexpr uint32_t heartbeatIntervalMs = 500;
+    static constexpr uint32_t transactionResponseTimeoutMs = 50;
+    static constexpr uint8_t maxMissedHeartbeats = 3;
 
     static const LogComponent logComponent =
         Totem::Wire::Rs485::detail::logComponent;
 
   private:
-    platform::TaskHandle _task = nullptr;
+    ReturnCode _receiveHeartbeat(const Header &header) {
+        FAIL_IF(header.payloadLength != 0, ERR(CoreError, InvalidData),
+                "RS485 heartbeat must not carry a payload in %s",
+                Derived::name);
 
-    std::atomic<NodeState> _state{NodeState::Initial};
+        const auto nowMs = ::platform::get_time();
+        if (header.responseTo != 0) {
+            if constexpr (Derived::sendsHeartbeat) {
+                if (!_heartbeatAwaitingResponse ||
+                    header.responseTo != _heartbeatSequence) {
+                    return ERR(CoreError, InvalidState);
+                }
+                _heartbeatAwaitingResponse = false;
+                _missedHeartbeats = 0;
+                _lastHeartbeatReceivedMs = nowMs;
+                return OK();
+            } else {
+                return ERR(CoreError, InvalidState);
+            }
+        }
 
-    Totem::Queue::Platform::Storage<RxQueueItem, UartNodeConfig::rxQueueSize>
-        _rxQueueStorage;
-    Totem::Queue::Handle _rxQueue = nullptr;
+        _lastHeartbeatReceivedMs = nowMs;
+        if constexpr (!Derived::sendsHeartbeat) {
+            FAIL_IF_ERR_FWD(
+                _transceiver.sendControl(FrameType::Heartbeat,
+                                         header.sequenceNumber,
+                                         PayloadType::Raw),
+                "Failed to send RS485 heartbeat response for %s",
+                Derived::name);
+        }
+        return OK();
+    }
+
+    ReturnCode _enqueueSend(const WriteRequest &request) {
+        FAIL_IF_INACTIVE_ERR("UART not initialized for writing in %s",
+                             Derived::name);
+        FAIL_IF(!request.validate(), ERR(CoreError, InvalidArgument),
+                "Invalid write request");
+        auto item = TxQueueItem{
+            .handle = _nextWriteHandle++,
+            .request = request,
+        };
+        FAIL_IF_ERR_FWD(Totem::Queue::Platform::send(_txQueue, &item),
+                        "Failed to send write request to Tx queue for %s",
+                        Derived::name);
+        return _wake();
+    }
+
+    ReturnCode _enqueueExchange(TransactionKind kind,
+                                const ExchangeRequest &request) {
+        FAIL_IF_INACTIVE_ERR("UART not initialized for exchange in %s",
+                             Derived::name);
+        FAIL_IF(!request.validate(), ERR(CoreError, InvalidArgument),
+                "Invalid exchange request");
+        auto item = ExchangeQueueItem{
+            .handle = _nextExchangeHandle++,
+            .kind = kind,
+            .request = request,
+        };
+        FAIL_IF_ERR_FWD(
+            Totem::Queue::Platform::send(_exchangeQueue, &item),
+            "Failed to send exchange request to exchange queue for %s",
+            Derived::name);
+        return _wake();
+    }
+
+    ReturnCode _processOneSend() {
+        if (Totem::Queue::Platform::size(_txQueue) == 0) {
+            return OK();
+        }
+        TxQueueItem item{};
+        FAIL_IF_ERR_FWD(Totem::Queue::Platform::receive(_txQueue, &item, 0),
+                        "Failed to receive Tx queue item for %s",
+                        Derived::name);
+
+        Header sentHeader{};
+        auto ret =
+            _transceiver.sendFrame(FrameType::Data, item.request.payloadType,
+                                   item.request.data, 0, &sentHeader);
+        if (!ret.ok()) {
+            return item.request.nack(item.handle, ret);
+        }
+
+        auto responseResult =
+            _transceiver.receiveHeader(transactionResponseTimeoutMs);
+        if (!responseResult) {
+            return item.request.nack(item.handle, responseResult.error());
+        }
+        auto response = *responseResult;
+        auto sequenceResult = response.validateSequence();
+        if (!sequenceResult.ok()) {
+            return item.request.nack(item.handle, sequenceResult);
+        }
+        if (response.responseTo != sentHeader.sequenceNumber ||
+            response.payloadType != item.request.payloadType ||
+            response.payloadLength != 0) {
+            return item.request.nack(item.handle, ERR(CoreError, InvalidState));
+        }
+        if (response.type == FrameType::Nack) {
+            return item.request.nack(item.handle, ERR(WireError, Nack));
+        }
+        if (response.type != FrameType::Ack) {
+            return item.request.nack(item.handle, ERR(CoreError, InvalidState));
+        }
+        return item.request.ack(item.handle,
+                                static_cast<uint16_t>(item.request.data.size()),
+                                ::platform::get_time_us());
+    }
+
+    ReturnCode _processOneExchange() {
+        if (Totem::Queue::Platform::size(_exchangeQueue) == 0) {
+            return OK();
+        }
+        ExchangeQueueItem item{};
+        FAIL_IF_ERR_FWD(
+            Totem::Queue::Platform::receive(_exchangeQueue, &item, 0),
+            "Failed to receive exchange queue item for %s", Derived::name);
+
+        Header sentHeader{};
+        auto frameType = item.kind == TransactionKind::Poll
+                             ? FrameType::Poll
+                             : FrameType::Request;
+        auto ret = _transceiver.sendFrame(frameType, item.request.payloadType,
+                                          item.request.request, 0, &sentHeader);
+        if (!ret.ok()) {
+            return item.request.nack(item.handle, ret);
+        }
+
+        auto responseResult =
+            _transceiver.receiveHeader(transactionResponseTimeoutMs);
+        if (!responseResult) {
+            return item.request.nack(item.handle, responseResult.error());
+        }
+        auto response = *responseResult;
+        auto sequenceResult = response.validateSequence();
+        if (!sequenceResult.ok()) {
+            return item.request.nack(item.handle, sequenceResult);
+        }
+        if (response.responseTo != sentHeader.sequenceNumber ||
+            response.payloadType != item.request.payloadType) {
+            return item.request.nack(item.handle, ERR(CoreError, InvalidState));
+        }
+        if (response.type == FrameType::Nack) {
+            return item.request.nack(item.handle, ERR(WireError, Nack));
+        }
+        if (response.type != FrameType::Response) {
+            return item.request.nack(item.handle, ERR(CoreError, InvalidState));
+        }
+
+        auto payloadResult =
+            _transceiver.receivePayload(response, item.request.response);
+        if (!payloadResult) {
+            return item.request.nack(item.handle, payloadResult.error());
+        }
+        return item.request.ack(item.handle, *payloadResult,
+                                ::platform::get_time_us());
+    }
+
+    ReturnCode _receiveData(const Header &header) {
+        auto payloadResult = _receivePayloadIntoScratch(header);
+        if (!payloadResult) {
+            FAIL_IF_ERR_FWD(
+                _transceiver.sendControl(FrameType::Nack, header.sequenceNumber,
+                                         header.payloadType),
+                "Failed to send RS485 data nack for %s", Derived::name);
+            return OK();
+        }
+
+        auto *handler = _findHandler(header.payloadType);
+        if (handler == nullptr || handler->onData == nullptr) {
+            FAIL_IF_ERR_FWD(
+                _transceiver.sendControl(FrameType::Nack, header.sequenceNumber,
+                                         header.payloadType),
+                "Failed to send RS485 data nack for %s", Derived::name);
+            return OK();
+        }
+
+        auto receivedAtUs = ::platform::get_time_us();
+        auto payload =
+            std::span<const std::byte>(_rxPayload.data(), *payloadResult);
+        auto ret = handler->onData(handler->owner, header.payloadType, payload,
+                                   receivedAtUs);
+        auto reaction = ret.ok() ? FrameType::Ack : FrameType::Nack;
+        FAIL_IF_ERR_FWD(
+            _transceiver.sendControl(reaction, header.sequenceNumber,
+                                     header.payloadType),
+            "Failed to send RS485 data reaction for %s", Derived::name);
+        return OK();
+    }
+
+    ReturnCode _receiveRequest(const Header &header) {
+        auto payloadResult = _receivePayloadIntoScratch(header);
+        if (!payloadResult) {
+            FAIL_IF_ERR_FWD(
+                _transceiver.sendControl(FrameType::Nack, header.sequenceNumber,
+                                         header.payloadType),
+                "Failed to send RS485 request nack for %s", Derived::name);
+            return OK();
+        }
+
+        auto *handler = _findHandler(header.payloadType);
+        if (handler == nullptr || handler->onRequest == nullptr) {
+            FAIL_IF_ERR_FWD(
+                _transceiver.sendControl(FrameType::Nack, header.sequenceNumber,
+                                         header.payloadType),
+                "Failed to send RS485 request nack for %s", Derived::name);
+            return OK();
+        }
+
+        auto receivedAtUs = ::platform::get_time_us();
+        auto request =
+            std::span<const std::byte>(_rxPayload.data(), *payloadResult);
+        auto responseResult =
+            handler->onRequest(handler->owner, header.payloadType, request,
+                               handler->response, receivedAtUs);
+        if (!responseResult) {
+            FAIL_IF_ERR_FWD(_transceiver.sendControl(FrameType::Nack,
+                                                     header.sequenceNumber,
+                                                     header.payloadType),
+                            "Failed to send RS485 request handler nack for %s",
+                            Derived::name);
+            return OK();
+        }
+        auto responseLength = *responseResult;
+
+        return _transceiver.sendFrame(FrameType::Response, header.payloadType,
+                                      handler->response.first(responseLength),
+                                      header.sequenceNumber);
+    }
+
+    std::expected<uint16_t, ReturnCode>
+    _receivePayloadIntoScratch(const Header &header) {
+        FAIL_IF(header.payloadLength > _rxPayload.size(),
+                std::unexpected(ERR(CoreError, InvalidArgument)),
+                "RS485 payload length %u exceeds scratch size %zu for %s",
+                header.payloadLength, _rxPayload.size(), Derived::name);
+        return _transceiver.receivePayload(header, _rxPayload);
+    }
+
+    FrameHandler *_findHandler(PayloadType payloadType) {
+        for (auto &handler : _handlers) {
+            if (handler.owner != nullptr &&
+                handler.payloadType == payloadType) {
+                return &handler;
+            }
+        }
+        return nullptr;
+    }
+
+    Totem::TaskController::RunnerKey _task = 0;
 
     Totem::Queue::Platform::Storage<TxQueueItem, UartNodeConfig::txQueueSize>
         _txQueueStorage;
     Totem::Queue::Handle _txQueue = nullptr;
+
+    Totem::Queue::Platform::Storage<ExchangeQueueItem,
+                                    UartNodeConfig::txQueueSize>
+        _exchangeQueueStorage;
+    Totem::Queue::Handle _exchangeQueue = nullptr;
+
+    std::array<FrameHandler, 4> _handlers{};
+    std::array<std::byte, 256> _rxPayload{};
+
+    WriteRequestHandle _nextWriteHandle = 1;
+    ExchangeRequestHandle _nextExchangeHandle = 1;
+
+    uint32_t _lastHeartbeatSentMs = 0;
+    uint32_t _lastHeartbeatReceivedMs = 0;
+    uint8_t _heartbeatSequence = 0;
+    uint8_t _missedHeartbeats = 0;
+    bool _heartbeatAwaitingResponse = false;
 
     Transceiver _transceiver;
 };
@@ -214,10 +600,6 @@ class Node : public HasLifecycle<Derived, ConfT>,
 template <class Derived> struct NodeContract {
     static_assert(IsNamedEntity<Derived>,
                   "Derived type must be a named entity");
-    static_assert(
-        requires(Derived &obj) {
-            { obj._transceiverMode } -> std::same_as<TransceiverMode>;
-        }, "Derived type must have a _transceiverMode");
 };
 
 } // namespace Totem::Wire::Rs485::detail

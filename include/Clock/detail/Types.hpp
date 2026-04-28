@@ -1,9 +1,12 @@
 #pragma once
 
+#include "Generic/StateMachine.hpp"
 #include "LoggingBackend/Interfaces/Types.hpp"
 #include "Macros/Facade.hpp"
+#include "Platform/PlatformSelect.hpp"
 #include "Support/Math.hpp"
 #include "Types/Error.hpp"
+#include <array>
 #include <atomic>
 #include <cinttypes>
 #include <cstdint>
@@ -16,6 +19,7 @@ using DefaultError = ClockError;
 static constexpr LogComponent logComponent = LogComponent::Clock;
 
 enum class SyncState : uint8_t {
+    Invalid,
     Initial,
     SyncSent,
     SyncReceived,
@@ -23,19 +27,34 @@ enum class SyncState : uint8_t {
     Synced,
 };
 
+constexpr std::array syncStateTransitions{
+    TRANSITION(SyncState, Initial, SyncSent),
+    TRANSITION(SyncState, SyncSent, SyncReceived),
+    TRANSITION(SyncState, SyncReceived, Calibrating),
+    TRANSITION(SyncState, Calibrating, Synced),
+};
+
 struct SyncRequest {
     int64_t sentTime;
 };
 
 struct SyncResponse {
-    int64_t recvTime;
+    int64_t requestReceivedTime;
     int64_t responseSentTime;
-    int64_t responseRecvTime;
 };
 
 struct State {
+    explicit State(void *owner, ReturnCode (*onSyncComplete)(void *) = nullptr)
+        : _owner(owner), _onSyncComplete(onSyncComplete) {}
+
     [[nodiscard]] bool synced() const {
-        return _state.load(std::memory_order_acquire) == SyncState::Synced;
+        return _syncState.is(SyncState::Synced);
+    }
+
+    [[nodiscard]] bool syncing() const {
+        return _syncState.is(SyncState::SyncSent) ||
+               _syncState.is(SyncState::SyncReceived) ||
+               _syncState.is(SyncState::Calibrating);
     }
 
     [[nodiscard]] std::optional<int64_t> drift() const {
@@ -65,40 +84,38 @@ struct State {
     }
 
     [[nodiscard]] std::expected<SyncRequest, ReturnCode> requestSync() {
-        FAIL_IF_NOT_STATE_UNEXPECTED(_state, SyncState::Initial,
-                                     SyncState::SyncSent,
-                                     "Failed to request sync");
+        FAIL_IF_ERR_FWD_UNEXPECTED(_syncState.transitionTo(SyncState::SyncSent),
+                                   "Failed to request sync");
         _sentTime = ::platform::get_time_us();
         return SyncRequest{.sentTime = _sentTime};
     }
 
     ReturnCode receiveSyncResponse(const SyncResponse &response) {
-        FAIL_IF_NOT_STATE(_state, SyncState::SyncSent, SyncState::SyncReceived,
-                          "Failed to receive sync response");
+        FAIL_IF_ERR_FWD(_syncState.transitionTo(SyncState::SyncReceived),
+                        "Failed to receive sync response");
         _recvTime = ::platform::get_time_us();
+        _requestReceivedTime = response.requestReceivedTime;
         _responseSentTime = response.responseSentTime;
-        _responseRecvTime = response.responseRecvTime;
         return OK();
     }
 
     [[nodiscard]] ReturnCode setDrift() {
-        FAIL_IF_NOT_STATE(_state, SyncState::SyncReceived,
-                          SyncState::Calibrating,
-                          "Failed to set drift and complete sync");
+        FAIL_IF_ERR_FWD(_syncState.transitionTo(SyncState::Calibrating),
+                        "Failed to set drift and complete sync");
 
-        FAIL_IF(will_overflow_sub(_recvTime, _sentTime),
+        FAIL_IF(will_overflow_sub(_requestReceivedTime, _sentTime),
                 ERR(ClockError, DriftOverflow),
-                "Drift calculation overflow: recvTime (%" PRId64
+                "Drift calculation overflow: requestReceivedTime (%" PRId64
                 ") - sentTime (%" PRId64 "would overflow",
-                _recvTime, _sentTime);
-        FAIL_IF(will_overflow_sub(_responseSentTime, _responseRecvTime),
+                _requestReceivedTime, _sentTime);
+        FAIL_IF(will_overflow_sub(_responseSentTime, _recvTime),
                 ERR(ClockError, DriftOverflow),
                 "Drift calculation overflow: responseSentTime (%" PRId64
-                ") - responseRecvTime (%" PRId64 ") would overflow",
-                _responseSentTime, _responseRecvTime);
+                ") - recvTime (%" PRId64 ") would overflow",
+                _responseSentTime, _recvTime);
 
-        auto roundTripTime1 = _recvTime - _sentTime;
-        auto roundTripTime2 = _responseSentTime - _responseRecvTime;
+        auto roundTripTime1 = _requestReceivedTime - _sentTime;
+        auto roundTripTime2 = _responseSentTime - _recvTime;
 
         int64_t driftCandidate;
 
@@ -109,34 +126,41 @@ struct State {
 
         _sentTime = 0;
         _recvTime = 0;
+        _requestReceivedTime = 0;
         _responseSentTime = 0;
-        _responseRecvTime = 0;
 
         _drift.store(driftCandidate / 2, std::memory_order_release);
-        _state.store(SyncState::Synced, std::memory_order_release);
+        FAIL_IF_ERR_FWD(_syncState.transitionTo(SyncState::Synced),
+                        "Failed to mark clock synced");
 
+        FAIL_IF_ERR_FWD(_onSyncComplete(_owner),
+                        "Failed to run on sync complete callback");
         return OK();
     }
 
     void reset() {
-        _state.store(SyncState::Initial, std::memory_order_release);
+        _syncState.reset();
         _drift.store(0, std::memory_order_release);
         _sentTime = 0;
         _recvTime = 0;
+        _requestReceivedTime = 0;
         _responseSentTime = 0;
-        _responseRecvTime = 0;
     }
 
   private:
-    std::atomic<SyncState> _state = SyncState::Initial;
+    StateMachine<SyncState, syncStateTransitions> _syncState{
+        "Clock::State", SyncState::Initial, SyncState::Synced};
 
     std::atomic<int64_t> _drift{0};
 
     int64_t _sentTime = 0;
     int64_t _recvTime = 0;
 
+    int64_t _requestReceivedTime = 0;
     int64_t _responseSentTime = 0;
-    int64_t _responseRecvTime = 0;
+
+    void *_owner;
+    ReturnCode (*_onSyncComplete)(void *) = nullptr;
 };
 
 } // namespace Totem::Clock::detail

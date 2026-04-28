@@ -1,11 +1,10 @@
 #pragma once
 
-#include "Platform/PlatformSelect.hpp" // IWYU pragma: export
-#include "Services/Logging.hpp"        // IWYU pragma: export
-#include "LoggingBackend/Interfaces/Types.hpp"           // IWYU pragma: export
-#include <array>                       // IWYU pragma: export
-#include <source_location>             // IWYU pragma: export
-#include <string_view>                 // IWYU pragma: export
+#include "LoggingBackend/Interfaces/Types.hpp" // IWYU pragma: export
+#include "Services/Logging.hpp"                // IWYU pragma: export
+#include <array>                               // IWYU pragma: export
+#include <source_location>                     // IWYU pragma: export
+#include <string_view>                         // IWYU pragma: export
 
 namespace Totem::LoggerBackend::detail {
 

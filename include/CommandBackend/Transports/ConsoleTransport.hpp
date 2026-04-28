@@ -10,7 +10,6 @@
 #include <array>
 #include <cctype>
 #include <cstddef>
-#include <cstdint>
 #include <cstring>
 #include <expected>
 #include <string_view>
@@ -162,7 +161,7 @@ class ConsoleTransport : public ITransport {
         }
     }
 
-    std::array<uint8_t, ConsoleConfig::maxReadLen> _rxChunk{};
+    std::array<std::byte, UartConsoleConfig.maxReadLen> _rxChunk{};
     std::array<char, CommandConfig::maxLineLen + 1> _line{};
     size_t _lineLen = 0;
 

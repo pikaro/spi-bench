@@ -1,15 +1,10 @@
 #pragma once
 
 #include "Macros/Facade.hpp"
-#include "Platform/platform/PlatformESP32/PlatformSelect.hpp"
+#include "Platform/platform/PlatformESP32/Uart.hpp"
 #include "StaticConfig/Console.hpp"
 #include "Types/Error.hpp"
 #include "driver/gpio.h" // IWYU pragma: keep
-#include "driver/uart.h"
-#include "freertos/projdefs.h"
-#include "hal/uart_types.h"
-#include "soc/clk_tree_defs.h"
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -18,100 +13,27 @@
 
 namespace platform {
 
-struct Pins {
-    std::optional<Pin> txPin = std::nullopt;
-    std::optional<Pin> rxPin = std::nullopt;
-    std::optional<Pin> rtsPin = std::nullopt;
-    std::optional<Pin> ctsPin = std::nullopt;
-};
+static inline Uart UartConsole;
 
 struct Console {
-    static ReturnCode init(Pins pins = {}) {
-        const uart_config_t uart_config = {
-            .baud_rate = ::ConsoleConfig::baudRate,
-            .data_bits = UART_DATA_8_BITS,
-            .parity = UART_PARITY_DISABLE,
-            .stop_bits = UART_STOP_BITS_1,
-            .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-            .rx_flow_ctrl_thresh = 122,
-            .source_clk = UART_SCLK_DEFAULT,
-            .flags =
-                {
-                    .allow_pd = 0,
-                    .backup_before_sleep = 0,
-                },
-        };
+    static ReturnCode init() { return UartConsole.init(UartConsoleConfig); }
 
-        FAIL_IF_ESP(
-            uart_driver_install(_uartNumber, 2048,
-                                static_cast<int>(::ConsoleConfig::txBufferSize),
-                                0, nullptr, 0),
-            ERR(OperationFailed), "Failed to install UART driver");
-        FAIL_IF_ESP(uart_param_config(_uartNumber, &uart_config),
-                    ERR(OperationFailed),
-                    "Failed to configure UART parameters");
-        FAIL_IF_ESP(uart_set_pin(_uartNumber, _pinOrNoChange(pins.txPin),
-                                 _pinOrNoChange(pins.rxPin),
-                                 _pinOrNoChange(pins.rtsPin),
-                                 _pinOrNoChange(pins.ctsPin)),
-                    ERR(OperationFailed), "Failed to set UART pins");
-        return OK();
+    static ReturnCode write(std::span<const std::byte> data, bool drain = false,
+                            std::optional<uint32_t> timeoutMs = std::nullopt) {
+        return UartConsole.write(data, drain, timeoutMs);
     }
 
-    static ReturnCode write(const char *data, size_t len, bool flush = false) {
-        auto ret = uart_write_bytes(_uartNumber, data, len);
-        FAIL_IF(ret < 0, ERR(OperationFailed), "Failed to write to UART");
-        if (flush) {
-            auto waitRet = uart_wait_tx_done(_uartNumber, pdMS_TO_TICKS(100));
-            FAIL_IF_ESP(waitRet, ERR(OperationFailed), "Failed to flush UART");
-        }
-        return OK();
+    static ReturnCode waitTxComplete(uint32_t timeoutMs) {
+        return UartConsole.waitTxComplete(timeoutMs);
     }
 
-    static std::expected<size_t, ReturnCode> read(std::span<uint8_t> buffer) {
-        if (buffer.empty()) {
-            return std::unexpected(ERR(InvalidArgument));
-        }
-
-        size_t available = 0;
-        uart_get_buffered_data_len(_uartNumber, &available);
-        if (available == 0) {
-            return std::unexpected(ERR(NotFound));
-        }
-
-        auto requested = std::min(available, buffer.size());
-
-        auto ret = uart_read_bytes(_uartNumber, buffer.data(), requested,
-                                   pdMS_TO_TICKS(100));
-
-        FAIL_IF(ret < 0, std::unexpected(ERR(OperationFailed)),
-                "Failed to read from UART");
-
-        if (ret == 0) {
-            return std::unexpected(ERR(NotFound));
-        }
-
-        return static_cast<size_t>(ret);
+    static std::expected<size_t, ReturnCode>
+    read(std::span<std::byte> buffer,
+         std::optional<uint32_t> timeoutMs = std::nullopt) {
+        return UartConsole.read(buffer, timeoutMs);
     }
 
-    static ReturnCode deinit() {
-        FAIL_IF_ESP(uart_driver_delete(_uartNumber), ERR(OperationFailed),
-                    "Failed to delete UART driver");
-        return OK();
-    }
-
-  private:
-    static int _pinOrNoChange(std::optional<Pin> pin) {
-        if (pin.has_value()) {
-            return static_cast<int>(pin.value());
-        }
-        return GPIO_NUM_0;
-    }
-
-    static_assert(::ConsoleConfig::uartNumber < UART_NUM_MAX,
-                  "UART number must be less than UART_NUM_MAX");
-    static constexpr uart_port_t _uartNumber =
-        static_cast<uart_port_t>(::ConsoleConfig::uartNumber);
+    static ReturnCode deinit() { return UartConsole.deinit(); }
 };
 
 } // namespace platform

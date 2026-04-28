@@ -26,7 +26,8 @@ template <class Derived> class ScopedMutexGuard final {
         if (!Platform::can_take_mutex(_name, _handle)) {
             // NOTE: Can NOT record failure here! Recording a failure metric
             //       requires taking the mutex
-            FAIL_VOID("Mutex %s cannot be taken by current task", _name);
+            FAIL_VOID("Mutex %s cannot be taken by %s", _name,
+                      ::platform::current_task_name());
         }
 
         auto takeResult = Platform::take_mutex(_handle, ticksToWait);
@@ -72,9 +73,6 @@ template <class Derived> class ScopedMutexGuard final {
         if ((_handle != nullptr) && _acquired) {
             (void)Platform::give_mutex(_handle);
             _acquired = false;
-            const char *name = Derived::name;
-            _log_d("%s: Mutex released by %s", name,
-                   Platform::current_task_name());
         }
     }
 

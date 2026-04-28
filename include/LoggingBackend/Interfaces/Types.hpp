@@ -44,6 +44,9 @@ enum class LogComponent : uint8_t {
     Command,
     TaskControllerRegistry,
     Output,
+    Rs485,
+    Spi,
+    Clock,
 };
 
 constexpr const char *log_component_to_string(LogComponent component) {
@@ -62,6 +65,12 @@ constexpr const char *log_component_to_string(LogComponent component) {
         return "tcr";
     case LogComponent::Output:
         return "out";
+    case LogComponent::Rs485:
+        return "rs4";
+    case LogComponent::Spi:
+        return "spi";
+    case LogComponent::Clock:
+        return "clk";
     case LogComponent::Unknown:
     default:
         return "???";
@@ -72,6 +81,7 @@ constexpr Color log_component_to_color(LogComponent component) {
     switch (component) {
     case LogComponent::System:
     case LogComponent::Output:
+    case LogComponent::Clock:
         return Color::Blue;
 
     case LogComponent::Monitoring:
@@ -86,6 +96,10 @@ constexpr Color log_component_to_color(LogComponent component) {
 
     case LogComponent::TaskControllerRegistry:
         return Color::Magenta;
+
+    case LogComponent::Rs485:
+    case LogComponent::Spi:
+        return Color::Red;
 
     case LogComponent::Unknown:
     default:

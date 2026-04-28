@@ -1,20 +1,19 @@
 #pragma once
 
-#include "Platform/PlatformSelect.hpp"
+#include "Types/Uart.hpp"
 
 namespace Totem::Wire::Rs485::detail {
 
-struct BaseConfig {
-    Pin txPin;
-    Pin rxPin;
-};
-
 struct MasterConfig {
-    BaseConfig base;
+    UartConfig uartConfig;
+
+    [[nodiscard]] bool validate() const { return uartConfig.validate(); }
 };
 
 struct SlaveConfig {
-    BaseConfig base;
+    UartConfig uartConfig;
+
+    [[nodiscard]] bool validate() const { return uartConfig.validate(); }
 };
 
 } // namespace Totem::Wire::Rs485::detail

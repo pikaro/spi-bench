@@ -3,10 +3,12 @@
 #include "Macros/Facade.hpp"
 #include "Types/Error.hpp"
 #include <cerrno>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <expected>
 #include <fcntl.h>
+#include <optional>
 #include <span>
 #include <stdio.h>
 #include <sys/_default_fcntl.h>
@@ -26,28 +28,30 @@ struct Console {
         return OK();
     }
 
-    static ReturnCode write(const char *data, size_t len, bool flush = false) {
-        if (data == nullptr && len != 0) {
-            return ERR(InvalidArgument);
-        }
-
-        auto written = fwrite(data, 1, len, stdout);
-        FAIL_IF(written != len, ERR(OperationFailed),
+    static ReturnCode write(std::span<const std::byte> data, bool drain = false,
+                            std::optional<uint32_t> /*unused*/ = std::nullopt) {
+        auto written = fwrite(reinterpret_cast<const char *>(data.data()), 1,
+                              data.size(), stdout);
+        FAIL_IF(written != data.size(), ERR(OperationFailed),
                 "Failed to write to console");
 
-        if (flush) {
+        if (drain) {
             auto ret = fflush(stdout);
             FAIL_IF(ret != 0, ERR(OperationFailed), "Failed to flush console");
         }
         return OK();
     }
 
-    static std::expected<size_t, ReturnCode> read(std::span<uint8_t> buffer) {
+    static std::expected<size_t, ReturnCode>
+    read(std::span<std::byte> buffer,
+         std::optional<uint32_t> /*unused*/ = std::nullopt) {
         if (buffer.empty()) {
             return std::unexpected(ERR(InvalidArgument));
         }
 
-        auto ret = ::read(fileno(stdin), buffer.data(), buffer.size());
+        auto ret =
+            ::read(fileno(stdin), reinterpret_cast<char *>(buffer.data()),
+                   buffer.size());
         if (ret < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 return std::unexpected(ERR(NotFound));

@@ -9,8 +9,9 @@ enum class ErrorDomain : uint8_t {
     Lifecycle,
     Storage,
     PubSub,
-    Spi,
+    Wire,
     Command,
+    Clock,
 };
 
 enum class CoreError : uint8_t {
@@ -41,11 +42,13 @@ enum class PubSubError : uint8_t {
     Ok,
 };
 
-enum class SpiError : uint8_t {
+enum class WireError : uint8_t {
     Unknown = 0,
     Ok,
-    CommunicationFailure,
-    InvalidResponse,
+    Corrupted,
+    CrcError,
+    SequenceError,
+    Nack,
 };
 
 enum class LifecycleError : uint8_t {
@@ -64,6 +67,12 @@ enum class CommandError : uint8_t {
     BadArgument,
     BadArgumentCount,
     NotFound,
+};
+
+enum class ClockError : uint8_t {
+    Unknown = 0,
+    Ok,
+    DriftOverflow,
 };
 
 template <typename Enum> constexpr const char *error_name(uint8_t value) {
@@ -103,14 +112,17 @@ struct [[nodiscard]] ReturnCode {
     static constexpr ReturnCode from(PubSubError err) {
         return from<PubSubError>(ErrorDomain::PubSub, err);
     }
-    static constexpr ReturnCode from(SpiError err) {
-        return from<SpiError>(ErrorDomain::Spi, err);
+    static constexpr ReturnCode from(WireError err) {
+        return from<WireError>(ErrorDomain::Wire, err);
     }
     static constexpr ReturnCode from(LifecycleError err) {
         return from<LifecycleError>(ErrorDomain::Lifecycle, err);
     }
     static constexpr ReturnCode from(CommandError err) {
         return from<CommandError>(ErrorDomain::Command, err);
+    }
+    static constexpr ReturnCode from(ClockError err) {
+        return from<ClockError>(ErrorDomain::Clock, err);
     }
 
     [[nodiscard]] constexpr const char *name() const {
@@ -121,12 +133,14 @@ struct [[nodiscard]] ReturnCode {
             return error_name<StorageError>(code);
         case ErrorDomain::PubSub:
             return error_name<PubSubError>(code);
-        case ErrorDomain::Spi:
-            return error_name<SpiError>(code);
+        case ErrorDomain::Wire:
+            return error_name<WireError>(code);
         case ErrorDomain::Lifecycle:
             return error_name<LifecycleError>(code);
         case ErrorDomain::Command:
             return error_name<CommandError>(code);
+        case ErrorDomain::Clock:
+            return error_name<ClockError>(code);
         default:
             assert(false && "ReturnCode contains invalid domain");
             return "InvalidDomain";

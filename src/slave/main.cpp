@@ -2,13 +2,13 @@
 #include "Setups/Core.hpp"
 #include "Setups/PubSubTest.hpp"
 
-// #include "Wire/Rs485/Facade.hpp"
-// #include "Wire/Spi/Facade.hpp"
+#include "Clock/Facade.hpp"
+#include "Wire/Rs485/Facade.hpp"
+#include "Wire/Spi/Facade.hpp"
 
 CoreSetup core{};
 PubSubTestSetup pubSubTestSetup{core.taskRegistry};
 
-// NOLINTNEXTLINE(readability-function-size)
 void setup() {
     core.setup();
     pubSubTestSetup.setup();

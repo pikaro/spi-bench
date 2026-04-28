@@ -14,6 +14,7 @@
 #include <cinttypes>
 #include <cstdio>
 #include <optional>
+#include <span>
 #include <string_view>
 
 namespace Totem::LoggingBackend::detail::Outputs {
@@ -166,8 +167,9 @@ class ConsoleOutput : public HasLifecycle<ConsoleOutput, ConsoleConfig>,
             num = static_cast<int>(buf.size() - 1);
         }
 
-        return ::platform::Console::write(buf.data(), static_cast<size_t>(num),
-                                          config().flush);
+        return ::platform::Console::write(
+            std::as_bytes(std::span(buf.data(), static_cast<size_t>(num))),
+            config().flush);
     }
 
   private:

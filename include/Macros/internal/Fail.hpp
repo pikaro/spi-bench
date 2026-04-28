@@ -26,7 +26,8 @@
 
 // Fail if active
 #define FAIL_IF_ACTIVE_THEN(action, msg, ...)                                  \
-    INTERNAL_FAIL_IF_IMPL(_life.active(), "active", action, msg, ##__VA_ARGS__)
+    INTERNAL_FAIL_IF_IMPL(this->_life.active(), "active", action, msg,         \
+                          ##__VA_ARGS__)
 #define ABORT_IF_ACTIVE(msg, ...)                                              \
     FAIL_IF_ACTIVE_THEN(abort(), msg, ##__VA_ARGS__)
 #define FAIL_IF_ACTIVE(ret, msg, ...)                                          \
@@ -47,7 +48,7 @@
 
 // Fail if not active
 #define FAIL_IF_INACTIVE_THEN(action, msg, ...)                                \
-    INTERNAL_FAIL_IF_IMPL(!_life.active(), "not active", action, msg,          \
+    INTERNAL_FAIL_IF_IMPL(!this->_life.active(), "not active", action, msg,    \
                           ##__VA_ARGS__)
 #define ABORT_IF_INACTIVE(msg, ...)                                            \
     FAIL_IF_INACTIVE_THEN(abort(), msg, ##__VA_ARGS__)
@@ -293,3 +294,25 @@
 #define FAIL_IF_SELF_MUTEX_TIMEOUT_DEFAULT_VOID(msg, ...)                      \
     FAIL_IF_SELF_MUTEX_TIMEOUT_THEN(self->_defaultMutexTimeoutMs, return, msg, \
                                     ##__VA_ARGS__)
+
+// State machine
+#define INTERNAL_FAIL_IF_NOT_STATE(var, exp, next, ret, msg, ...)              \
+    do {                                                                       \
+        auto _expected_ = exp;                                                 \
+        INTERNAL_FAIL_IF_IMPL(!var.compare_exchange_strong(                    \
+                                  _expected_, next, std::memory_order_acq_rel, \
+                                  std::memory_order_acquire),                  \
+                              "Cannot step " #var " from " SV_FMT              \
+                              " to " SV_FMT " - need " SV_FMT,                 \
+                              return ret, msg, MAGIC_SV_ARG(_expected_),       \
+                              MAGIC_SV_ARG(next), MAGIC_SV_ARG(exp),           \
+                              ##__VA_ARGS__);                                  \
+    } while (0)
+
+#define FAIL_IF_NOT_STATE(var, exp, next, msg, ...)                            \
+    INTERNAL_FAIL_IF_NOT_STATE(var, exp, next, ERR(CoreError, InvalidState),   \
+                               msg, ##__VA_ARGS__)
+#define FAIL_IF_NOT_STATE_UNEXPECTED(var, exp, next, msg, ...)                 \
+    INTERNAL_FAIL_IF_NOT_STATE(var, exp, next,                                 \
+                               std::unexpected(ERR(CoreError, InvalidState)),  \
+                               msg, ##__VA_ARGS__)

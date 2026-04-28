@@ -1,11 +1,10 @@
 #pragma once
 
-#include <cstddef>
-#include <cstdint>
+#include "Types/Uart.hpp"
 
-struct ConsoleConfig {
-    static constexpr int baudRate = 921600;
-    static constexpr uint8_t uartNumber = 0;
-    static constexpr size_t txBufferSize = 2048;
-    static constexpr size_t maxReadLen = 128;
+constexpr auto UartConsoleConfig = UartConfig{
+    .baudRate = BaudRate::Baud115200,
+    .uartNumber = 0,
+    .txBufferSize = 2048,
+    .maxReadLen = 128,
 };

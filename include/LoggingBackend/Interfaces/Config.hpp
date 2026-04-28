@@ -3,10 +3,7 @@
 #include "LoggingBackend/Interfaces/Types.hpp"
 #include "Macros/Facade.hpp"
 #include "Platform/PlatformSelect.hpp"
-#include "StaticConfig/Console.hpp"
 #include "TaskController/Interfaces/Config.hpp"
-#include <algorithm>
-#include <array>
 #include <cstddef>
 
 namespace Totem::LoggingBackend {
@@ -26,27 +23,12 @@ struct AggregatorConfig {
     };
 };
 
-static constexpr auto supportedBaudRates = std::to_array<int>({
-    9600,
-    19200,
-    38400,
-    57600,
-    115200,
-    921600,
-});
-
 struct ConsoleConfig {
     // Logging tolerates line delay, so prefer the driver's buffered TX path by
     // default and avoid forcing a full wire drain on every record.
     bool flush = false;
 
-    [[nodiscard]] static bool validate() {
-        FAIL_IF(std::ranges::find(supportedBaudRates, ::ConsoleConfig::baudRate) ==
-                    supportedBaudRates.end(),
-                false, "Unsupported baud rate %d for %s",
-                ::ConsoleConfig::baudRate);
-        return true;
-    }
+    [[nodiscard]] static bool validate() { return true; }
 };
 
 } // namespace Totem::LoggingBackend

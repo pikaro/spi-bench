@@ -3,12 +3,9 @@
 #include "Setups/PubSubTest.hpp"
 
 CoreSetup core{};
-PubSubTestSetup pubSubTestSetup{core.taskRegistry};
 
-// NOLINTNEXTLINE(readability-function-size)
 void setup() {
     core.setup();
-    pubSubTestSetup.setup();
     _log_i("Setup complete");
 }
 
@@ -21,7 +18,6 @@ void app_main() {
     for (;;) {
         const auto nowMs = ::platform::get_time();
         (void)core.work(nowMs);
-        (void)pubSubTestSetup.work(nowMs);
         ::platform::delay(::platform::ms_to_ticks(publishIntervalMs));
     }
 }

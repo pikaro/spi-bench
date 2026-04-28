@@ -46,9 +46,11 @@ See: /docs/commands.md
 - Use LSP tools only when they provide value - for example, to analyze symbol
     relationships or to search for a symbol that is difficult to find through
     file browsing. `rg` and `ast-grep` are often more efficient for simpler
-    tasks, and since the codebase uses small components split across many files,
-    ingesting the whole file is often the best way to get a better understanding
-    of the code.
+    tasks.
+- If you need to understand only a subsection of the codebase, using `rg`, `fd`
+    and `ast-grep` to find the relevant files and sections may be more efficient
+    than ingesting the entire file or using the LSP to navigate to the relevant
+    section.
 - When using LSP, limit the scope of your queries appropriately for the task at
     hand instead of asking for large dumps of information.
 
@@ -80,18 +82,20 @@ See: /docs/commands.md
 - Use deterministic behavior, simple ownership, and clear data flow over heavy
     abstractions
 
-### Documentation
+### Docstrings
 
 - Add or update documentation comments for public APIs and for non-obvious
     functions when intent, preconditions, side effects, or invariants are not
     immediately clear from the code.
-- Add or update module or file-level documentation when the overall purpose,
+- Add or update module or file-level docstrings when the overall purpose,
     design, or interactions of the code are not immediately clear from the code
     itself.
-- Prefer concise documentation that explains why and how to use the function,
-    not what obvious code already shows.
-- Use the industry standard documentation format for the language if not already
-    established in the codebase, otherwise follow the existing style.
+- Prefer concise docstrings that explain why and how to use the function, not
+    what obvious code or names already show.
+- Use the industry standard docstring format for the language if not already
+    established in the codebase, otherwise follow the existing style. Existing
+    code may not have docstrings - you should not use this as a pattern for new
+    code.
 
 ## Boundaries
 
@@ -119,6 +123,13 @@ See: /docs/commands.md
 - Rewrite working code without reason
 - Modify base layer code as discovered from LSP without necessity
 
+## Task scope
+
+- Files directly required to implement the feature/fix
+- Documentation related to the feature/fix
+- Tests related to the feature/fix
+- Minimal adjacent changes required for correctness
+
 ## Documentation Rules
 
 - Prefer using LSP or `rg` and similar shell tools for discovery instead of
@@ -129,6 +140,14 @@ See: /docs/commands.md
 - You may modify docs/\* files regardless of the task scope
 - If the user specifically instructs you to document, you may **ONLY** update
     the relevant docs/\* file(s).
+
+## Refactoring Rules
+
+- Refactor only when necessary to complete the task, or when you have identified
+    a clear improvement to code quality, maintainability, or correctness in the
+    code path you need to change.
+- Extract common code into a new function or class when it is reused in multiple
+    places, or when it is complex enough to warrant its own focused unit.
 
 ## Workflow
 

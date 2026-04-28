@@ -66,6 +66,20 @@ Shared-bus routers track peer interest separately. A frame received from peer A
 on a shared bus may be redistributed to peers B/C/etc. on the same transport,
 but must not be reflected back to A.
 
+`PubSubBackend/Transports/Rs485Transport.hpp` is the hardware point-to-point
+RS485 transport. It serializes PubSub frames into RS485 `Data` payloads using
+`PayloadType::PubSub`, retains each egress frame in a bounded in-flight slot,
+and releases the PubSub drainer ack only when the RS485 write completion
+callback fires. Ingress frames are copied into a small RX queue from the RS485
+data handler and published during the normal PubSub transport polling path.
+
+Application PubSub envelopes require a synced clock before creation. The wire
+header carries both the legacy millisecond timestamp and a synced microsecond
+timestamp so peer-side consumers can compute end-to-end latency from the
+received envelope. PubSub control-plane subscription events may still be
+created before clock sync so link discovery can complete; those frames carry a
+zero microsecond timestamp when no synced clock is available.
+
 ## Local Harness
 
 `src/master/main.cpp` currently instantiates the target topology on one device:
@@ -117,6 +131,11 @@ When optimizing PubSub, measure and reason at the path level:
 - avoid zero-initializing stack scratch buffers that are immediately filled
 - keep direct-relay paths conservative unless routing correctness is obvious
 - prefer bounded static buffers over dynamic allocation
+
+`LOG_VERBOSE_PUBSUB` and `LOG_VERBOSE_RS485` enable hot-path packet trace logs
+for PubSub and RS485 respectively. Leave them disabled for throughput runs; the
+trace points are meant to localize queueing, task wakeup, and wire transaction
+delays during diagnosis.
 
 The current hot path is expected to be dominated by task scheduling, queue
 handoff, transport fanout, and payload serialization only when local delivery is

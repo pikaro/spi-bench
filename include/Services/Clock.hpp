@@ -1,7 +1,7 @@
 #pragma once
 
-#include <cstdlib>
 #include <cstdint>
+#include <cstdlib>
 #include <optional>
 
 namespace Totem::Clock::detail {

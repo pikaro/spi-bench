@@ -4,6 +4,7 @@
 #include "PubSubBackend/Interfaces/Envelope.hpp"
 #include "PubSubBackend/Interfaces/Types.hpp"
 #include "PubSubBackend/detail/SubscriptionManager.hpp"
+#include "PubSubBackend/detail/Trace.hpp"
 #include "PubSubBackend/detail/Types.hpp"
 #include "Types/Error.hpp"
 #include <optional>
@@ -26,6 +27,7 @@ class ControlPlane {
         }
 
         auto topic = static_cast<Topic>(envelope.header.topic);
+        log_trace_packet("control.handle", envelope.header, "ControlPlane");
         _log_d("ControlPlane: handling topic " SV_FMT
                " for " MAGIC_PUBSUB_SV_FMT,
                SV_ARG(magic_enum::enum_name(topic)),

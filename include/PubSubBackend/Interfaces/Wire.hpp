@@ -8,6 +8,7 @@ namespace Totem::PubSubBackend {
 
 struct WIRE_MSG Header {
     uint32_t timestampMs{};
+    uint64_t timestampUs{};
     MessageId messageId{};
     TopicId topic{};
     NodeId source{};

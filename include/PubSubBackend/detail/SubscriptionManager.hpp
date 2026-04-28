@@ -5,6 +5,7 @@
 #include "PubSubBackend/Interfaces/Types.hpp"
 #include "PubSubBackend/detail/Pool.hpp"
 #include "PubSubBackend/detail/TransportDirectory.hpp"
+#include "PubSubBackend/detail/Trace.hpp"
 #include "PubSubBackend/detail/Types.hpp"
 #include "PubSubBackend/detail/Wire.hpp"
 #include "Types/Error.hpp"
@@ -137,6 +138,8 @@ class SubscriptionManager {
             event, envelope.getPayloadAs<PubSubEvent>(),
             "Failed to get PubSub event from pool for message ID %u",
             envelope.header.messageId);
+        log_trace_packet("subscriptions.handle", envelope.header,
+                         "SubscriptionManager");
         _log_d("SubscriptionManager: decoded PubSub event %u for topic " SV_FMT,
                static_cast<unsigned>(event.type),
                SV_ARG(magic_enum::enum_name(static_cast<Topic>(event.topic))));
@@ -208,10 +211,13 @@ class SubscriptionManager {
             .getPayloadPtr = EventPool::getPtr,
             .encodePayload = EventPool::encodePayload,
             .release = EventPool::release,
+            .requireSyncedClock = false,
         });
         FAIL_IF_UNEXPECTED_FWD(
             envelope, envelopeResult,
             "Failed to create envelope for subscription event");
+        log_trace_packet("subscriptions.publish", envelope.header,
+                         "SubscriptionManager");
         FAIL_IF_ERR_FWD(
             _publishCallback(_pubSubNode, envelope),
             "Failed to publish event for topic " SV_FMT,

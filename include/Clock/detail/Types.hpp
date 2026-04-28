@@ -48,7 +48,7 @@ struct State {
         : _owner(owner), _onSyncComplete(onSyncComplete) {}
 
     [[nodiscard]] bool synced() const {
-        return _syncState.is(SyncState::Synced);
+        return _syncState.is(SyncState::Synced) || _resyncInProgress;
     }
 
     [[nodiscard]] bool syncing() const {
@@ -70,8 +70,6 @@ struct State {
                     "Current time and drift would overflow when added");
             return currentTime + drift;
         }
-        _log_w("Clock is not synced, returning unsynced time to %s",
-               ::platform::current_task_name());
         return currentTime;
     }
 
@@ -84,6 +82,10 @@ struct State {
     }
 
     [[nodiscard]] std::expected<SyncRequest, ReturnCode> requestSync() {
+        if (synced()) {
+            _resyncInProgress = true;
+            _syncState.reset();
+        }
         FAIL_IF_ERR_FWD_UNEXPECTED(_syncState.transitionTo(SyncState::SyncSent),
                                    "Failed to request sync");
         _sentTime = ::platform::get_time_us();
@@ -129,18 +131,32 @@ struct State {
         _requestReceivedTime = 0;
         _responseSentTime = 0;
 
-        _drift.store(driftCandidate / 2, std::memory_order_release);
+        auto newDrift = driftCandidate / 2;
+        auto oldDrift = _drift.exchange(newDrift, std::memory_order_release);
         FAIL_IF_ERR_FWD(_syncState.transitionTo(SyncState::Synced),
                         "Failed to mark clock synced");
+        _resyncInProgress = false;
 
         FAIL_IF_ERR_FWD(_onSyncComplete(_owner),
                         "Failed to run on sync complete callback");
+
+        if (oldDrift != 0) {
+            _log_i("Clock resynced with drift delta of %" PRId64
+                   " us; drift=%" PRId64 " us",
+                   newDrift - oldDrift, newDrift);
+        }
+
         return OK();
     }
 
     void reset() {
-        _syncState.reset();
-        _drift.store(0, std::memory_order_release);
+        if (_resyncInProgress) {
+            _syncState.reset(SyncState::Synced);
+            _resyncInProgress = false;
+        } else {
+            _syncState.reset();
+            _drift.store(0, std::memory_order_release);
+        }
         _sentTime = 0;
         _recvTime = 0;
         _requestReceivedTime = 0;
@@ -161,6 +177,7 @@ struct State {
 
     void *_owner;
     ReturnCode (*_onSyncComplete)(void *) = nullptr;
+    bool _resyncInProgress = false;
 };
 
 } // namespace Totem::Clock::detail

@@ -19,6 +19,7 @@
 #include "PubSubBackend/detail/SubscriptionManager.hpp"
 #include "PubSubBackend/detail/TransportDirectory.hpp"
 #include "PubSubBackend/detail/ITransport.hpp"
+#include "PubSubBackend/detail/Trace.hpp"
 #include "PubSubBackend/detail/Types.hpp"
 #include "Queue/Facade.hpp"
 #include "Services/PubSub.hpp"
@@ -115,6 +116,7 @@ class Node : public HasLifecycle<Node, Config>,
     }
 
     ReturnCode publish(const Envelope &envelope) override {
+        log_trace_packet("node.publish.enqueue", envelope.header, name);
         _log_d("%s: enqueue publish for " MAGIC_PUBSUB_SV_FMT, name,
                MAGIC_PUBSUB_SV_ARG(envelope.header));
         FAIL_IF_ERR_FWD(Totem::Queue::Platform::send(_publishQueue, &envelope),

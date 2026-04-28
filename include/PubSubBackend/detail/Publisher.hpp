@@ -5,6 +5,7 @@
 #include "PubSubBackend/Interfaces/Types.hpp"
 #include "PubSubBackend/detail/SubscriberDirectory.hpp"
 #include "PubSubBackend/detail/TransportDirectory.hpp"
+#include "PubSubBackend/detail/Trace.hpp"
 #include "PubSubBackend/detail/Types.hpp"
 #include "Support/Basic.hpp"
 #include "Types/Error.hpp"
@@ -88,6 +89,8 @@ class Publisher {
                        " for " MAGIC_PUBSUB_SV_FMT,
                        SV_ARG(entry.name),
                        MAGIC_PUBSUB_SV_ARG(envelope.header));
+                log_trace_packet("publisher.subscriber", envelope.header,
+                                 entry.name.data());
                 FAIL_IF_ERR_FWD(
                     entry.callback(entry.subscriber, envelope),
                     "Failed to publish to subscriber " SV_FMT

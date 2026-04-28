@@ -10,6 +10,7 @@ template <> struct FieldList<::Totem::PubSubBackend::Header> {
     using Type = ::Totem::PubSubBackend::Header;
     static constexpr auto fields = std::make_tuple(
         Field<&Type::timestampMs>{"timestampMs"},
+        Field<&Type::timestampUs>{"timestampUs"},
         Field<&Type::messageId>{"messageId"},
         Field<&Type::topic>{"topic"},
         Field<&Type::source>{"source"},

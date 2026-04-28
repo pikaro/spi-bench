@@ -137,7 +137,9 @@ template <typename State, auto Transitions> class StateMachine {
         return OK();
     }
 
-    void reset() { _state.store(_startState, std::memory_order_release); }
+    void reset() { reset(_startState); }
+
+    void reset(State state) { _state.store(state, std::memory_order_release); }
 
   private:
     const char *_ownerName;

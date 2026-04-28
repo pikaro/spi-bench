@@ -6,6 +6,7 @@
 #include "PubSubBackend/Interfaces/Types.hpp"
 #include "PubSubBackend/detail/Metrics.hpp"
 #include "PubSubBackend/detail/SerDe.hpp"
+#include "PubSubBackend/detail/Trace.hpp"
 #include "PubSubBackend/detail/Types.hpp"
 #include "Types/Error.hpp"
 #include <algorithm>
@@ -68,6 +69,7 @@ class IngressBuffer : public ByteArenaImpl {
         FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
             header, SerDe::peekHeader(frame),
             "Failed to peek frame header for storage");
+        log_trace_packet("ingress.storeFrame", header, name);
         if (!_canRememberSerialized(header)) {
             FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
                 data, SerDe::deserializeRaw(frame),
@@ -96,6 +98,7 @@ class IngressBuffer : public ByteArenaImpl {
             "Failed to store serialized frame for " MAGIC_PUBSUB_SV_FMT,
             MAGIC_PUBSUB_SV_ARG(header));
         _rememberSerialized(header);
+        log_trace_packet("ingress.store.serialized", header, name);
         return std::optional<Envelope>{Envelope{
             .header = header,
             .owner = this,
@@ -113,6 +116,7 @@ class IngressBuffer : public ByteArenaImpl {
         FAIL_IF(payload.size() != header.payloadSize, ERR(InvalidArgument),
                 "Payload size does not match size in header");
         _forgetSerialized(header);
+        log_trace_packet("ingress.store.payload", header, name);
         _log_d("%s: store payload of %zu bytes for " MAGIC_PUBSUB_SV_FMT, name,
                payload.size(), MAGIC_PUBSUB_SV_ARG(header));
         return ByteArena::store(header, payload);
@@ -186,6 +190,7 @@ class IngressBuffer : public ByteArenaImpl {
     }
 
     ReturnCode release(const Header &header) {
+        log_trace_packet("ingress.release", header, name);
         _log_d("%s: release " MAGIC_PUBSUB_SV_FMT, name,
                MAGIC_PUBSUB_SV_ARG(header));
         _forgetSerialized(header);

@@ -4,7 +4,9 @@
 #include "Macros/Facade.hpp"
 #include "PubSubBackend/Interfaces/Types.hpp"
 #include "PubSubBackend/Interfaces/Wire.hpp" // IWYU pragma: export
+#include "Services/Clock.hpp"
 #include "PubSubBackend/detail/Codec.hpp"
+#include "PubSubBackend/detail/Trace.hpp"
 #include "Types/Error.hpp"
 #include <cstddef>
 #include <cstdint>
@@ -43,6 +45,7 @@ struct EnvelopeDef {
     PayloadGetter getPayload = nullptr;
     PayloadEncoder encodePayload = nullptr;
     ReleaseCallback release;
+    bool requireSyncedClock = true;
 
     [[nodiscard]] bool valid() const {
         return static_cast<uint32_t>(topic) != 0 && release != nullptr &&
@@ -124,10 +127,19 @@ struct Envelope {
             def.valid(), std::unexpected(ERR(InvalidArgument)),
             "Invalid EnvelopeDef for topic " SV_FMT,
             SV_ARG(magic_enum::enum_name(static_cast<Topic>(def.topic))));
-        return Envelope{
+        const auto &clock = ClockService::get();
+        FAIL_IF(def.requireSyncedClock && !clock.synced(),
+                std::unexpected(ERR(CoreError, InvalidState)),
+                "Cannot create PubSub envelope for topic " SV_FMT
+                " before clock sync",
+                SV_ARG(magic_enum::enum_name(static_cast<Topic>(def.topic))));
+        const auto timestampUs =
+            clock.synced() ? static_cast<uint64_t>(clock.nowUs()) : 0U;
+        auto envelope = Envelope{
             .header =
                 {
-                    .timestampMs = ::platform::get_time(),
+                    .timestampMs = static_cast<uint32_t>(timestampUs / 1000U),
+                    .timestampUs = timestampUs,
                     .messageId = def.messageId,
                     .topic = static_cast<TopicId>(def.topic),
                     .source = def.source,
@@ -141,6 +153,8 @@ struct Envelope {
             .typeTag = &PayloadTypeTag<T>,
             .release = def.release,
         };
+        detail::log_trace_packet("envelope.make", envelope.header);
+        return envelope;
     }
 };
 

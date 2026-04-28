@@ -27,6 +27,13 @@ Frame semantics are intentionally split:
   `responseTo`; either side resets to handshake mode when the peer misses three
   heartbeat windows.
 
+Reconnect is intentionally lossy at the RS485 transaction layer. When the link
+resets, the node discards pending UART input and nacks queued writes/exchanges
+so old PubSub or Clock transactions cannot leak into the next handshake with a
+stale sequence number. While a node is handshaking, non-`Hello` frames are
+treated as stale input and discarded instead of sequence-checked against the new
+connection.
+
 The second header discriminator is `Totem::Wire::PayloadType`, which identifies
 the higher-level payload owner such as `Clock` or future `PubSub`. Consumers can
 register a `FrameHandler` with an RS485 node instead of repeatedly submitting

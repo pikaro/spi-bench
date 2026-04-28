@@ -4,6 +4,7 @@
 #include "PubSubBackend/Interfaces/Envelope.hpp"
 #include "PubSubBackend/Interfaces/Wire.hpp"
 #include "PubSubBackend/detail/Codec.hpp"
+#include "PubSubBackend/detail/Trace.hpp"
 #include "PubSubBackend/detail/Types.hpp"
 #include "Types/Error.hpp"
 #include <cstddef>
@@ -31,6 +32,7 @@ class SerDe {
     serialize(const Envelope &envelope, std::span<std::byte> out) {
         size_t totalSize =
             headerSize + envelope.header.payloadSize + overheadSize;
+        log_trace_packet("serde.serialize.begin", envelope.header);
         _log_d("SerDe: serialize " MAGIC_PUBSUB_SV_FMT " into %zu bytes",
                MAGIC_PUBSUB_SV_ARG(envelope.header), totalSize);
         FAIL_IF(out.size() < totalSize,
@@ -61,6 +63,7 @@ class SerDe {
         auto crc = _crcSum(out.first(headerSize + envelope.header.payloadSize));
         std::memcpy(crcSpan.data(), &crc, sizeof(crc));
 
+        log_trace_packet("serde.serialize.done", envelope.header);
         return totalSize;
     }
 
@@ -70,6 +73,7 @@ class SerDe {
         _log_d("SerDe: deserialize raw frame of %zu bytes", frame.size());
         FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
             header, peekHeader(frame), "Failed to peek header from frame");
+        log_trace_packet("serde.deserialize.peek", header);
         FAIL_IF_ERR_FWD_UNEXPECTED(validateFrame(frame, header),
                                    "Failed to validate frame for "
                                    MAGIC_PUBSUB_SV_FMT,
@@ -77,6 +81,7 @@ class SerDe {
         auto payloadSpan = frame.subspan(headerSize, header.payloadSize);
         _log_d("SerDe: deserialized " MAGIC_PUBSUB_SV_FMT,
                MAGIC_PUBSUB_SV_ARG(header));
+        log_trace_packet("serde.deserialize.done", header);
         return std::make_pair(header, payloadSpan);
     }
 
@@ -88,6 +93,7 @@ class SerDe {
         auto headerSpan = frame.first(headerSize);
         FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(header, decodeHeader(headerSpan),
                                           "Failed to decode header from frame");
+        log_trace_packet("serde.peekHeader", header);
         FAIL_IF(encodedSize(header) != frame.size(),
                 std::unexpected(ERR(CoreError, InvalidData)),
                 "Frame size does not match encoded size for "
@@ -111,6 +117,7 @@ class SerDe {
         FAIL_IF(actualCrc != expectedCrc, ERR(CoreError, InvalidData),
                 "CRC mismatch for " MAGIC_PUBSUB_SV_FMT,
                 MAGIC_PUBSUB_SV_ARG(header));
+        log_trace_packet("serde.validate", header);
         return OK();
     }
 
@@ -139,8 +146,9 @@ class SerDe {
         return headerSize + overheadSize + header.payloadSize;
     }
 
-    static constexpr size_t headerSize = sizeof(uint32_t) + sizeof(MessageId) +
-                                         sizeof(TopicId) + sizeof(NodeId) +
+    static constexpr size_t headerSize = sizeof(uint32_t) + sizeof(uint64_t) +
+                                         sizeof(MessageId) + sizeof(TopicId) +
+                                         sizeof(NodeId) +
                                          sizeof(TrafficClass) +
                                          sizeof(uint16_t);
     static constexpr size_t overheadSize = sizeof(uint32_t);
@@ -190,6 +198,7 @@ class SerDe {
                 "Output buffer is too small for PubSub header");
         size_t offset = 0;
         _writeLe(out, offset, header.timestampMs);
+        _writeLe(out, offset, header.timestampUs);
         _writeLe(out, offset, header.messageId);
         _writeLe(out, offset, header.topic);
         _writeLe(out, offset, header.source);
@@ -206,6 +215,7 @@ class SerDe {
         size_t offset = 0;
         return Header{
             .timestampMs = _readLe<uint32_t>(in, offset),
+            .timestampUs = _readLe<uint64_t>(in, offset),
             .messageId = _readLe<MessageId>(in, offset),
             .topic = _readLe<TopicId>(in, offset),
             .source = _readLe<::Totem::PubSubBackend::NodeId>(in, offset),

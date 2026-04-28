@@ -16,6 +16,7 @@
 #include "Types/Uart.hpp"
 #include "Wire/Interfaces/Request.hpp"
 #include "Wire/Rs485/detail/Pdu.hpp"
+#include "Wire/Rs485/detail/Trace.hpp"
 #include "Wire/Rs485/detail/Transceiver.hpp"
 #include "Wire/Rs485/detail/Types.hpp"
 #include <array>
@@ -206,6 +207,13 @@ class Node : public HasLifecycle<Derived, ConfT>,
             return headerResult.error();
         }
         auto header = *headerResult;
+        log_trace_packet("poll.header", header, Derived::name);
+        if (!ready() && header.type != FrameType::Hello) {
+            _log_w("Discarding stale RS485 frame during handshake in %s",
+                   Derived::name);
+            (void)_transceiver.discardRx();
+            return OK();
+        }
         if (header.type != FrameType::Hello) {
             auto sequenceResult = header.validateSequence();
             if (!sequenceResult.ok()) {
@@ -293,6 +301,8 @@ class Node : public HasLifecycle<Derived, ConfT>,
     void _resetConnection(const char *reason) {
         _log_w("Resetting RS485 connection for %s: %s", Derived::name, reason);
         _state.store(NodeState::Initial, std::memory_order_release);
+        (void)_transceiver.discardRx();
+        _failPendingTransactions(ERR(CoreError, InvalidState));
         _heartbeatAwaitingResponse = false;
         _heartbeatSequence = 0;
         _missedHeartbeats = 0;
@@ -401,30 +411,35 @@ class Node : public HasLifecycle<Derived, ConfT>,
         auto ret =
             _transceiver.sendFrame(FrameType::Data, item.request.payloadType,
                                    item.request.data, 0, &sentHeader);
+        log_trace_packet("data.sent", sentHeader, Derived::name);
         if (!ret.ok()) {
-            return item.request.nack(item.handle, ret);
+            return _failWrite(item, ret, "data send failed");
         }
 
         auto responseResult =
             _transceiver.receiveHeader(transactionResponseTimeoutMs);
         if (!responseResult) {
-            return item.request.nack(item.handle, responseResult.error());
+            return _failWrite(item, responseResult.error(),
+                              "data response read failed");
         }
         auto response = *responseResult;
+        log_trace_packet("data.response", response, Derived::name);
         auto sequenceResult = response.validateSequence();
         if (!sequenceResult.ok()) {
-            return item.request.nack(item.handle, sequenceResult);
+            return _failWrite(item, sequenceResult, "data response sequence");
         }
         if (response.responseTo != sentHeader.sequenceNumber ||
             response.payloadType != item.request.payloadType ||
             response.payloadLength != 0) {
-            return item.request.nack(item.handle, ERR(CoreError, InvalidState));
+            return _failWrite(item, ERR(CoreError, InvalidState),
+                              "data response mismatch");
         }
         if (response.type == FrameType::Nack) {
             return item.request.nack(item.handle, ERR(WireError, Nack));
         }
         if (response.type != FrameType::Ack) {
-            return item.request.nack(item.handle, ERR(CoreError, InvalidState));
+            return _failWrite(item, ERR(CoreError, InvalidState),
+                              "unexpected data response");
         }
         return item.request.ack(item.handle,
                                 static_cast<uint16_t>(item.request.data.size()),
@@ -446,35 +461,42 @@ class Node : public HasLifecycle<Derived, ConfT>,
                              : FrameType::Request;
         auto ret = _transceiver.sendFrame(frameType, item.request.payloadType,
                                           item.request.request, 0, &sentHeader);
+        log_trace_packet("exchange.sent", sentHeader, Derived::name);
         if (!ret.ok()) {
-            return item.request.nack(item.handle, ret);
+            return _failExchange(item, ret, "exchange send failed");
         }
 
         auto responseResult =
             _transceiver.receiveHeader(transactionResponseTimeoutMs);
         if (!responseResult) {
-            return item.request.nack(item.handle, responseResult.error());
+            return _failExchange(item, responseResult.error(),
+                                 "exchange response read failed");
         }
         auto response = *responseResult;
+        log_trace_packet("exchange.response", response, Derived::name);
         auto sequenceResult = response.validateSequence();
         if (!sequenceResult.ok()) {
-            return item.request.nack(item.handle, sequenceResult);
+            return _failExchange(item, sequenceResult,
+                                 "exchange response sequence");
         }
         if (response.responseTo != sentHeader.sequenceNumber ||
             response.payloadType != item.request.payloadType) {
-            return item.request.nack(item.handle, ERR(CoreError, InvalidState));
+            return _failExchange(item, ERR(CoreError, InvalidState),
+                                 "exchange response mismatch");
         }
         if (response.type == FrameType::Nack) {
             return item.request.nack(item.handle, ERR(WireError, Nack));
         }
         if (response.type != FrameType::Response) {
-            return item.request.nack(item.handle, ERR(CoreError, InvalidState));
+            return _failExchange(item, ERR(CoreError, InvalidState),
+                                 "unexpected exchange response");
         }
 
         auto payloadResult =
             _transceiver.receivePayload(response, item.request.response);
         if (!payloadResult) {
-            return item.request.nack(item.handle, payloadResult.error());
+            return _failExchange(item, payloadResult.error(),
+                                 "exchange payload read failed");
         }
         return item.request.ack(item.handle, *payloadResult,
                                 ::platform::get_time_us());
@@ -502,6 +524,7 @@ class Node : public HasLifecycle<Derived, ConfT>,
         auto receivedAtUs = ::platform::get_time_us();
         auto payload =
             std::span<const std::byte>(_rxPayload.data(), *payloadResult);
+        log_trace_packet("data.received", header, Derived::name);
         auto ret = handler->onData(handler->owner, header.payloadType, payload,
                                    receivedAtUs);
         auto reaction = ret.ok() ? FrameType::Ack : FrameType::Nack;
@@ -534,6 +557,7 @@ class Node : public HasLifecycle<Derived, ConfT>,
         auto receivedAtUs = ::platform::get_time_us();
         auto request =
             std::span<const std::byte>(_rxPayload.data(), *payloadResult);
+        log_trace_packet("request.received", header, Derived::name);
         auto responseResult =
             handler->onRequest(handler->owner, header.payloadType, request,
                                handler->response, receivedAtUs);
@@ -569,6 +593,47 @@ class Node : public HasLifecycle<Derived, ConfT>,
             }
         }
         return nullptr;
+    }
+
+    ReturnCode _failWrite(const TxQueueItem &item, ReturnCode reason,
+                          const char *resetReason) {
+        if (_shouldResetAfterTransactionFailure(reason)) {
+            _resetConnection(resetReason);
+        }
+        return item.request.nack(item.handle, reason);
+    }
+
+    ReturnCode _failExchange(const ExchangeQueueItem &item, ReturnCode reason,
+                             const char *resetReason) {
+        if (_shouldResetAfterTransactionFailure(reason)) {
+            _resetConnection(resetReason);
+        }
+        return item.request.nack(item.handle, reason);
+    }
+
+    [[nodiscard]] static bool
+    _shouldResetAfterTransactionFailure(ReturnCode reason) {
+        return reason == ERR(CoreError, Timeout) ||
+               reason == ERR(CoreError, InvalidState) ||
+               reason == ERR(WireError, Corrupted) ||
+               reason == ERR(WireError, CrcError) ||
+               reason == ERR(WireError, SequenceError);
+    }
+
+    void _failPendingTransactions(ReturnCode reason) {
+        if (_txQueue != nullptr) {
+            TxQueueItem item{};
+            while (Totem::Queue::Platform::receive(_txQueue, &item, 0).ok()) {
+                (void)item.request.nack(item.handle, reason);
+            }
+        }
+        if (_exchangeQueue != nullptr) {
+            ExchangeQueueItem item{};
+            while (Totem::Queue::Platform::receive(_exchangeQueue, &item, 0)
+                       .ok()) {
+                (void)item.request.nack(item.handle, reason);
+            }
+        }
     }
 
     Totem::TaskController::RunnerKey _task = 0;

@@ -6,6 +6,7 @@
 #include "PubSubBackend/detail/ITransport.hpp"
 #include "PubSubBackend/detail/IngressBuffer.hpp"
 #include "PubSubBackend/detail/SerDe.hpp"
+#include "PubSubBackend/detail/Trace.hpp"
 #include "PubSubBackend/detail/Types.hpp"
 #include "Queue/Facade.hpp"
 #include "Types/Error.hpp"
@@ -106,6 +107,9 @@ class BaseTransport : public HasLifecycle<BaseTransport>,
         FAIL_IF_NOT(_available(), ERR(InvalidState),
                     "Cannot enqueue frame for unavailable transport " SV_FMT,
                     SV_ARG(_instanceName));
+        detail::log_trace_packet("transport.enqueue",
+                                 frameHandle->envelope.header,
+                                 _instanceName.data());
         _log_d(SV_FMT ": enqueue send for " MAGIC_PUBSUB_SV_FMT,
                SV_ARG(_instanceName),
                MAGIC_PUBSUB_SV_ARG(frameHandle->envelope.header));
@@ -147,6 +151,9 @@ class BaseTransport : public HasLifecycle<BaseTransport>,
             ret.combine(Totem::Queue::Platform::receive(
                 _sendQueue, static_cast<void *>(&item), 0));
             if (ret.ok()) {
+                detail::log_trace_packet("transport.send.dequeue",
+                                         item->envelope.header,
+                                         _instanceName.data());
                 _log_d(SV_FMT ": dequeued send for " MAGIC_PUBSUB_SV_FMT,
                        SV_ARG(_instanceName),
                        MAGIC_PUBSUB_SV_ARG(item->envelope.header));
@@ -161,6 +168,9 @@ class BaseTransport : public HasLifecycle<BaseTransport>,
                     "Failed to prepare queued frame for sending");
                 auto frame =
                     std::span<const std::byte>{sendBuffer.data(), frameSize};
+                detail::log_trace_packet("transport.send.bytes",
+                                         item->envelope.header,
+                                         _instanceName.data());
                 _log_d(SV_FMT ": sending %zu bytes for " MAGIC_PUBSUB_SV_FMT,
                        SV_ARG(_instanceName), frameSize,
                        MAGIC_PUBSUB_SV_ARG(item->envelope.header));
@@ -225,6 +235,9 @@ class BaseTransport : public HasLifecycle<BaseTransport>,
                     ++count;
                     continue;
                 }
+                detail::log_trace_packet("transport.rx.envelope",
+                                         envelope->header,
+                                         _instanceName.data());
                 _log_d(SV_FMT
                        ": enqueuing received envelope for " MAGIC_PUBSUB_SV_FMT,
                        SV_ARG(_instanceName),
@@ -273,6 +286,8 @@ class BaseTransport : public HasLifecycle<BaseTransport>,
             }
             _log_d(SV_FMT ": pollInto dispatch " MAGIC_PUBSUB_SV_FMT,
                    SV_ARG(_instanceName), MAGIC_PUBSUB_SV_ARG(item.header));
+            detail::log_trace_packet("transport.pollInto", item.header,
+                                     _instanceName.data());
             FAIL_IF_ERR_FWD(callback(ctx, item, std::nullopt),
                             "Failed to process item from publish queue");
         }
@@ -307,6 +322,8 @@ class BaseTransport : public HasLifecycle<BaseTransport>,
     }
 
     ReturnCode _ack(const Envelope &envelope) {
+        detail::log_trace_packet("transport.ack", envelope.header,
+                                 _instanceName.data());
         _log_d(SV_FMT ": ack " MAGIC_PUBSUB_SV_FMT, SV_ARG(_instanceName),
                MAGIC_PUBSUB_SV_ARG(envelope.header));
         return _sendAckCallback(_pubSubNode, _transportId, envelope);

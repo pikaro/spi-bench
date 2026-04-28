@@ -5,6 +5,7 @@
 #include "PubSubBackend/detail/ControlPlane.hpp"
 #include "PubSubBackend/detail/Publisher.hpp"
 #include "PubSubBackend/detail/TransportDirectory.hpp"
+#include "PubSubBackend/detail/Trace.hpp"
 #include "PubSubBackend/detail/Types.hpp"
 #include "Queue/Facade.hpp"
 #include "Types/Error.hpp"
@@ -94,6 +95,8 @@ class Drainer {
             ret.combine(
                 Totem::Queue::Platform::receive(*_publishQueue, &item, 0));
             if (ret.ok()) {
+                log_trace_packet("drainer.local.dequeue", item.header,
+                                 "Drainer");
                 _log_d("Drainer: dequeued local publish " MAGIC_PUBSUB_SV_FMT,
                        MAGIC_PUBSUB_SV_ARG(item.header));
                 ret.combine(_publishFrame(item));
@@ -200,6 +203,10 @@ class Drainer {
     _publishFrame(const Envelope &item,
                   std::optional<IngressContext> ingressContext = std::nullopt) {
         auto ret = OK();
+        log_trace_packet(ingressContext.has_value()
+                             ? "drainer.ingress.publish"
+                             : "drainer.local.publish",
+                         item.header, "Drainer");
         _log_d("Drainer: publish frame " MAGIC_PUBSUB_SV_FMT "%s",
                MAGIC_PUBSUB_SV_ARG(item.header),
                ingressContext.has_value() ? " from transport ingress" : "");
@@ -232,6 +239,8 @@ class Drainer {
         }
         for (size_t i = 0; i < targetCount; ++i) {
             const auto &target = targets[i];
+            log_trace_packet("drainer.transport.enqueue", item.header,
+                             target.name.data());
             _log_d("Drainer: enqueue to transport " SV_FMT
                    " (%u) for " MAGIC_PUBSUB_SV_FMT,
                    SV_ARG(target.name), target.transportId,

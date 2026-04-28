@@ -132,10 +132,10 @@ When optimizing PubSub, measure and reason at the path level:
 - keep direct-relay paths conservative unless routing correctness is obvious
 - prefer bounded static buffers over dynamic allocation
 
-`LOG_VERBOSE_PUBSUB` and `LOG_VERBOSE_RS485` enable hot-path packet trace logs
-for PubSub and RS485 respectively. Leave them disabled for throughput runs; the
-trace points are meant to localize queueing, task wakeup, and wire transaction
-delays during diagnosis.
+`Tracing::pubSub` and `Tracing::rs485`, gated through `tracing_for(...)`, enable
+hot-path packet trace logs for PubSub and RS485 respectively. Leave tracing
+disabled for throughput runs; the trace points are meant to localize queueing,
+task wakeup, and wire transaction delays during diagnosis.
 
 The current hot path is expected to be dominated by task scheduling, queue
 handoff, transport fanout, and payload serialization only when local delivery is

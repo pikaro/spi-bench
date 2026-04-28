@@ -7,7 +7,9 @@ first implementation without rediscovering the same design constraints.
 
 ## Goals
 
-- Support one SPI master owning one physical bus with up to five slaves.
+- Support one SPI master owning one physical bus with the current four-node
+  topology, while keeping the peer-selection design open for future larger
+  buses.
 - Allow multiple independent SPI buses, for example one slower bus to an ESP32
   classic Bluetooth node and one faster bus to ESP32-S3/C3 GPU/media nodes.
 - Use DMA-backed, bounded, preallocated buffers for predictable CPU and memory
@@ -31,7 +33,7 @@ first implementation without rediscovering the same design constraints.
 - A generalized bus abstraction shared with RS485. Start with `Wire/Spi/` and
   extract common pieces only after stable duplication is obvious.
 - Complex reliability semantics such as retransmit windows. Use bounded sequence
-  checks, CRC, explicit ack/nack, and reconnect/rehandshake first.
+  checks, metadata CRC8, explicit ack/nack, and reconnect/rehandshake first.
 
 ## Proposed File Layout
 
@@ -78,7 +80,6 @@ Define compact platform-agnostic data types:
   - MOSI/MISO/SCLK/CS pins
   - DMA max transfer bytes
   - optional attention pin
-  - optional ready pin if separate ready/attention becomes necessary
 - `SpiTransfer`
   - `std::span<const std::byte> tx`
   - `std::span<std::byte> rx`
@@ -199,11 +200,16 @@ Every DMA slot starts with a fixed header:
   - clock sync marker if needed
 - frame count
 - payload bytes used
-- header CRC
-- full slot or payload CRC
+- metadata CRC8
 
 The header should be small enough to fit in the 64-byte status bucket with at
 least one tiny control frame.
+
+Only SPI slot and frame metadata should be protected by the SPI wire CRC, and
+CRC8 is enough for that purpose. Higher-level payloads remain responsible for
+their own integrity checks. This preserves PubSub's ability to peek and route a
+wire header without forcing the router to compute a full payload CRC for traffic
+that only an interested destination node needs to validate.
 
 ### Logical Frames Inside A Slot
 
@@ -262,16 +268,19 @@ Each peer needs a two-way handshake:
 3. Master marks peer ready and publishes transport availability.
 4. Peer sequence and connection id reset on reconnect.
 
-Attention GPIO is not readiness. It only indicates that a ready or handshaking
-slave wants a turn. Protocol readiness still comes from `Hello`.
+The attention GPIO can serve as the initial slave-to-master readiness signal.
+Before protocol handshake, the line has no other useful semantic meaning: it
+only tells the master that the slave wants to be clocked. Protocol readiness
+still comes from `Hello`, so a noisy or stale attention assertion cannot by
+itself mark the peer ready. Master readiness is implicit because the master owns
+the clock and slave-select lines.
 
 ### Error Recovery
 
 On any of these:
 
 - invalid preamble/version
-- header CRC failure
-- payload CRC failure
+- metadata CRC failure
 - impossible length
 - sequence mismatch
 - repeated missed heartbeat/status
@@ -332,8 +341,9 @@ Avoid high-rate empty polling. Attention GPIO exists to prevent that.
 
 ### Multi-Bus Support
 
-Represent each physical bus as one `Spi::MasterBus` instance with its own
-TaskController runner and peer table.
+Represent each physical bus as one instance of the same `Spi::MasterBus` class,
+with its own configuration, TaskController runner, and peer table. A slower
+classic ESP32 bus and a faster S3/C3 bus should not become separate classes.
 
 Possible topology:
 
@@ -349,6 +359,12 @@ PubSub sees these as transports:
 
 Prefer one router transport per physical bus initially. It keeps metrics,
 configuration, and failures isolated.
+
+The current hardware bring-up should assume the available native ESP32
+slave-select lines and four total nodes. The public peer-selection boundary
+should still remain narrow enough that a future GPIO-driven CS, mux, or shift
+register implementation can replace native SS selection without rewriting the
+wire protocol or PubSub transport.
 
 ## Slave Node
 
@@ -468,6 +484,7 @@ Master side:
 - input with pull-up
 - GPIO interrupt wakes the SPI master scheduler runner
 - scheduler samples line level and services asserted peers first
+- before handshake, an asserted line means "clock me for protocol startup"
 
 Slave side:
 
@@ -475,6 +492,8 @@ Slave side:
 - assert only after the next TX slot is prepared and DMA is queued
 - keep asserted while outbound queue remains nonempty
 - release after transfer completion if the queue is empty
+- before handshake, assert after the initial `Hello` response/status slot is
+  prepared
 
 This mirrors the RS485 attention pattern, but per slave rather than one
 point-to-point line.
@@ -505,7 +524,7 @@ Per peer metrics:
 - ack latency
 - PubSub frame latency min/avg/max
 - Clock sync latency and offset samples
-- CRC failures
+- metadata CRC failures
 - sequence errors
 - DMA/platform errors
 
@@ -516,7 +535,7 @@ existing metrics/logging infrastructure at low frequency.
 
 Add `Wire/Spi/detail/Trace.hpp` similar to RS485:
 
-- gated by `LOG_VERBOSE_SPI`
+- gated by `tracing_for(Tracing::spi)`
 - inline `log_trace_slot(...)`
 - inline `log_trace_frame(...)`
 - compiled to no-op when disabled
@@ -535,7 +554,8 @@ Trace points:
 - Clock request/response timestamp points
 
 Do not scatter `#ifdef`s through protocol code. Keep flags inside trace helper
-functions.
+functions, following the same constexpr `Tracing` pattern as current RS485 /
+PubSub tracing so the compiler can discard disabled trace paths.
 
 ## Step-By-Step Implementation Plan
 
@@ -564,21 +584,21 @@ Critical checks:
 ### Phase 2: Slot Format And Local Packing
 
 1. Add `Wire/Spi/detail/Pdu.hpp`.
-2. Define slot header, frame header, CRC helpers, bucket enum.
+2. Define slot header, frame header, metadata CRC8 helpers, bucket enum.
 3. Add `SlotBuffer`:
    - fixed max capacity
    - reset
    - append frame
-   - finalize CRC
+   - finalize metadata CRC
    - parse iterator
 4. Add host-side or compile-time tests if practical; otherwise add a small
    on-device self-check path behind a setup flag.
-5. Add `LOG_VERBOSE_SPI` trace helpers.
+5. Add SPI trace helpers using `tracing_for(Tracing::spi)`.
 
 Critical checks:
 
 - Parser rejects impossible lengths before touching payload spans.
-- CRC failures reset only the affected peer.
+- metadata CRC failures reset only the affected peer.
 - Empty/status slots are valid frames, not special cases.
 
 ### Phase 3: One Master And One Slave Wire Link
@@ -691,9 +711,10 @@ Critical checks:
   slot.
 - Whether the classic ESP32 node should use a separate physical bus from the
   start or only after first throughput measurements.
-- Whether each GPU node gets one attention line, or whether a shared attention
-  plus GPIO expander/bitmask is worth the added hardware complexity. The first
-  design should assume one line per latency-sensitive slave.
+- Whether native slave-select lines remain sufficient in future projects, or
+  whether GPIO-driven CS, a mux, or a shift register becomes useful. The first
+  implementation should use native SS lines but avoid exposing that detail above
+  the platform/bus configuration boundary.
 
 ## Expected Data Flow
 
@@ -739,4 +760,3 @@ Clock sync:
 - Prefer attention-driven scheduling over high-rate empty polling.
 - Treat metrics as part of the feature, not a debugging afterthought.
 - Keep the first implementation simple enough to reason about under logs.
-

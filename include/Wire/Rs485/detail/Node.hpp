@@ -14,6 +14,7 @@
 #include "Types/Error.hpp"
 #include "Types/Signal.hpp"
 #include "Types/Uart.hpp"
+#include "Wire/Rs485/detail/AttentionLine.hpp"
 #include "Wire/Interfaces/Request.hpp"
 #include "Wire/Rs485/detail/Pdu.hpp"
 #include "Wire/Rs485/detail/Trace.hpp"
@@ -29,7 +30,7 @@
 
 namespace Totem::Wire::Rs485::detail {
 
-template <class Derived, typename ConfT>
+template <class Derived, typename ConfT, TransceiverMode Mode>
 class Node : public HasLifecycle<Derived, ConfT>,
              public HasTaskController<Derived, ConfT> {
 
@@ -42,6 +43,12 @@ class Node : public HasLifecycle<Derived, ConfT>,
         ExchangeRequestHandle handle;
         TransactionKind kind;
         ExchangeRequest request;
+    };
+
+    struct ResponseWriteContext {
+        FrameHandler *handler = nullptr;
+        PayloadType payloadType = PayloadType::Raw;
+        std::span<std::byte> response;
     };
 
     static_assert(
@@ -140,15 +147,22 @@ class Node : public HasLifecycle<Derived, ConfT>,
         FAIL_IF_ERR_FWD(_transceiver.init(this->config().uartConfig),
                         "Failed to initialize transceiver for %s",
                         Derived::name);
+        FAIL_IF_ERR_FWD(_transceiver.registerUartCallback(this, _onUartEvent),
+                        "Failed to register UART event callback for %s",
+                        Derived::name);
 
         FAIL_IF_ERR_FWD(
             this->_taskController.startTask(task, this->config().task),
             "Failed to start task for %s", Derived::name);
+        FAIL_IF_ERR_FWD(_initAttentionLine(),
+                        "Failed to initialize RS485 attention line for %s",
+                        Derived::name);
         return OK();
     }
 
     ReturnCode _onEnd() {
         auto ret = OK();
+        ret.combine(_attention.deinit());
         _task = 0;
 
         if (_txQueue != nullptr) {
@@ -174,18 +188,33 @@ class Node : public HasLifecycle<Derived, ConfT>,
         if (!ready()) {
             return OK();
         }
-        FAIL_IF_ERR_FWD(_pollIncoming(), "Failed to poll incoming frame for %s",
-                        Derived::name);
+        if (_transceiver.canRead()) {
+            FAIL_IF_ERR_FWD(_pollIncoming(),
+                            "Failed to poll incoming frame for %s",
+                            Derived::name);
+            if (!ready() || !_transceiver.canInitiateWrite()) {
+                return OK();
+            }
+        }
+        if (!_transceiver.canInitiateWrite()) {
+            return OK();
+        }
         FAIL_IF_ERR_FWD(_heartbeatStep(), "Failed heartbeat step for %s",
                         Derived::name);
-        if (!ready() || _heartbeatAwaitingResponse) {
+        if (!ready() || !_transceiver.canInitiateWrite()) {
             return OK();
         }
         FAIL_IF_ERR_FWD(_processOneSend(), "Failed to process send for %s",
                         Derived::name);
+        if (!ready() || !_transceiver.canInitiateWrite()) {
+            return OK();
+        }
         FAIL_IF_ERR_FWD(_processOneExchange(),
                         "Failed to process exchange for %s", Derived::name);
-        FAIL_IF_ERR_FWD(_pollIncoming(), "Failed to poll incoming frame for %s",
+        if (!ready() || !_transceiver.canInitiateWrite()) {
+            return OK();
+        }
+        FAIL_IF_ERR_FWD(_nopStep(), "Failed to process nop for %s",
                         Derived::name);
         return OK();
     }
@@ -194,6 +223,14 @@ class Node : public HasLifecycle<Derived, ConfT>,
         auto headerResult = _transceiver.pollHeader();
         if (!headerResult) {
             if (headerResult.error() == ERR(CoreError, NotFound)) {
+                return OK();
+            }
+            if (headerResult.error() == ERR(CoreError, InvalidState)) {
+                if (ready()) {
+                    _resetConnection("turn state mismatch");
+                } else {
+                    _transceiver.resetTurn();
+                }
                 return OK();
             }
             if (headerResult.error() == ERR(WireError, Corrupted) ||
@@ -212,6 +249,7 @@ class Node : public HasLifecycle<Derived, ConfT>,
             _log_w("Discarding stale RS485 frame during handshake in %s",
                    Derived::name);
             (void)_transceiver.discardRx();
+            _transceiver.resetTurn();
             return OK();
         }
         if (header.type != FrameType::Hello) {
@@ -227,6 +265,8 @@ class Node : public HasLifecycle<Derived, ConfT>,
         }
 
         switch (header.type) {
+        case FrameType::Nop:
+            return _receiveNop(header);
         case FrameType::Hello:
             return this->derived()._onHello(header);
         case FrameType::Heartbeat:
@@ -244,19 +284,21 @@ class Node : public HasLifecycle<Derived, ConfT>,
         }
     }
 
-    ReturnCode _sendHello(uint8_t responseTo = 0) {
+    ReturnCode _sendHello(uint8_t responseTo = 0,
+                          FrameTurn turn = FrameTurn::Initiated) {
         Header sentHeader{};
         FAIL_IF_ERR_FWD(_transceiver.sendControl(FrameType::Hello, responseTo,
-                                                 PayloadType::Raw, &sentHeader),
+                                                 PayloadType::Raw, &sentHeader,
+                                                 turn),
                         "Failed to send RS485 hello for %s", Derived::name);
         _lastHelloSequence = sentHeader.sequenceNumber;
         return OK();
     }
 
-    ReturnCode _wake() {
+    ReturnCode _wake(Signal signal = Signal::Ping) {
         FAIL_IF(_task == 0, ERR(CoreError, InvalidState),
                 "Cannot wake unregistered RS485 task for %s", Derived::name);
-        return this->_taskController.signalTask(_task, Signal::Ping);
+        return this->_taskController.signalTask(_task, signal);
     }
 
     ReturnCode _heartbeatStep() {
@@ -284,8 +326,28 @@ class Node : public HasLifecycle<Derived, ConfT>,
                             "Failed to send RS485 heartbeat for %s",
                             Derived::name);
             _lastHeartbeatSentMs = nowMs;
-            _heartbeatAwaitingResponse = true;
             _heartbeatSequence = sentHeader.sequenceNumber;
+            auto responseResult =
+                _transceiver.receiveHeader(transactionResponseTimeoutMs);
+            if (!responseResult) {
+                _heartbeatAwaitingResponse = true;
+                _transceiver.resetTurn();
+                return OK();
+            }
+            auto response = *responseResult;
+            log_trace_packet("heartbeat.response", response, Derived::name);
+            auto sequenceResult = response.validateSequence();
+            if (!sequenceResult.ok() ||
+                response.type != FrameType::Heartbeat ||
+                response.responseTo != _heartbeatSequence ||
+                response.payloadLength != 0) {
+                _heartbeatAwaitingResponse = true;
+                _transceiver.resetTurn();
+                return OK();
+            }
+            _heartbeatAwaitingResponse = false;
+            _missedHeartbeats = 0;
+            _lastHeartbeatReceivedMs = nowMs;
         } else {
             if (_lastHeartbeatReceivedMs == 0) {
                 return OK();
@@ -302,6 +364,7 @@ class Node : public HasLifecycle<Derived, ConfT>,
         _log_w("Resetting RS485 connection for %s: %s", Derived::name, reason);
         _state.store(NodeState::Initial, std::memory_order_release);
         (void)_transceiver.discardRx();
+        _transceiver.resetTurn();
         _failPendingTransactions(ERR(CoreError, InvalidState));
         _heartbeatAwaitingResponse = false;
         _heartbeatSequence = 0;
@@ -309,6 +372,9 @@ class Node : public HasLifecycle<Derived, ConfT>,
         _lastHeartbeatReceivedMs = 0;
         _lastHeartbeatSentMs = 0;
         _lastHelloSequence = 0;
+        _lastNopSentMs = 0;
+        _attentionRequested.store(false, std::memory_order_release);
+        (void)_updateAttentionLine();
     }
 
     void _deferHeartbeat() {
@@ -319,12 +385,45 @@ class Node : public HasLifecycle<Derived, ConfT>,
         _missedHeartbeats = 0;
     }
 
-    static ReturnCode _onTaskNotify(Signal /*signal*/) { return OK(); }
+    void _resetTurn() { _transceiver.resetTurn(); }
+
+    ReturnCode _onTaskNotify(Signal signal) {
+        if (signal == Signal::Rs485Attention) {
+            _attentionRequested.store(true, std::memory_order_release);
+        }
+        return OK();
+    }
+
+    static ReturnCode _onUartEvent(void *owner, UartEvent event) {
+        auto *self = static_cast<Node *>(owner);
+        switch (event.type) {
+        case UartEventType::Data:
+            return self->_wake(Signal::UartData);
+        case UartEventType::Overflow:
+            return self->_wake(Signal::UartOverflow);
+        case UartEventType::Error:
+        case UartEventType::Break:
+        case UartEventType::Pattern:
+        case UartEventType::Unknown:
+        default:
+            return self->_wake(Signal::UartError);
+        }
+    }
+
+    static void _onAttentionLine(void *owner, AttentionLineEvent event) {
+        auto *self = static_cast<Node *>(owner);
+        if (self == nullptr || event != AttentionLineEvent::Asserted) {
+            return;
+        }
+        self->_attentionRequested.store(true, std::memory_order_release);
+        self->_wakeFromIsr(Signal::Rs485Attention);
+    }
 
     std::atomic<NodeState> _state{NodeState::Initial};
     uint8_t _lastHelloSequence = 0;
 
     static constexpr uint32_t heartbeatIntervalMs = 500;
+    static constexpr uint32_t nopIntervalMs = 10;
     static constexpr uint32_t transactionResponseTimeoutMs = 50;
     static constexpr uint8_t maxMissedHeartbeats = 3;
 
@@ -332,6 +431,36 @@ class Node : public HasLifecycle<Derived, ConfT>,
         Totem::Wire::Rs485::detail::logComponent;
 
   private:
+    ReturnCode _initAttentionLine() {
+        if constexpr (Derived::sendsHeartbeat) {
+            return _attention.initInput(this->config().attentionPin, this,
+                                        _onAttentionLine);
+        } else {
+            return _attention.initOutput(this->config().attentionPin);
+        }
+    }
+
+    void _wakeFromIsr(Signal signal = Signal::Ping) {
+        if (_task == 0) {
+            return;
+        }
+        this->_taskController.signalTaskFromIsr(_task, signal);
+    }
+
+    ReturnCode _receiveNop(const Header &header) {
+        FAIL_IF(header.payloadLength != 0, ERR(CoreError, InvalidData),
+                "RS485 nop must not carry a payload in %s", Derived::name);
+        if (header.responseTo != 0) {
+            return OK();
+        }
+        FAIL_IF_ERR_FWD(
+            _transceiver.sendControl(FrameType::Nop, header.sequenceNumber,
+                                     PayloadType::Raw, nullptr,
+                                     FrameTurn::Reaction),
+            "Failed to send RS485 nop response for %s", Derived::name);
+        return OK();
+    }
+
     ReturnCode _receiveHeartbeat(const Header &header) {
         FAIL_IF(header.payloadLength != 0, ERR(CoreError, InvalidData),
                 "RS485 heartbeat must not carry a payload in %s",
@@ -358,7 +487,8 @@ class Node : public HasLifecycle<Derived, ConfT>,
             FAIL_IF_ERR_FWD(
                 _transceiver.sendControl(FrameType::Heartbeat,
                                          header.sequenceNumber,
-                                         PayloadType::Raw),
+                                         PayloadType::Raw, nullptr,
+                                         FrameTurn::Reaction),
                 "Failed to send RS485 heartbeat response for %s",
                 Derived::name);
         }
@@ -376,6 +506,9 @@ class Node : public HasLifecycle<Derived, ConfT>,
         };
         FAIL_IF_ERR_FWD(Totem::Queue::Platform::send(_txQueue, &item),
                         "Failed to send write request to Tx queue for %s",
+                        Derived::name);
+        FAIL_IF_ERR_FWD(_updateAttentionLine(),
+                        "Failed to update RS485 attention line for %s",
                         Derived::name);
         return _wake();
     }
@@ -395,6 +528,9 @@ class Node : public HasLifecycle<Derived, ConfT>,
             Totem::Queue::Platform::send(_exchangeQueue, &item),
             "Failed to send exchange request to exchange queue for %s",
             Derived::name);
+        FAIL_IF_ERR_FWD(_updateAttentionLine(),
+                        "Failed to update RS485 attention line for %s",
+                        Derived::name);
         return _wake();
     }
 
@@ -405,6 +541,9 @@ class Node : public HasLifecycle<Derived, ConfT>,
         TxQueueItem item{};
         FAIL_IF_ERR_FWD(Totem::Queue::Platform::receive(_txQueue, &item, 0),
                         "Failed to receive Tx queue item for %s",
+                        Derived::name);
+        FAIL_IF_ERR_FWD(_updateAttentionLine(),
+                        "Failed to update RS485 attention line for %s",
                         Derived::name);
 
         Header sentHeader{};
@@ -446,6 +585,40 @@ class Node : public HasLifecycle<Derived, ConfT>,
                                 ::platform::get_time_us());
     }
 
+    ReturnCode _nopStep() {
+        const auto nowMs = ::platform::get_time();
+        const bool attentionRequested = _consumeAttentionRequest();
+        if (!attentionRequested &&
+            static_cast<uint32_t>(nowMs - _lastNopSentMs) < nopIntervalMs) {
+            return OK();
+        }
+        _lastNopSentMs = nowMs;
+        return _sendNopExchange();
+    }
+
+    ReturnCode _sendNopExchange() {
+        Header sentHeader{};
+        FAIL_IF_ERR_FWD(_transceiver.sendControl(FrameType::Nop, 0,
+                                                 PayloadType::Raw, &sentHeader),
+                        "Failed to send RS485 nop for %s", Derived::name);
+        auto responseResult =
+            _transceiver.receiveHeader(transactionResponseTimeoutMs);
+        if (!responseResult) {
+            _transceiver.resetTurn();
+            return OK();
+        }
+        auto response = *responseResult;
+        log_trace_packet("nop.response", response, Derived::name);
+        auto sequenceResult = response.validateSequence();
+        if (!sequenceResult.ok() || response.type != FrameType::Nop ||
+            response.responseTo != sentHeader.sequenceNumber ||
+            response.payloadLength != 0) {
+            _transceiver.resetTurn();
+            return OK();
+        }
+        return OK();
+    }
+
     ReturnCode _processOneExchange() {
         if (Totem::Queue::Platform::size(_exchangeQueue) == 0) {
             return OK();
@@ -454,13 +627,18 @@ class Node : public HasLifecycle<Derived, ConfT>,
         FAIL_IF_ERR_FWD(
             Totem::Queue::Platform::receive(_exchangeQueue, &item, 0),
             "Failed to receive exchange queue item for %s", Derived::name);
+        FAIL_IF_ERR_FWD(_updateAttentionLine(),
+                        "Failed to update RS485 attention line for %s",
+                        Derived::name);
 
         Header sentHeader{};
         auto frameType = item.kind == TransactionKind::Poll
                              ? FrameType::Poll
                              : FrameType::Request;
+        int64_t sentAtUs = 0;
         auto ret = _transceiver.sendFrame(frameType, item.request.payloadType,
-                                          item.request.request, 0, &sentHeader);
+                                          item.request.request, 0, &sentHeader,
+                                          FrameTurn::Initiated, &sentAtUs);
         log_trace_packet("exchange.sent", sentHeader, Derived::name);
         if (!ret.ok()) {
             return _failExchange(item, ret, "exchange send failed");
@@ -498,17 +676,14 @@ class Node : public HasLifecycle<Derived, ConfT>,
             return _failExchange(item, payloadResult.error(),
                                  "exchange payload read failed");
         }
-        return item.request.ack(item.handle, *payloadResult,
+        return item.request.ack(item.handle, *payloadResult, sentAtUs,
                                 ::platform::get_time_us());
     }
 
     ReturnCode _receiveData(const Header &header) {
         auto payloadResult = _receivePayloadIntoScratch(header);
         if (!payloadResult) {
-            FAIL_IF_ERR_FWD(
-                _transceiver.sendControl(FrameType::Nack, header.sequenceNumber,
-                                         header.payloadType),
-                "Failed to send RS485 data nack for %s", Derived::name);
+            _resetConnection("data payload read failed");
             return OK();
         }
 
@@ -516,7 +691,8 @@ class Node : public HasLifecycle<Derived, ConfT>,
         if (handler == nullptr || handler->onData == nullptr) {
             FAIL_IF_ERR_FWD(
                 _transceiver.sendControl(FrameType::Nack, header.sequenceNumber,
-                                         header.payloadType),
+                                         header.payloadType, nullptr,
+                                         FrameTurn::Reaction),
                 "Failed to send RS485 data nack for %s", Derived::name);
             return OK();
         }
@@ -530,7 +706,8 @@ class Node : public HasLifecycle<Derived, ConfT>,
         auto reaction = ret.ok() ? FrameType::Ack : FrameType::Nack;
         FAIL_IF_ERR_FWD(
             _transceiver.sendControl(reaction, header.sequenceNumber,
-                                     header.payloadType),
+                                     header.payloadType, nullptr,
+                                     FrameTurn::Reaction),
             "Failed to send RS485 data reaction for %s", Derived::name);
         return OK();
     }
@@ -538,10 +715,7 @@ class Node : public HasLifecycle<Derived, ConfT>,
     ReturnCode _receiveRequest(const Header &header) {
         auto payloadResult = _receivePayloadIntoScratch(header);
         if (!payloadResult) {
-            FAIL_IF_ERR_FWD(
-                _transceiver.sendControl(FrameType::Nack, header.sequenceNumber,
-                                         header.payloadType),
-                "Failed to send RS485 request nack for %s", Derived::name);
+            _resetConnection("request payload read failed");
             return OK();
         }
 
@@ -549,7 +723,8 @@ class Node : public HasLifecycle<Derived, ConfT>,
         if (handler == nullptr || handler->onRequest == nullptr) {
             FAIL_IF_ERR_FWD(
                 _transceiver.sendControl(FrameType::Nack, header.sequenceNumber,
-                                         header.payloadType),
+                                         header.payloadType, nullptr,
+                                         FrameTurn::Reaction),
                 "Failed to send RS485 request nack for %s", Derived::name);
             return OK();
         }
@@ -564,16 +739,36 @@ class Node : public HasLifecycle<Derived, ConfT>,
         if (!responseResult) {
             FAIL_IF_ERR_FWD(_transceiver.sendControl(FrameType::Nack,
                                                      header.sequenceNumber,
-                                                     header.payloadType),
+                                                     header.payloadType,
+                                                     nullptr,
+                                                     FrameTurn::Reaction),
                             "Failed to send RS485 request handler nack for %s",
                             Derived::name);
             return OK();
         }
         auto responseLength = *responseResult;
+        auto responsePayload = handler->response.first(responseLength);
+        auto responseWriteContext = ResponseWriteContext{
+            .handler = handler,
+            .payloadType = header.payloadType,
+            .response = responsePayload,
+        };
 
         return _transceiver.sendFrame(FrameType::Response, header.payloadType,
-                                      handler->response.first(responseLength),
-                                      header.sequenceNumber);
+                                      responsePayload, header.sequenceNumber,
+                                      nullptr, FrameTurn::Reaction, nullptr,
+                                      &responseWriteContext,
+                                      _beforeResponseWrite);
+    }
+
+    static ReturnCode _beforeResponseWrite(void *owner, int64_t sentAtUs) {
+        auto *ctx = static_cast<ResponseWriteContext *>(owner);
+        if (ctx == nullptr || ctx->handler == nullptr ||
+            ctx->handler->onBeforeResponse == nullptr) {
+            return OK();
+        }
+        return ctx->handler->onBeforeResponse(
+            ctx->handler->owner, ctx->payloadType, ctx->response, sentAtUs);
     }
 
     std::expected<uint16_t, ReturnCode>
@@ -634,6 +829,42 @@ class Node : public HasLifecycle<Derived, ConfT>,
                 (void)item.request.nack(item.handle, reason);
             }
         }
+        (void)_updateAttentionLine();
+    }
+
+    ReturnCode _updateAttentionLine() {
+        if constexpr (Derived::sendsHeartbeat) {
+            return OK();
+        } else {
+            if (!_attention.configured()) {
+                return OK();
+            }
+            const bool hasPendingTx =
+                _txQueue != nullptr &&
+                Totem::Queue::Platform::size(_txQueue) > 0;
+            const bool hasPendingExchange =
+                _exchangeQueue != nullptr &&
+                Totem::Queue::Platform::size(_exchangeQueue) > 0;
+            const bool hasPending = hasPendingTx || hasPendingExchange;
+            return _attention.setAsserted(hasPending);
+        }
+    }
+
+    bool _consumeAttentionRequest() {
+        if constexpr (!Derived::sendsHeartbeat) {
+            return false;
+        } else {
+            const bool edgeRequested =
+                _attentionRequested.exchange(false, std::memory_order_acq_rel);
+            if (edgeRequested) {
+                return true;
+            }
+            if (!_attention.configured()) {
+                return false;
+            }
+            auto asserted = _attention.asserted();
+            return asserted.has_value() && *asserted;
+        }
     }
 
     Totem::TaskController::RunnerKey _task = 0;
@@ -658,8 +889,11 @@ class Node : public HasLifecycle<Derived, ConfT>,
     uint8_t _heartbeatSequence = 0;
     uint8_t _missedHeartbeats = 0;
     bool _heartbeatAwaitingResponse = false;
+    uint32_t _lastNopSentMs = 0;
+    AttentionLine _attention;
+    std::atomic<bool> _attentionRequested{false};
 
-    Transceiver _transceiver;
+    Transceiver<Mode> _transceiver;
 };
 
 template <class Derived> struct NodeContract {

@@ -58,6 +58,14 @@ class Runner {
         return OK();
     }
 
+    void signalFromIsr(Signal signal = Signal::Ping) {
+        auto *handle = _isrSignalHandle.load(std::memory_order_acquire);
+        if (handle == nullptr) {
+            return;
+        }
+        Platform::signal_task_from_isr(handle, signal);
+    }
+
     void kill() {
         TaskHandle handle = nullptr;
         {
@@ -65,6 +73,7 @@ class Runner {
             FAIL_IF_NULL_VOID(_handle, "Cannot kill unstarted runner");
             handle = _handle;
             _handle = nullptr;
+            _isrSignalHandle.store(nullptr, std::memory_order_release);
         }
         _stateManager.enterStopping();
         _stopResult =
@@ -233,6 +242,7 @@ class Runner {
         {
             Mutex::ScopedSpinlockGuard guard{self->_lock};
             self->_handle = nullptr;
+            self->_isrSignalHandle.store(nullptr, std::memory_order_release);
         }
         if (nativeHandle != 0) {
             auto deregisterResult =
@@ -265,6 +275,7 @@ class Runner {
         {
             Mutex::ScopedSpinlockGuard guard{_lock};
             _handle = result.handle;
+            _isrSignalHandle.store(result.handle, std::memory_order_release);
         }
         auto registerResult = _registry.registerManagedTaskHandle(
             reinterpret_cast<uintptr_t>(result.handle));
@@ -272,6 +283,7 @@ class Runner {
             {
                 Mutex::ScopedSpinlockGuard guard{_lock};
                 _handle = nullptr;
+                _isrSignalHandle.store(nullptr, std::memory_order_release);
             }
             Platform::kill_task(result.handle);
             _stateManager.enterStopped();
@@ -286,6 +298,7 @@ class Runner {
     }
 
     TaskHandle _handle = nullptr;
+    std::atomic<TaskHandle> _isrSignalHandle{nullptr};
     StateManager _stateManager;
 
     Config _config;

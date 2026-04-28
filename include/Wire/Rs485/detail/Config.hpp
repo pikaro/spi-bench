@@ -1,9 +1,11 @@
 #pragma once
 
 #include "TaskController/Interfaces/Config.hpp"
+#include "Platform/Hardware.hpp"
 #include "Types/Uart.hpp"
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 
 namespace Totem::Wire::Rs485::detail {
 
@@ -19,6 +21,7 @@ struct MasterConfig {
         .notifyExpectTimeout = false,
         .notifyTimeoutMs = 10,
     };
+    std::optional<::platform::Pin> attentionPin = std::nullopt;
     size_t maxPayloadSize = 128;
     uint8_t handlerSlots = 4;
 
@@ -40,6 +43,7 @@ struct SlaveConfig {
         .notifyExpectTimeout = false,
         .notifyTimeoutMs = 10,
     };
+    std::optional<::platform::Pin> attentionPin = std::nullopt;
     size_t maxPayloadSize = 128;
     uint8_t handlerSlots = 4;
 

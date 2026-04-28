@@ -78,6 +78,16 @@ struct Platform {
         return OK(CoreError);
     }
 
+    static void signal_task_from_isr(TaskHandle task,
+                                     Signal signal = Signal::Ping) {
+        BaseType_t woke = pdFALSE;
+        (void)xTaskNotifyFromISR(task, static_cast<uint32_t>(signal),
+                                 eSetValueWithOverwrite, &woke);
+        if (woke == pdTRUE) {
+            portYIELD_FROM_ISR();
+        }
+    }
+
     static bool is_alive(TaskHandle task) {
         return task != nullptr && eTaskGetState(task) != eDeleted;
     }

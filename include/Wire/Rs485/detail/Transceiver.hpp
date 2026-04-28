@@ -1,11 +1,13 @@
 #pragma once
 
+#include "Generic/StateMachine.hpp"
 #include "Macros/Facade.hpp"
 #include "Platform/platform/PlatformESP32/Uart.hpp"
 #include "Types/Error.hpp"
 #include "Types/Uart.hpp"
 #include "Wire/Interfaces/Request.hpp"
 #include "Wire/Rs485/detail/Pdu.hpp"
+#include "Wire/Rs485/detail/Types.hpp"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -14,14 +16,103 @@
 
 namespace Totem::Wire::Rs485::detail {
 
+constexpr std::array writeReadTurnTransitions{
+    TRANSITION(TransceiverState, WriteRequest, ReadReaction),
+    TRANSITION(TransceiverState, ReadReaction, ReadRequest),
+    TRANSITION(TransceiverState, ReadRequest, WriteReaction),
+    TRANSITION(TransceiverState, WriteReaction, WriteRequest),
+};
+
+constexpr std::array readWriteTurnTransitions{
+    TRANSITION(TransceiverState, ReadRequest, WriteReaction),
+    TRANSITION(TransceiverState, WriteReaction, WriteRequest),
+    TRANSITION(TransceiverState, WriteRequest, ReadReaction),
+    TRANSITION(TransceiverState, ReadReaction, ReadRequest),
+};
+
+template <TransceiverMode Mode> class TurnStateMachine {
+    static constexpr auto Transitions = Mode == TransceiverMode::WriteRead
+                                            ? writeReadTurnTransitions
+                                            : readWriteTurnTransitions;
+    using Machine = StateMachine<TransceiverState, Transitions>;
+
+  public:
+    explicit TurnStateMachine(const char *ownerName)
+        : _state(ownerName, startState()) {}
+
+    [[nodiscard]] TransceiverState current() const {
+        return _state.current();
+    }
+
+    [[nodiscard]] bool canRead() const {
+        const auto state = current();
+        return state == TransceiverState::ReadRequest ||
+               state == TransceiverState::ReadReaction;
+    }
+
+    [[nodiscard]] bool canInitiateWrite() const {
+        return current() == TransceiverState::WriteRequest;
+    }
+
+    [[nodiscard]] bool canReadRequest() const {
+        return current() == TransceiverState::ReadRequest;
+    }
+
+    [[nodiscard]] bool canReadReaction() const {
+        return current() == TransceiverState::ReadReaction;
+    }
+
+    [[nodiscard]] bool canWriteReaction() const {
+        return current() == TransceiverState::WriteReaction;
+    }
+
+    void reset() { _state.reset(startState()); }
+
+    ReturnCode markWrite(FrameTurn turn) {
+        const auto expected = turn == FrameTurn::Initiated
+                                  ? TransceiverState::WriteRequest
+                                  : TransceiverState::WriteReaction;
+        FAIL_IF_NOT(_state.is(expected), ERR(CoreError, InvalidState),
+                    "RS485 turn cannot write while in state " SV_FMT
+                    "; expected " SV_FMT,
+                    MAGIC_SV_ARG(_state.current()), MAGIC_SV_ARG(expected));
+        return _state.step();
+    }
+
+    ReturnCode markRead() {
+        const auto state = current();
+        FAIL_IF(state != TransceiverState::ReadRequest &&
+                    state != TransceiverState::ReadReaction,
+                ERR(CoreError, InvalidState),
+                "RS485 turn cannot read while in state %u",
+                static_cast<unsigned>(state));
+        return _state.step();
+    }
+
+  private:
+    static constexpr TransceiverState startState() {
+        if constexpr (Mode == TransceiverMode::WriteRead) {
+            return TransceiverState::WriteRequest;
+        }
+        return TransceiverState::ReadRequest;
+    }
+
+    Machine _state;
+};
+
+template <TransceiverMode Mode>
 class Transceiver {
   public:
-    explicit Transceiver(const char *ownerName) : _ownerName(ownerName) {}
+    using BeforeWriteCallback = ReturnCode (*)(void *owner, int64_t sentAtUs);
+
+    explicit Transceiver(const char *ownerName)
+        : _ownerName(ownerName), _turn(ownerName) {}
 
     ReturnCode init(UartConfig uartConfig) {
         FAIL_IF_ERR_FWD(_uart.init(uartConfig),
                         "Failed to initialize UART for RS485 %s", _ownerName);
         _uartConfig = uartConfig;
+        _turn.reset();
         return OK();
     }
 
@@ -31,14 +122,34 @@ class Transceiver {
         return OK();
     }
 
+    ReturnCode registerUartCallback(void *owner,
+                                    UartEventCallback callback) {
+        return _uart.registerCallback(owner, callback);
+    }
+
     ReturnCode sendFrame(FrameType type, PayloadType payloadType,
                          std::span<const std::byte> payload,
-                         uint8_t responseTo = 0, Header *sentHeader = nullptr) {
+                         uint8_t responseTo = 0, Header *sentHeader = nullptr,
+                         FrameTurn turn = FrameTurn::Initiated,
+                         int64_t *sentAtUs = nullptr,
+                         void *beforeWriteOwner = nullptr,
+                         BeforeWriteCallback beforeWrite = nullptr) {
         FAIL_IF(payload.size() > UINT16_MAX, ERR(CoreError, InvalidArgument),
                 "RS485 payload too large for %s", _ownerName);
+        FAIL_IF_ERR_FWD(_turn.markWrite(turn),
+                        "RS485 turn rejected write for %s", _ownerName);
         auto header =
             Header::make(type, payloadType,
                          static_cast<uint16_t>(payload.size()), responseTo);
+        const auto writeStartUs = ::platform::get_time_us();
+        if (beforeWrite != nullptr) {
+            FAIL_IF_ERR_FWD(beforeWrite(beforeWriteOwner, writeStartUs),
+                            "Failed RS485 before-write callback for %s",
+                            _ownerName);
+        }
+        if (sentAtUs != nullptr) {
+            *sentAtUs = writeStartUs;
+        }
         FAIL_IF_ERR_FWD(writeHeader(header),
                         "Failed to write RS485 frame header for %s",
                         _ownerName);
@@ -60,11 +171,15 @@ class Transceiver {
 
     ReturnCode sendControl(FrameType type, uint8_t responseTo = 0,
                            PayloadType payloadType = PayloadType::Raw,
-                           Header *sentHeader = nullptr) {
-        return sendFrame(type, payloadType, {}, responseTo, sentHeader);
+                           Header *sentHeader = nullptr,
+                           FrameTurn turn = FrameTurn::Initiated) {
+        return sendFrame(type, payloadType, {}, responseTo, sentHeader, turn);
     }
 
     std::expected<Header, ReturnCode> pollHeader() {
+        FAIL_IF_NOT(_turn.canRead(),
+                    std::unexpected(ERR(CoreError, InvalidState)),
+                    "RS485 turn rejected poll for %s", _ownerName);
         FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
             availableBytes, _uart.available(),
             "Failed to check RS485 header availability for %s", _ownerName);
@@ -75,6 +190,9 @@ class Transceiver {
     }
 
     std::expected<Header, ReturnCode> receiveHeader(uint32_t timeoutMs = 0) {
+        FAIL_IF_NOT(_turn.canRead(),
+                    std::unexpected(ERR(CoreError, InvalidState)),
+                    "RS485 turn rejected read for %s", _ownerName);
         const auto effectiveTimeout =
             timeoutMs == 0
                 ? _uartConfig.timeoutFromBytes(Header::headerSize) * 2
@@ -87,7 +205,14 @@ class Transceiver {
         FAIL_IF(readBytes != Header::headerSize,
                 std::unexpected(ERR(Corrupted)),
                 "Incomplete RS485 frame header for %s", _ownerName);
-        return Header::fromBytes(_headerBuf);
+        auto headerResult = Header::fromBytes(_headerBuf);
+        FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
+            header, headerResult, "Failed to parse RS485 frame header for %s",
+            _ownerName);
+        FAIL_IF_ERR_FWD_UNEXPECTED(_turn.markRead(),
+                                   "Failed to advance RS485 read turn for %s",
+                                   _ownerName);
+        return header;
     }
 
     std::expected<uint16_t, ReturnCode>
@@ -113,6 +238,22 @@ class Transceiver {
 
     ReturnCode discardRx() { return _uart.discardRx(); }
 
+    [[nodiscard]] TransceiverState turnState() const {
+        return _turn.current();
+    }
+
+    [[nodiscard]] bool canRead() const { return _turn.canRead(); }
+    [[nodiscard]] bool canReadRequest() const {
+        return _turn.canReadRequest();
+    }
+    [[nodiscard]] bool canInitiateWrite() const {
+        return _turn.canInitiateWrite();
+    }
+    [[nodiscard]] bool canWriteReaction() const {
+        return _turn.canWriteReaction();
+    }
+    void resetTurn() { _turn.reset(); }
+
   private:
     ReturnCode writeHeader(const Header &header) {
         _headerBuf = header.toBytes();
@@ -123,6 +264,7 @@ class Transceiver {
     UartConfig _uartConfig{};
     std::array<std::uint8_t, Header::headerSize> _headerBuf{};
     const char *_ownerName;
+    TurnStateMachine<Mode> _turn;
 };
 
 } // namespace Totem::Wire::Rs485::detail

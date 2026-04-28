@@ -23,6 +23,7 @@ using Totem::Wire::detail::Sequence;
 inline Sequence sequence{};
 
 enum class FrameType : uint8_t {
+    Nop = 0x00,
     Data = 0x01,
     Hello = 0x02,
     Request = 0x03,

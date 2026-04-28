@@ -37,8 +37,40 @@ template <class Link> struct PubSubRs485TestSetup {
     using BaseTransportDeps =
         Totem::PubSubBackend::Transports::BaseTransportDependencies;
 
+    struct Config {
+        uint32_t masterPublishIntervalMs = 10;
+        uint32_t slavePublishIntervalMs = 1;
+        uint32_t reportIntervalMs = 1000;
+        bool masterPublishes = false;
+        bool slavePublishes = true;
+    };
+
+    struct Stats {
+        uint32_t publishAttempts = 0;
+        uint32_t publishFailures = 0;
+        uint32_t publishOverflow = 0;
+        uint32_t received = 0;
+        uint32_t receivedBytes = 0;
+        int64_t minLatencyUs = INT64_MAX;
+        int64_t maxLatencyUs = INT64_MIN;
+        int64_t totalLatencyUs = 0;
+
+        void recordLatency(int64_t latencyUs, uint16_t payloadSize) {
+            ++received;
+            receivedBytes += payloadSize;
+            if (latencyUs < minLatencyUs) {
+                minLatencyUs = latencyUs;
+            }
+            if (latencyUs > maxLatencyUs) {
+                maxLatencyUs = latencyUs;
+            }
+            totalLatencyUs += latencyUs;
+        }
+    };
+
     struct Consumer {
         const char *name = nullptr;
+        Stats *stats = nullptr;
 
         static ReturnCode
         callback(void *ctx, const Totem::PubSubBackend::Envelope &envelope) {
@@ -55,24 +87,24 @@ template <class Link> struct PubSubRs485TestSetup {
                 envelope.header.timestampUs == 0
                     ? 0
                     : nowUs - static_cast<int64_t>(envelope.header.timestampUs);
-            _log_i("%s received PubSub topic " SV_FMT " message %u in %" PRId64
-                   " us: %s",
-                   name, MAGIC_SV_ARG(Topic, envelope.header.topic),
-                   envelope.header.messageId, latencyUs, message.strVal.data());
+            if (stats != nullptr) {
+                stats->recordLatency(latencyUs, envelope.header.payloadSize);
+            }
             return OK();
         }
     };
 
     PubSubRs485TestSetup(Totem::TaskController::IRegistry &taskRegistry,
-                         Link &link, Role role)
+                         Link &link, Role role, Config config = {})
         : pubSubNode(taskRegistry,
                      static_cast<NodeId>(NodeData::PubSub::nodeId)),
-          role(role),
+          role(role), config(config),
           transport(makeRs485Deps(pubSubNode, link, "PubSub-RS485")),
           messagePool(static_cast<void *>(&pubSubNode),
                       PubSubNode::nextMessageId),
           consumer{role == Role::Master ? "RS485-master-consumer"
-                                        : "RS485-slave-consumer"} {}
+                                        : "RS485-slave-consumer",
+                   &stats} {}
 
     void setup() {
         ABORT_IF_ERR_BEGIN(pubSubNode.begin(makePubSubConfig("PubSubRs485")));
@@ -100,28 +132,43 @@ template <class Link> struct PubSubRs485TestSetup {
     }
 
     ReturnCode work(uint32_t nowMs) {
+        reportIfDue(nowMs);
         if (nowMs < publishStartMs || nowMs < nextPublishAtMs) {
             return OK();
         }
+        nextPublishAtMs = nowMs + publishIntervalMs();
+        if (!publishingEnabled()) {
+            return OK();
+        }
         if (!transport.available()) {
-            nextPublishAtMs = nowMs + publishIntervalMs;
             return OK();
         }
         if (!ClockService::get().synced()) {
-            nextPublishAtMs = nowMs + publishIntervalMs;
             return OK();
         }
 
-        nextPublishAtMs = nowMs + publishIntervalMs;
+        ++stats.publishAttempts;
         auto publishResult = publishTestMessage();
         if (!publishResult.ok()) {
-            _log_e("Failed to publish RS485 PubSub message: " ERR_FMT,
-                   ERR_ARG(publishResult));
+            ++stats.publishFailures;
+            if (publishResult == ERR(CoreError, Overflow)) {
+                ++stats.publishOverflow;
+            }
         }
         return OK();
     }
 
   private:
+    [[nodiscard]] bool publishingEnabled() const {
+        return role == Role::Master ? config.masterPublishes
+                                    : config.slavePublishes;
+    }
+
+    [[nodiscard]] uint32_t publishIntervalMs() const {
+        return role == Role::Master ? config.masterPublishIntervalMs
+                                    : config.slavePublishIntervalMs;
+    }
+
     [[nodiscard]] Topic publishedTopic() const {
         return role == Role::Master ? Topic::Heartbeat : Topic::Sensor;
     }
@@ -165,6 +212,42 @@ template <class Link> struct PubSubRs485TestSetup {
         return OK();
     }
 
+    void reportIfDue(uint32_t nowMs) {
+        if (config.reportIntervalMs == 0 ||
+            nowMs - lastReportAtMs < config.reportIntervalMs) {
+            return;
+        }
+
+        const auto elapsedMs = lastReportAtMs == 0 ? config.reportIntervalMs
+                                                   : nowMs - lastReportAtMs;
+        lastReportAtMs = nowMs;
+
+        const auto period = stats;
+        stats = {};
+
+        const auto avgLatencyUs =
+            period.received == 0
+                ? 0
+                : period.totalLatencyUs / static_cast<int64_t>(period.received);
+        const auto minLatencyUs =
+            period.received == 0 ? 0 : period.minLatencyUs;
+        const auto maxLatencyUs =
+            period.received == 0 ? 0 : period.maxLatencyUs;
+        const auto rxPerSecond =
+            elapsedMs == 0 ? 0 : (period.received * 1000U) / elapsedMs;
+        const auto rxBytesPerSecond =
+            elapsedMs == 0 ? 0 : (period.receivedBytes * 1000U) / elapsedMs;
+        const auto txPerSecond =
+            elapsedMs == 0 ? 0 : (period.publishAttempts * 1000U) / elapsedMs;
+
+        _log_i("%s stats: tx=%" PRIu32 "/s txFail=%" PRIu32
+               " txOverflow=%" PRIu32 " rx=%" PRIu32 "/s rxBytes=%" PRIu32
+               "/s latencyUs[min/avg/max]=%" PRId64 "/%" PRId64 "/%" PRId64,
+               consumer.name, txPerSecond, period.publishFailures,
+               period.publishOverflow, rxPerSecond, rxBytesPerSecond,
+               minLatencyUs, avgLatencyUs, maxLatencyUs);
+    }
+
     [[nodiscard]] static Totem::PubSubBackend::Config
     makePubSubConfig(const char *taskName) {
         return Totem::PubSubBackend::Config{
@@ -206,13 +289,15 @@ template <class Link> struct PubSubRs485TestSetup {
 
     PubSubNode pubSubNode;
     Role role;
+    Config config;
     Rs485Transport transport;
     TestPool messagePool;
     Consumer consumer;
+    Stats stats{};
 
     uint32_t publishStartMs = 0;
     uint32_t nextPublishAtMs = 0;
+    uint32_t lastReportAtMs = 0;
 
     static constexpr uint32_t warmupMs = 2000;
-    static constexpr uint32_t publishIntervalMs = 10;
 };

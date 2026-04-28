@@ -129,6 +129,17 @@ class Controller : public HasLifecycle<Controller, Config>,
             });
     }
 
+    void signalTaskFromIsr(RunnerKey ref, Signal signal = Signal::Ping) {
+        if (ref == 0) {
+            return;
+        }
+        // RunnerKey is the Runner pointer assigned by Directory::add().
+        // Avoid the directory lock here because GPIO ISRs only need a direct
+        // FreeRTOS task notification.
+        auto *runner = reinterpret_cast<Runner *>(ref);
+        runner->signalFromIsr(signal);
+    }
+
     ReturnCode signalTask(std::string_view refName,
                           Signal signal = Signal::Ping) {
         FAIL_IF_INACTIVE_ERR("%s of %s", name, _ownerName);

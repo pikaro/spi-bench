@@ -31,7 +31,8 @@ void setup() {
                                           .pins = {
                                               .txPin = ::platform::Pin::GPIO12,
                                               .rxPin = ::platform::Pin::GPIO13,
-                                          }}}));
+                                          }},
+                            .attentionPin = ::platform::Pin::GPIO1}));
 
     ABORT_IF_ERR(clockMaster.registerHandler(rs485master),
                  "Failed to register RS485 clock handler");

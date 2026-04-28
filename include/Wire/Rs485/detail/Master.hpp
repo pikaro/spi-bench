@@ -15,7 +15,8 @@
 
 namespace Totem::Wire::Rs485::detail {
 
-class Master : public Node<Master, MasterConfig> {
+class Master
+    : public Node<Master, MasterConfig, TransceiverMode::WriteRead> {
     friend class HasLifecycle<Master, MasterConfig>;
     friend struct LifecycleContract<Master, MasterConfig>;
 
@@ -29,7 +30,6 @@ class Master : public Node<Master, MasterConfig> {
 
     static constexpr const char *name = "Rs485::Master";
     static constexpr bool sendsHeartbeat = true;
-
     ReturnCode _onHello(const Header &header) {
         FAIL_IF(header.responseTo != _lastHelloSequence,
                 ERR(CoreError, InvalidState),
@@ -77,6 +77,7 @@ class Master : public Node<Master, MasterConfig> {
         if (!ready() &&
             static_cast<uint32_t>(nowMs - _lastHandshakeAttemptMs) >=
                 handshakeRetryMs) {
+            _resetTurn();
             FAIL_IF_ERR_FWD(_sendHello(), "Failed to retry RS485 hello");
             _lastHandshakeAttemptMs = nowMs;
             _log_i("RS485 master handshake retry");

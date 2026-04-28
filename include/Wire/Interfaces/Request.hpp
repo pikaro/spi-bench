@@ -29,6 +29,10 @@ template <typename Tag> struct Result {
     ReturnCode result;
     uint16_t length;
     int64_t completedAtUs = 0;
+    // For ExchangeResult: time captured just before the request frame was
+    // transmitted, used by time-sensitive protocols (e.g. clock sync NTP T1).
+    // Populated by the transport; zero if not supported.
+    int64_t sentAtUs = 0;
 };
 
 struct WriteRequest {
@@ -109,13 +113,14 @@ struct ExchangeRequest {
     }
 
     ReturnCode ack(RequestHandle<ExchangeTag> handle, uint16_t responseLength,
-                   int64_t completedAtUs = 0) const {
+                   int64_t sentAtUs = 0, int64_t completedAtUs = 0) const {
         return onComplete({
             .owner = owner,
             .handle = handle,
             .result = OK(),
             .length = responseLength,
             .completedAtUs = completedAtUs,
+            .sentAtUs = sentAtUs,
         });
     }
 
@@ -140,6 +145,9 @@ struct FrameHandler {
         void *owner, PayloadType payloadType,
         std::span<const std::byte> request, std::span<std::byte> response,
         int64_t receivedAtUs) = nullptr;
+    ReturnCode (*onBeforeResponse)(void *owner, PayloadType payloadType,
+                                   std::span<std::byte> response,
+                                   int64_t sentAtUs) = nullptr;
 
     [[nodiscard]] constexpr bool validate() const {
         return owner != nullptr &&

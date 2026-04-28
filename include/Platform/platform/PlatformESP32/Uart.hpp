@@ -5,10 +5,14 @@
 #include "Types/Uart.hpp"
 #include "driver/gpio.h" // IWYU pragma: keep
 #include "driver/uart.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/projdefs.h"
+#include "freertos/task.h"
 #include "hal/uart_types.h"
 #include "soc/clk_tree_defs.h"
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -18,6 +22,11 @@
 namespace platform {
 
 class Uart {
+    struct CallbackRegistration {
+        void *owner = nullptr;
+        UartEventCallback callback = nullptr;
+    };
+
   public:
     ReturnCode init(UartConfig config) {
         ABORT_IF(config.uartNumber > UART_NUM_MAX, "Invalid UART number");
@@ -42,7 +51,7 @@ class Uart {
 
         FAIL_IF_ESP(uart_driver_install(_uartNumber(), 2048,
                                         static_cast<int>(_config.txBufferSize),
-                                        0, nullptr, 0),
+                                        eventQueueDepth, &_eventQueue, 0),
                     ERR(OperationFailed), "Failed to install UART driver");
         FAIL_IF_ESP(uart_param_config(_uartNumber(), &uart_config),
                     ERR(OperationFailed),
@@ -54,7 +63,28 @@ class Uart {
                                  _pinOrNoChange(_config.pins.ctsPin)),
                     ERR(OperationFailed), "Failed to set UART pins");
 
+        auto taskCreated =
+            xTaskCreate(_eventTaskMain, "UartEventTask", eventTaskStackSize,
+                        this, eventTaskPriority, &_eventTask);
+        FAIL_IF(taskCreated != pdPASS, ERR(OperationFailed),
+                "Failed to start UART event task");
+
         return OK();
+    }
+
+    ReturnCode registerCallback(void *owner, UartEventCallback callback) {
+        FAIL_IF(owner == nullptr || callback == nullptr, ERR(InvalidArgument),
+                "Invalid UART event callback registration");
+        for (auto &registration : _callbacks) {
+            if (registration.callback == nullptr) {
+                registration = {
+                    .owner = owner,
+                    .callback = callback,
+                };
+                return OK();
+            }
+        }
+        return ERR(OutOfMemory);
     }
 
     ReturnCode write(std::span<const std::byte> data, bool drain = false,
@@ -159,13 +189,91 @@ class Uart {
     }
 
     ReturnCode deinit() {
+        if (_eventTask != nullptr) {
+            auto *task = _eventTask;
+            _eventTask = nullptr;
+            vTaskDelete(task);
+        }
         FAIL_IF_ESP(uart_driver_delete(_uartNumber()), ERR(OperationFailed),
                     "Failed to delete UART driver");
+        _eventQueue = nullptr;
         return OK();
     }
 
   private:
+    static void _eventTaskMain(void *arg) {
+        auto *self = static_cast<Uart *>(arg);
+        self->_eventTaskLoop();
+    }
+
+    void _eventTaskLoop() {
+        uart_event_t event{};
+        while (_eventTask != nullptr) {
+            if (_eventQueue == nullptr) {
+                vTaskDelay(pdMS_TO_TICKS(10));
+                continue;
+            }
+            if (xQueueReceive(_eventQueue, &event, portMAX_DELAY) != pdTRUE) {
+                continue;
+            }
+            _dispatchEvent(_mapEvent(event));
+        }
+        vTaskDelete(nullptr);
+    }
+
+    void _dispatchEvent(UartEvent event) {
+        for (auto &registration : _callbacks) {
+            if (registration.callback != nullptr) {
+                (void)registration.callback(registration.owner, event);
+            }
+        }
+    }
+
+    static UartEvent _mapEvent(const uart_event_t &event) {
+        switch (event.type) {
+        case UART_DATA:
+            return {
+                .type = UartEventType::Data,
+                .size = event.size,
+            };
+        case UART_FIFO_OVF:
+        case UART_BUFFER_FULL:
+            return {
+                .type = UartEventType::Overflow,
+                .size = event.size,
+            };
+        case UART_BREAK:
+            return {
+                .type = UartEventType::Break,
+                .size = event.size,
+            };
+        case UART_PARITY_ERR:
+        case UART_FRAME_ERR:
+            return {
+                .type = UartEventType::Error,
+                .size = event.size,
+            };
+        case UART_PATTERN_DET:
+            return {
+                .type = UartEventType::Pattern,
+                .size = event.size,
+            };
+        default:
+            return {
+                .type = UartEventType::Unknown,
+                .size = event.size,
+            };
+        }
+    }
+
     UartConfig _config;
+    QueueHandle_t _eventQueue = nullptr;
+    TaskHandle_t _eventTask = nullptr;
+    std::array<CallbackRegistration, 4> _callbacks{};
+
+    static constexpr int eventQueueDepth = 16;
+    static constexpr uint32_t eventTaskStackSize = 2048;
+    static constexpr UBaseType_t eventTaskPriority = 3;
 
     static int _pinOrNoChange(std::optional<Pin> pin) {
         if (pin.has_value()) {

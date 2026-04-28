@@ -15,7 +15,7 @@
 
 namespace Totem::Wire::Rs485::detail {
 
-class Slave : public Node<Slave, SlaveConfig> {
+class Slave : public Node<Slave, SlaveConfig, TransceiverMode::ReadWrite> {
     friend class HasLifecycle<Slave, SlaveConfig>;
     friend struct LifecycleContract<Slave, SlaveConfig>;
 
@@ -29,10 +29,9 @@ class Slave : public Node<Slave, SlaveConfig> {
 
     static constexpr const char *name = "Rs485::Slave";
     static constexpr bool sendsHeartbeat = false;
-
     ReturnCode _onHello(const Header &header) {
         sequence.reset(static_cast<uint8_t>(header.sequenceNumber + 1));
-        FAIL_IF_ERR_FWD(_sendHello(header.sequenceNumber),
+        FAIL_IF_ERR_FWD(_sendHello(header.sequenceNumber, FrameTurn::Reaction),
                         "Failed to send RS485 slave hello response");
         _state.store(NodeState::Synced, std::memory_order_release);
         _deferHeartbeat();

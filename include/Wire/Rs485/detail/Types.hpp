@@ -16,6 +16,25 @@ enum class NodeState : uint8_t {
     Synced,
 };
 
+enum class TransceiverMode : uint8_t {
+    ReadWrite,
+    WriteRead,
+};
+
+enum class TransceiverState : uint8_t {
+    Invalid = 0,
+    Initial,
+    WriteRequest,
+    ReadReaction,
+    ReadRequest,
+    WriteReaction,
+};
+
+enum class FrameTurn : uint8_t {
+    Initiated,
+    Reaction,
+};
+
 enum class TransactionKind : uint8_t {
     Data,
     Request,

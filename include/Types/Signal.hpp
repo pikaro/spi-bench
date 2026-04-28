@@ -17,6 +17,10 @@ enum class Signal : uint8_t {
     Under,
     Min,
     Max,
+    UartData,
+    UartOverflow,
+    UartError,
+    Rs485Attention,
 };
 
 struct SignalWaitResult {

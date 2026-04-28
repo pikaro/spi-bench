@@ -1,9 +1,26 @@
 #pragma once
 
 #include "Platform/Hardware.hpp"
+#include "Types/Error.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+
+enum class UartEventType : uint8_t {
+    Data,
+    Overflow,
+    Error,
+    Break,
+    Pattern,
+    Unknown,
+};
+
+struct UartEvent {
+    UartEventType type = UartEventType::Unknown;
+    size_t size = 0;
+};
+
+using UartEventCallback = ReturnCode (*)(void *owner, UartEvent event);
 
 struct Pins {
     std::optional<::platform::Pin> txPin = std::nullopt;

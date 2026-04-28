@@ -116,9 +116,25 @@ template <class Link> class Rs485Transport : public BaseTransport {
                      ERR_ARG(receiveRet));
             }
 
-            FAIL_IF_UNEXPECTED_FWD(
-                frameSize, _prepareFrameForSend(item, slot->data),
-                "Failed to prepare RS485 PubSub frame");
+            auto frameSizeResult = _prepareFrameForSend(item, slot->data);
+            if (!frameSizeResult) {
+                _log_w(SV_FMT
+                       ": dropping unserializable PubSub message %u: "
+                       ERR_FMT,
+                       SV_ARG(_instanceName), item->envelope.header.messageId,
+                       ERR_ARG(frameSizeResult.error()));
+                auto ackRet = _ack(item->envelope);
+                if (!ackRet.ok()) {
+                    _log_w(SV_FMT
+                           ": dropped PubSub message %u was not tracked for "
+                           "release: " ERR_FMT,
+                           SV_ARG(_instanceName),
+                           item->envelope.header.messageId, ERR_ARG(ackRet));
+                }
+                ++count;
+                continue;
+            }
+            auto frameSize = *frameSizeResult;
             detail::log_trace_packet("rs485.tx.prepared",
                                      item->envelope.header,
                                      _instanceName.data());

@@ -22,6 +22,7 @@ class Master {
             .response = std::as_writable_bytes(std::span(&_response, 1)),
             .onData = nullptr,
             .onRequest = _onSyncRequest,
+            .onBeforeResponse = _onBeforeSyncResponse,
         };
     }
 
@@ -44,9 +45,20 @@ class Master {
 
         self->_response = {
             .requestReceivedTime = receivedAtUs,
-            .responseSentTime = ::platform::get_time_us(),
+            .responseSentTime = 0,
         };
         return static_cast<uint16_t>(sizeof(SyncResponse));
+    }
+
+    static ReturnCode _onBeforeSyncResponse(
+        void *owner, Totem::Wire::PayloadType /*payloadType*/,
+        std::span<std::byte> response, int64_t sentAtUs) {
+        auto *self = static_cast<Master *>(owner);
+        FAIL_IF(response.size() != sizeof(SyncResponse),
+                ERR(CoreError, InvalidArgument),
+                "Invalid clock sync response length %zu", response.size());
+        self->_response.responseSentTime = sentAtUs;
+        return OK();
     }
 
     SyncResponse _response{};

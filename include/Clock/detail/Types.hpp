@@ -81,6 +81,15 @@ struct State {
         return static_cast<uint32_t>(tus / 1000);
     }
 
+    // Called by the transport layer with the time captured just before the
+    // request frame was transmitted. Overwrites the coarse T1 from requestSync()
+    // with a more accurate wire-level timestamp.
+    void setSentTime(int64_t sentAtUs) {
+        if (sentAtUs != 0) {
+            _sentTime = sentAtUs;
+        }
+    }
+
     [[nodiscard]] std::expected<SyncRequest, ReturnCode> requestSync() {
         if (synced()) {
             _resyncInProgress = true;

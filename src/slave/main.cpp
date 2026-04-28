@@ -26,7 +26,8 @@ void setup() {
                                          .pins = {
                                              .txPin = ::platform::Pin::GPIO6,
                                              .rxPin = ::platform::Pin::GPIO5,
-                                         }}}));
+                                         }},
+                           .attentionPin = ::platform::Pin::GPIO10}));
 
     pubSubRs485.setup();
 

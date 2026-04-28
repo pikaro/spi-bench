@@ -41,6 +41,7 @@ class Slave {
             self->_state.reset();
             return OK();
         }
+        self->_state.setSentTime(result.sentAtUs);
         if (auto ret = self->_state.receiveSyncResponse(self->_response);
             !ret.ok()) {
             _log_w("Failed to receive clock sync response: " ERR_FMT,

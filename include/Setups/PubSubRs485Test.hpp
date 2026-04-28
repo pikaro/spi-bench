@@ -39,7 +39,7 @@ template <class Link> struct PubSubRs485TestSetup {
 
     struct Config {
         uint32_t masterPublishIntervalMs = 10;
-        uint32_t slavePublishIntervalMs = 1;
+        uint32_t slavePublishIntervalMs = 10;
         uint32_t reportIntervalMs = 1000;
         bool masterPublishes = false;
         bool slavePublishes = true;

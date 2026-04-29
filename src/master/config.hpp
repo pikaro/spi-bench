@@ -1,0 +1,69 @@
+#pragma once
+
+#include "Platform/Hardware.hpp"
+#include "Wire/Rs485/Interfaces/MasterConfig.hpp"
+#include "Wire/Spi/Interfaces/MasterConfig.hpp"
+#include "Wire/Spi/Interfaces/Types.hpp"
+
+inline Totem::Wire::Rs485::MasterConfig rs485MasterConfig{
+    .uartConfig =
+        {
+            .uartNumber = 1,
+            .pins =
+                {
+                    .txPin = Pin::GPIO12,
+                    .rxPin = Pin::GPIO13,
+                },
+        },
+    .attentionPin = Pin::GPIO1,
+};
+
+inline Totem::Wire::Spi::MasterConfig spiMasterBusHighSpeedConfig{
+    .bus =
+        {
+            .busId = Totem::Wire::Spi::BusId::Bus2,
+            .pins =
+                {
+                    .mosiPin = Pin::GPIO15,
+                    .misoPin = Pin::GPIO16,
+                    .sclkPin = Pin::GPIO17,
+                },
+            .maxTransferSize = 4096,
+        },
+    .device =
+        {
+            .csPin = Pin::GPIO4,
+            .clockHz = 20'000'000,
+            .queueSize = 1,
+            // attention GPIO5
+        },
+    // {
+    //     .csPin = Pin::GPIO11,
+    //     .clockHz = 20'000'000,
+    //     .queueSize = 1,
+    //     // attention GPIO10
+    // },
+};
+
+inline Totem::Wire::Spi::MasterConfig spiMasterBusLowSpeedConfig{
+    .bus =
+        {
+            .busId = Totem::Wire::Spi::BusId::Bus3,
+            .pins =
+                {
+                    .mosiPin = Pin::GPIO36,
+                    .misoPin = Pin::GPIO21,
+                    .sclkPin = Pin::GPIO37,
+                },
+            .maxTransferSize = 4096,
+        },
+    .device =
+        {
+            .csPin = Pin::GPIO38,
+            .clockHz = 5'000'000,
+            .mode = Totem::Wire::Spi::Mode::Mode0,
+            .bitOrder = Totem::Wire::Spi::BitOrder::MsbFirst,
+            .queueSize = 1,
+            // attention GPIO39
+        },
+};

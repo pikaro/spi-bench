@@ -1,17 +1,19 @@
+#include "Clock/Facade.hpp"
 #include "Macros/Facade.hpp"
 #include "Platform/PlatformSelect.hpp"
 #include "Services/Clock.hpp"
 #include "Setups/Core.hpp"
 #include "Setups/PubSubRs485Test.hpp"
-#include "Setups/PubSubTest.hpp"
-
-#include "Clock/Facade.hpp"
 #include "Wire/Rs485/Facade.hpp"
+#include "Wire/Spi/Facade.hpp"
+#include "config.hpp"
 #include <cstdint>
 
 CoreSetup core{};
 
 Totem::Wire::Rs485::Master rs485master{core.taskRegistry};
+// Totem::Wire::Spi::Master spiMasterHighSpeed{core.taskRegistry};
+Totem::Wire::Spi::Master spiMasterLowSpeed{core.taskRegistry};
 Totem::Clock::Clock clockMaster{Totem::Clock::Clock::Role::Master};
 PubSubRs485TestSetup<Totem::Wire::Rs485::Master> pubSubRs485{
     core.taskRegistry, rs485master,
@@ -26,13 +28,10 @@ void setup() {
 
     ClockService::set(clockMaster);
 
-    ABORT_IF_ERR_BEGIN(
-        rs485master.begin({.uartConfig = {.uartNumber = 1,
-                                          .pins = {
-                                              .txPin = ::platform::Pin::GPIO12,
-                                              .rxPin = ::platform::Pin::GPIO13,
-                                          }},
-                            .attentionPin = ::platform::Pin::GPIO1}));
+    ABORT_IF_ERR_BEGIN(rs485master.begin(rs485MasterConfig));
+
+    // ABORT_IF_ERR_BEGIN(spiMasterHighSpeed.begin(spiMasterBusHighSpeedConfig))
+    ABORT_IF_ERR_BEGIN(spiMasterLowSpeed.begin(spiMasterBusLowSpeedConfig))
 
     ABORT_IF_ERR(clockMaster.registerHandler(rs485master),
                  "Failed to register RS485 clock handler");

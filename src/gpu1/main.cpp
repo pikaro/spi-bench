@@ -1,14 +1,16 @@
+#include "Clock/Facade.hpp"
 #include "Macros/Facade.hpp"
 #include "Platform/PlatformSelect.hpp"
 #include "Setups/Core.hpp"
 #include "Setups/PubSubRs485Test.hpp"
-
-#include "Clock/Facade.hpp"
 #include "Wire/Rs485/Facade.hpp"
+#include "Wire/Spi/Facade.hpp"
+#include "config.hpp"
 #include <cstdint>
 
 CoreSetup core{};
 Totem::Wire::Rs485::Slave rs485Slave{core.taskRegistry};
+Totem::Wire::Spi::Slave spiSlave{core.taskRegistry};
 Totem::Clock::Clock clockSlave{Totem::Clock::Clock::Role::Slave};
 PubSubRs485TestSetup<Totem::Wire::Rs485::Slave> pubSubRs485{
     core.taskRegistry, rs485Slave,
@@ -21,13 +23,8 @@ void setup() {
     core.setup();
     _log_i("Core setup complete");
 
-    ABORT_IF_ERR_BEGIN(
-        rs485Slave.begin({.uartConfig = {.uartNumber = 1,
-                                         .pins = {
-                                             .txPin = ::platform::Pin::GPIO6,
-                                             .rxPin = ::platform::Pin::GPIO5,
-                                         }},
-                           .attentionPin = ::platform::Pin::GPIO10}));
+    ABORT_IF_ERR_BEGIN(rs485Slave.begin(rs485SlaveConfig));
+    ABORT_IF_ERR_BEGIN(spiSlave.begin(spiSlaveConfig));
 
     pubSubRs485.setup();
 

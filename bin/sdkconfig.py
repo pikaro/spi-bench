@@ -31,6 +31,16 @@ with Path("platformio.ini").open() as f:
 section = f"env:{pioenv}"
 stack = []
 
+if not parser.has_section(section):
+    _error = f"Section {section} not found in platformio.ini"
+    raise RuntimeError(_error)
+
+sdkconfig_name = parser.get(
+    section,
+    "custom_sdkconfig",
+    fallback=pioenv,
+)
+
 while section:
     if not parser.has_section(section):
         _error = f"Section {section} not found in platformio.ini"
@@ -43,7 +53,7 @@ while section:
     else:
         section = None
 
-sdkconfig = f"sdkconfig.{pioenv}.defaults"
+sdkconfig = f"sdkconfig.{sdkconfig_name}.defaults"
 sdkconfig_tmp = f"{sdkconfig}.tmp"
 
 with open(sdkconfig_tmp, "w") as f:
@@ -56,9 +66,7 @@ with open(sdkconfig_tmp, "w") as f:
                 f.write(f"# = sdkconfig.stack.{item}\n")
                 f.write(f"# {'=' * 80}\n\n")
                 f.write(stack_file.read())
-                log.info(
-                    f"Included sdkconfig.stack.{item} in sdkconfig.{pioenv}.defaults"
-                )
+                log.info(f"Included sdkconfig.stack.{item} in {sdkconfig}")
 
 if not Path(sdkconfig).exists():
     Path(sdkconfig_tmp).rename(sdkconfig)
@@ -68,8 +76,8 @@ else:
 
     if md5_old != md5_new:
         Path(sdkconfig_tmp).rename(sdkconfig)
-        if Path(f"sdkconfig.{pioenv}").exists():
-            Path(f"sdkconfig.{pioenv}").unlink()
+        if Path(f"sdkconfig.{sdkconfig_name}").exists():
+            Path(f"sdkconfig.{sdkconfig_name}").unlink()
         log.info(f"Updated {sdkconfig} with new content")
     else:
         Path(sdkconfig_tmp).unlink()

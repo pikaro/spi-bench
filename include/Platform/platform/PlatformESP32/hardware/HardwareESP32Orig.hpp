@@ -2,17 +2,72 @@
 
 #pragma once
 
+#include "soc/gpio_num.h"
 #include <cstdint>
 
 namespace platform {
 
-#define UART_RX_PIN UART_PIN_NO_CHANGE
-#define UART_TX_PIN UART_PIN_NO_CHANGE
-#define UART_RTS_PIN UART_PIN_NO_CHANGE
-#define UART_CTS_PIN UART_PIN_NO_CHANGE
+enum class Esp32OrigPin : uint8_t {
+    BOOT = GPIO_NUM_0,
 
-enum class Pin : uint8_t {
+    UART0_TX = GPIO_NUM_1,
 
+    GPIO2 = GPIO_NUM_2,
+
+    UART0_RX = GPIO_NUM_3,
+
+    GPIO4 = GPIO_NUM_4,
+
+    // Reserved for flash
+    // GPIO6 = GPIO_NUM_6,
+    // GPIO7 = GPIO_NUM_7,
+    // GPIO8 = GPIO_NUM_8,
+    // GPIO9 = GPIO_NUM_9,
+    // GPIO10 = GPIO_NUM_10,
+    // GPIO11 = GPIO_NUM_11,
+
+    GPIO12 = GPIO_NUM_12,
+    GPIO13 = GPIO_NUM_13,
+    GPIO14 = GPIO_NUM_14,
+    GPIO15 = GPIO_NUM_15,
+    HSPI_MISO = GPIO_NUM_12,
+    HSPI_MOSI = GPIO_NUM_13,
+    HSPI_SCLK = GPIO_NUM_14,
+    HSPI_CS = GPIO_NUM_15,
+
+    GPIO16 = GPIO_NUM_16,
+    GPIO17 = GPIO_NUM_17,
+
+    GPIO5 = GPIO_NUM_5,
+    GPIO18 = GPIO_NUM_18,
+    GPIO19 = GPIO_NUM_19,
+    GPIO23 = GPIO_NUM_23,
+    VSPI_SCLK = GPIO_NUM_18,
+    VSPI_MISO = GPIO_NUM_19,
+    VSPI_MOSI = GPIO_NUM_23,
+    VSPI_CS = GPIO_NUM_5,
+
+    // Reserved for PSRAM
+    // GPIO20 = GPIO_NUM_20,
+    // GPIO21 = GPIO_NUM_21,
+
+    GPIO22 = GPIO_NUM_22,
+
+    GPIO25 = GPIO_NUM_25,
+    GPIO26 = GPIO_NUM_26,
+    GPIO27 = GPIO_NUM_27,
+
+    GPIO32 = GPIO_NUM_32,
+    GPIO33 = GPIO_NUM_33,
+    GPIO34 = GPIO_NUM_34,
+    GPIO35 = GPIO_NUM_35,
+    GPIO36 = GPIO_NUM_36,
+
+    // GPIOs 37-39 are input-only
+    // GPIO37 = GPIO_NUM_37,
+    // GPIO38 = GPIO_NUM_38,
+
+    GPIO39 = GPIO_NUM_39,
 };
 
 } // namespace platform

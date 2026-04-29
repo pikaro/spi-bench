@@ -3,6 +3,7 @@
 #include "LoggingBackend/Interfaces/Types.hpp"
 #include "Macros/Facade.hpp"
 #include "Platform/PlatformSelect.hpp"
+#include "StaticConfig/Logging.hpp"
 #include "TaskController/Interfaces/Config.hpp"
 #include <cstddef>
 
@@ -10,7 +11,7 @@ namespace Totem::LoggingBackend {
 
 struct AggregatorConfig {
     size_t ringBufferSize = 100;
-    LogLevel defaultLogLevel = LogLevel::Info;
+    LogLevel defaultLogLevel = LoggingConfig::defaultLogLevel;
     ::platform::Tick sendTimeoutMs = 0;
     ::platform::Tick receiveTimeoutMs = 5;
 

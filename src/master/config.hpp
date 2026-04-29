@@ -33,10 +33,13 @@ inline Totem::Wire::Spi::MasterConfig spiMasterBusHighSpeedConfig{
     .device =
         {
             .csPin = Pin::GPIO4,
-            .clockHz = 20'000'000,
+            .clockHz = 10'000'000,
+            .mode = Totem::Wire::Spi::Mode::Mode0,
+            .bitOrder = Totem::Wire::Spi::BitOrder::MsbFirst,
             .queueSize = 1,
-            // attention GPIO5
+            .inputDelayNs = 0,
         },
+    .attentionPin = Pin::GPIO5,
     // {
     //     .csPin = Pin::GPIO11,
     //     .clockHz = 20'000'000,
@@ -51,8 +54,8 @@ inline Totem::Wire::Spi::MasterConfig spiMasterBusLowSpeedConfig{
             .busId = Totem::Wire::Spi::BusId::Bus3,
             .pins =
                 {
-                    .mosiPin = Pin::GPIO36,
-                    .misoPin = Pin::GPIO21,
+                    .mosiPin = Pin::GPIO21,
+                    .misoPin = Pin::GPIO36,
                     .sclkPin = Pin::GPIO37,
                 },
             .maxTransferSize = 4096,
@@ -60,10 +63,11 @@ inline Totem::Wire::Spi::MasterConfig spiMasterBusLowSpeedConfig{
     .device =
         {
             .csPin = Pin::GPIO38,
-            .clockHz = 5'000'000,
+            .clockHz = 10'000'000,
             .mode = Totem::Wire::Spi::Mode::Mode0,
             .bitOrder = Totem::Wire::Spi::BitOrder::MsbFirst,
             .queueSize = 1,
-            // attention GPIO39
+            .inputDelayNs = 0,
         },
+    .attentionPin = Pin::GPIO39,
 };

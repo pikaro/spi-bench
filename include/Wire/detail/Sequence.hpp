@@ -4,8 +4,9 @@
 #include <cstdint>
 namespace Totem::Wire::detail {
 
+template <typename T = uint8_t>
 struct Sequence {
-    uint8_t next() {
+    T next() {
         return _sequenceNumber.fetch_add(1, std::memory_order_relaxed);
     }
 
@@ -18,18 +19,19 @@ struct Sequence {
     //            (_sequenceNumber.load(std::memory_order_relaxed) + 1) % 256;
     // }
 
-    bool received(uint8_t num) {
+    bool received(T num) {
+        auto expected = num;
         return _sequenceNumber.compare_exchange_strong(
-            num, (num + 1) % 256, std::memory_order_acq_rel,
+            expected, static_cast<T>(num + 1), std::memory_order_acq_rel,
             std::memory_order_acquire);
     }
 
-    void reset(uint8_t num = 0) {
+    void reset(T num = 0) {
         _sequenceNumber.store(num, std::memory_order_release);
     }
 
   private:
-    std::atomic<uint8_t> _sequenceNumber = 0;
+    std::atomic<T> _sequenceNumber = 0;
 };
 
 } // namespace Totem::Wire::detail

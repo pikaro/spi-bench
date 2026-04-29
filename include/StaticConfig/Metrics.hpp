@@ -6,6 +6,7 @@ struct MetricCollection {
     static constexpr bool enabled = true;
     static constexpr bool pubSub = false;
     static constexpr bool rs485 = false;
+    static constexpr bool spi = false;
     static constexpr bool taskController = true;
     static constexpr bool taskControllerRegistry = true;
     static constexpr bool logging = true;

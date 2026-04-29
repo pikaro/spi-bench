@@ -37,8 +37,11 @@ first implementation without rediscovering the same design constraints.
 
 ## Proposed File Layout
 
+- `include/Wire/Spi/Interfaces/`
+  - `MasterConfig.hpp`
+  - `SlaveConfig.hpp`
+  - `Types.hpp`
 - `include/Wire/Spi/detail/`
-  - `Config.hpp`
   - `Pdu.hpp`
   - `Trace.hpp`
   - `Metrics.hpp`
@@ -47,7 +50,6 @@ first implementation without rediscovering the same design constraints.
   - `Master.hpp`
   - `Slave.hpp`
   - `Scheduler.hpp`
-  - `AttentionLine.hpp` if the RS485 helper is not reusable
   - `PlatformSelect.hpp`
   - `Types.hpp`
   - `platform/PlatformESP32.hpp`
@@ -58,9 +60,9 @@ first implementation without rediscovering the same design constraints.
 - `include/Setups/PubSubSpiTest.hpp`
   - first hardware test harness
 
-Do not add `Wire/Spi/Interfaces/` unless external code needs to name or store
-SPI-specific public types independently of `Facade.hpp`. Reuse
-`Wire/Interfaces/` for cross-wire request/result and payload concepts.
+SPI uses `Wire/Spi/Interfaces/` for config and small public types because the
+environment config files instantiate them directly. Reuse `Wire/Interfaces/`
+for cross-wire request/result and payload concepts.
 
 ## Component-Owned Platform Abstraction
 
@@ -68,6 +70,10 @@ SPI should not start as a top-level `Platform/` abstraction. UART sits there
 because multiple components use it. SPI is expected to be owned by the SPI wire
 transport, so hardware-specific code should live under
 `Wire/Spi/detail/platform/` until another component genuinely needs it.
+
+Phase one enables the ESP-IDF `esp_driver_spi` component through
+`ENABLE_SPI=ON`. Without that build flag, the component-owned abstraction can
+compile headers but cannot link or instantiate the ESP-IDF master/slave driver.
 
 ### `Wire/Spi/detail/Types.hpp`
 
@@ -95,7 +101,7 @@ Define compact platform-agnostic data types:
   - overflow / missed transaction for slave mode if exposed by ESP-IDF
 
 Keep `Wire/Spi/detail/Types.hpp` independent from ESP-IDF. It may use
-`::platform::Pin` like other hardware-facing component configs, but it should
+`Pin` like other hardware-facing component configs, but it should
 not include ESP-IDF headers.
 
 ### `detail::platform::SpiMasterBus`
@@ -126,6 +132,12 @@ Blocking transfer is acceptable initially because the master scheduler task is
 the bus owner. Move to async only if profiling shows transfer blocking harms
 latency elsewhere.
 
+ESP-IDF host selection must stay behind the platform layer. `BusId::Bus2` maps
+to `SPI2_HOST`; `BusId::Bus3` is only valid on chips where
+`SOC_SPI_PERIPH_NUM > 2`. ESP32-C3 exposes only `SPI2_HOST`, so selecting bus 3
+must fail validation / initialization instead of referencing `SPI3_HOST` at
+compile time.
+
 ### `detail::platform::SpiSlaveDevice`
 
 Responsibilities:
@@ -150,6 +162,11 @@ class SpiSlaveDevice {
 The slave should keep its next TX slot ready before asserting attention. If no
 application data is pending, the TX slot still carries a valid empty/status
 frame.
+
+The first ESP32 slave wrapper intentionally supports one queued in-flight DMA
+transaction. That is enough to validate initialization and the platform shape;
+the protocol layer can expand this to multiple prequeued slots once
+`SlotBuffer` ownership exists.
 
 ### DMA Buffer Rules
 
@@ -607,6 +624,16 @@ Critical checks:
 - metadata CRC failures reset only the affected peer.
 - Empty/status slots are valid frames, not special cases.
 
+Implementation status:
+
+- `Pdu.hpp`, `SlotBuffer.hpp`, `Trace.hpp`, and `Metrics.hpp` exist.
+- The slot header is 19 bytes: 18 CRC-covered metadata bytes plus CRC8.
+- The frame header is 10 bytes: 9 CRC-covered metadata bytes plus CRC8.
+- CRC is intentionally metadata-only; payload integrity remains the L7
+  protocol's responsibility.
+- Slot parsing validates preamble, version, declared slot length, bucket length,
+  payload bytes, and frame bounds before exposing payload spans.
+
 ### Phase 3: One Master And One Slave Wire Link
 
 1. Add `Wire::Spi::Master` with one peer.
@@ -624,6 +651,32 @@ Critical checks:
 - Reset on malformed slot must recover without reboot.
 - Slave always has a valid TX slot queued before attention.
 
+Implementation status:
+
+- A first `Transceiver<Capacity>` exists and is embedded by `Spi::Master` and
+  `Spi::Slave`.
+- The transceiver can prepare hello, heartbeat, data, request, and response
+  frames, parse slots, dispatch registered `PayloadType` handlers, and queue
+  request responses for the next slot.
+- Handshake state uses the shared event-capable `Generic::StateMachine`.
+  `SendHello`, `RetryHello`, and `ReceiveHello` events make hello retries and
+  passive hello receipt explicit while reconnects remain explicit resets.
+- Slot and frame transmit counters use the shared `Wire/detail/Sequence`
+  helper. The helper is now width-parameterized with an unchanged `uint8_t`
+  default for RS485 and `uint16_t` use in SPI.
+- `Spi::Master` and `Spi::Slave` now drive one-peer SPI DMA turns from
+  TaskController runners.
+- The master retries `Hello` until the slave answers; the slave auto-queues a
+  `Hello` response after parsing the first master hello.
+- The public link exposes `ready()` and logs handshake completion on both sides.
+- `Spi::Slave::exchange()` defers one in-flight exchange request until the
+  currently queued DMA transfer completes, so application code does not mutate a
+  buffer already handed to the SPI slave driver.
+- Response frames are routed to the pending exchange callback. This is enough
+  for first Clock protocol validation, with the caveat that the current slave
+  timestamp is captured when the slot is queued because ESP-IDF slave mode only
+  wakes this wrapper after master clock completion.
+
 ### Phase 4: Attention And Event-Driven Scheduling
 
 1. Add per-peer attention config.
@@ -638,6 +691,35 @@ Critical checks:
 - No ad-hoc platform tasks for GPIO.
 - ISR path only records state and wakes the existing runner.
 - Sustained low attention causes repeated service until the peer drains.
+
+Implementation status:
+
+- The active-low open-drain attention-line implementation now lives in
+  `Wire/detail/AttentionLine.hpp` and is shared by RS485 and SPI.
+- SPI master and slave configs include TaskController runner config and an
+  optional attention pin.
+- `Spi::Master` now owns a TaskController runner and registers the attention
+  line as an ISR-backed input. The ISR records an attention request and wakes
+  the SPI runner with `Signal::SpiAttention`.
+- `Spi::Slave` now owns a TaskController runner and can drive the attention
+  line as an output based on whether the current TX slot contains frames.
+- SPI metrics include task-step and attention wake/assert/release counters.
+- The master clocks DMA turns when attention is asserted, when outbound data is
+  pending, or while the handshake is incomplete. Without an attention pin,
+  startup still progresses through the periodic task cadence.
+- The slave queues the next DMA transfer immediately after parsing the previous
+  one and only appends deferred application traffic while no transfer is queued.
+- The first practical wire test can now validate SPI driver initialization,
+  two-way hello readiness, attention wakeups when configured, and a single
+  deferred request/response exchange such as Clock sync.
+
+Remaining before PubSub work:
+
+- Publish transport availability changes to PubSub once the SPI PubSub
+  transport exists.
+- Add heartbeat/status recovery to the running link, not only hello/readiness.
+- Replace the one-exchange shortcut with the bounded per-peer egress and
+  in-flight tables planned for PubSub.
 
 ### Phase 5: PubSub Edge Transport
 

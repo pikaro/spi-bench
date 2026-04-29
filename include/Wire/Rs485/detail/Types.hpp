@@ -30,6 +30,10 @@ enum class TransceiverState : uint8_t {
     WriteReaction,
 };
 
+enum class TransceiverEvent : uint8_t {
+    Default = 0,
+};
+
 enum class FrameTurn : uint8_t {
     Initiated,
     Reaction,

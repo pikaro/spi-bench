@@ -14,7 +14,6 @@ void setup() {
     ::platform::delay(::platform::ms_to_ticks(3000));
 
     core.setup();
-    _log_i("Core setup complete");
 
     ABORT_IF_ERR_BEGIN(spiSlave.begin(spiSlaveConfig));
 

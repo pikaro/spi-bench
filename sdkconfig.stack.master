@@ -1,0 +1,4 @@
+# The master low-speed SPI bus uses GPIO36/GPIO37. On ESP32-S3 OPI PSRAM
+# builds those pins are part of the external memory bus, so PSRAM must stay
+# disabled for this board wiring.
+CONFIG_SPIRAM=n

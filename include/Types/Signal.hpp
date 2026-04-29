@@ -21,6 +21,8 @@ enum class Signal : uint8_t {
     UartOverflow,
     UartError,
     Rs485Attention,
+    SpiAttention,
+    SpiTransfer,
 };
 
 struct SignalWaitResult {

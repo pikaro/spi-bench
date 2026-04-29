@@ -158,7 +158,9 @@ class Controller : public HasLifecycle<Controller, Config>,
     }
 
     std::expected<uint8_t, ReturnCode> reap() override {
-        FAIL_IF_INACTIVE_UNEXPECTED("%s of %s", name, _ownerName);
+        if (!this->_life.active()) {
+            return 0;
+        }
         auto filter = [](const RunnerKey &, const RunnerEntry &entry) -> bool {
             return entry.runner->hasStopped();
         };
@@ -366,14 +368,12 @@ class Controller : public HasLifecycle<Controller, Config>,
     static ReturnCode _restartTaskInPlace(Controller &self, RunnerKey key,
                                           RunnerEntry &entry, TaskHooks hooks,
                                           Config config) {
-        auto restartedRunner = std::make_unique<Runner>(hooks, self._registry);
-        auto startResult = restartedRunner->start(config);
+        auto startResult = entry.runner->restart(config, hooks);
         if (!startResult.ok()) {
             _log_e("Failed to restart task runner %s->%s: " ERR_FMT,
                    self._ownerName, config.name, ERR_ARG(startResult));
             return startResult;
         }
-        entry.runner = std::move(restartedRunner);
         entry.hooks = hooks;
         entry.config = config;
         (void)key;

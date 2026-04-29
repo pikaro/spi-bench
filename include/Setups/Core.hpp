@@ -4,9 +4,10 @@
 #include "LoggingBackend/Facade.hpp"
 #include "Macros/Facade.hpp"
 #include "MetricsBackend/Facade.hpp"
-#include "Mutex/detail/Metrics.hpp"
 #include "Monitoring/Facade.hpp"
+#include "Mutex/detail/Metrics.hpp"
 #include "Platform/Console.hpp"
+#include "Platform/PlatformSelect.hpp"
 #include "Services/Commands.hpp"
 #include "Services/Metrics.hpp"
 #include "Support/CoreCommands.hpp"
@@ -47,6 +48,8 @@ struct CoreSetup {
         LoggingService::set(aggregator);
 
         ABORT_IF_ERR_BEGIN(monitoring.begin());
+
+        _log_i("Core setup complete");
     }
 
     ReturnCode work(uint32_t /*unused*/) {

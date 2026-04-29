@@ -29,7 +29,7 @@ enum class GpioEventType : uint8_t {
 };
 
 struct GpioEvent {
-    ::platform::Pin pin;
+    Pin pin;
     GpioEventType type = GpioEventType::Changed;
     bool level = false;
 };

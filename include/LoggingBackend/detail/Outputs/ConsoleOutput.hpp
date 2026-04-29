@@ -191,10 +191,6 @@ class ConsoleOutput : public HasLifecycle<ConsoleOutput, ConsoleConfig>,
         (LoggingConfig::useColor
              ? (5 * 2 * 5) // 5 groups, 2 colors each, 5 chars per color
              : 0);
-
-    LogLevel _logLevel = LogLevel::Info;
-    std::array<std::optional<LogLevel>, magic_enum::enum_count<LogComponent>()>
-        _componentLogLevels{std::nullopt};
 };
 
 inline constexpr LifecycleContract<ConsoleOutput, ConsoleConfig>

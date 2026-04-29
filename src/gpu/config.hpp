@@ -6,17 +6,17 @@
 
 #if (NODE_IDENTITY == GPUNode0)
 
-#define GPU_MOSI GPIO6
+#define GPU_MOSI GPIO4
 #define GPU_MISO GPIO5
-#define GPU_SCLK GPIO4
+#define GPU_SCLK GPIO6
 #define GPU_CS GPIO7
 #define GPU_ATTENTION GPIO8
 
 #elif (NODE_IDENTITY == GPUNode1)
 
-#define GPU_MOSI GPIO7
+#define GPU_MOSI GPIO9
 #define GPU_MISO GPIO8
-#define GPU_SCLK GPIO9
+#define GPU_SCLK GPIO7
 #define GPU_CS GPIO6
 #define GPU_ATTENTION GPIO5
 

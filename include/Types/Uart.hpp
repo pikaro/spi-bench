@@ -23,10 +23,10 @@ struct UartEvent {
 using UartEventCallback = ReturnCode (*)(void *owner, UartEvent event);
 
 struct Pins {
-    std::optional<::platform::Pin> txPin = std::nullopt;
-    std::optional<::platform::Pin> rxPin = std::nullopt;
-    std::optional<::platform::Pin> rtsPin = std::nullopt;
-    std::optional<::platform::Pin> ctsPin = std::nullopt;
+    std::optional<Pin> txPin = std::nullopt;
+    std::optional<Pin> rxPin = std::nullopt;
+    std::optional<Pin> rtsPin = std::nullopt;
+    std::optional<Pin> ctsPin = std::nullopt;
 };
 
 enum class BaudRate : uint32_t {

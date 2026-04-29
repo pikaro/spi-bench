@@ -48,6 +48,9 @@ organized as follows:
 - `include/Generated/Wire/`: generated wire-format support code
 - `include/Wire/Rs485/`: point-to-point RS485 wire layer; see
     [wire-rs485.md](wire-rs485.md)
+- `include/Wire/Spi/`: in-progress DMA-oriented SPI wire layer with a
+    component-owned ESP32 platform abstraction; see
+    [spi-transport-plan.md](spi-transport-plan.md)
 - `src/master/`, `src/slave/`, `src/listener/`: environment-specific execution
     roots selected by build configuration
 - `bin/`: project helper scripts used during build and code generation
@@ -60,6 +63,10 @@ lightweight public types that external code needs to name directly, and
 ## Build Model
 
 - `platformio.ini` defines PlatformIO environments and board-specific flags
+- PlatformIO environment-specific `board_build.cmake_extra_args` must include
+    parent environment arguments when overriding the field; otherwise ESP-IDF
+    component flags such as `ENABLE_SPI` are silently dropped for that
+    environment.
 - Top-level `CMakeLists.txt` requires `SRC_ROOT` and maps it to the selected
     source subtree
 - `src/CMakeLists.txt` maps PlatformIO environments to source roots:
@@ -81,6 +88,13 @@ order:
 
 If options have changed, it deletes the existing `sdkconfig.master` to force
 regeneration.
+
+The current master board wiring uses GPIO36/GPIO37 for the low-speed SPI bus.
+Those pins overlap the ESP32-S3 OPI PSRAM signal set on the devkit-style board,
+so `env:master` deliberately disables PSRAM through `sdkconfig.stack.master`.
+Changing this requires changing the board wiring or the SPI pin configuration;
+otherwise the SPI driver can wedge external memory access and trigger a system
+watchdog reset instead of a normal panic.
 
 ## Verification Model
 
@@ -139,6 +153,9 @@ guidance.
 Task monitoring treats managed task-controller runners and platform/system tasks
 as distinct sources. Managed native task handles are tracked explicitly so the
 system task source skips those tasks instead of reporting duplicates.
+Task-controller auto-restart reuses the existing managed runner entry and its
+metric handles; restart counts therefore remain attached to the same metric
+group instead of registering a new group for every failed task instance.
 
 Meaningful verification currently means:
 

@@ -35,7 +35,6 @@ struct Platform {
 
     static ReturnCode take_mutex(MutexHandle handle, Tick timeout) {
         if (xSemaphoreTake(handle, timeout) == pdTRUE) {
-            _log_d("Mutex taken by %s", pcTaskGetName(nullptr));
             return OK(CoreError);
         }
         return ERR(CoreError, Timeout);

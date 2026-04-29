@@ -21,7 +21,7 @@ struct SlaveConfig {
         .notifyExpectTimeout = false,
         .notifyTimeoutMs = 10,
     };
-    std::optional<::platform::Pin> attentionPin = std::nullopt;
+    std::optional<Pin> attentionPin = std::nullopt;
     size_t maxPayloadSize = 128;
     uint8_t handlerSlots = 4;
 

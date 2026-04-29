@@ -18,6 +18,10 @@ namespace Totem::Clock::detail {
 using DefaultError = ClockError;
 static constexpr LogComponent logComponent = LogComponent::Clock;
 
+enum class SyncEvent : uint8_t {
+    Default,
+};
+
 enum class SyncState : uint8_t {
     Invalid,
     Initial,
@@ -28,10 +32,10 @@ enum class SyncState : uint8_t {
 };
 
 constexpr std::array syncStateTransitions{
-    TRANSITION(SyncState, Initial, SyncSent),
-    TRANSITION(SyncState, SyncSent, SyncReceived),
-    TRANSITION(SyncState, SyncReceived, Calibrating),
-    TRANSITION(SyncState, Calibrating, Synced),
+    TRANSITION(Sync, Initial, SyncSent),
+    TRANSITION(Sync, SyncSent, SyncReceived),
+    TRANSITION(Sync, SyncReceived, Calibrating),
+    TRANSITION(Sync, Calibrating, Synced),
 };
 
 struct SyncRequest {
@@ -82,8 +86,8 @@ struct State {
     }
 
     // Called by the transport layer with the time captured just before the
-    // request frame was transmitted. Overwrites the coarse T1 from requestSync()
-    // with a more accurate wire-level timestamp.
+    // request frame was transmitted. Overwrites the coarse T1 from
+    // requestSync() with a more accurate wire-level timestamp.
     void setSentTime(int64_t sentAtUs) {
         if (sentAtUs != 0) {
             _sentTime = sentAtUs;
@@ -173,7 +177,7 @@ struct State {
     }
 
   private:
-    StateMachine<SyncState, syncStateTransitions> _syncState{
+    StateMachine<SyncState, SyncEvent, syncStateTransitions> _syncState{
         "Clock::State", SyncState::Initial, SyncState::Synced};
 
     std::atomic<int64_t> _drift{0};

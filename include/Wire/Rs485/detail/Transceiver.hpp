@@ -2,6 +2,7 @@
 
 #include "Generic/StateMachine.hpp"
 #include "Macros/Facade.hpp"
+#include "Platform/PlatformSelect.hpp"
 #include "Platform/platform/PlatformESP32/Uart.hpp"
 #include "Types/Error.hpp"
 #include "Types/Uart.hpp"
@@ -17,32 +18,31 @@
 namespace Totem::Wire::Rs485::detail {
 
 constexpr std::array writeReadTurnTransitions{
-    TRANSITION(TransceiverState, WriteRequest, ReadReaction),
-    TRANSITION(TransceiverState, ReadReaction, ReadRequest),
-    TRANSITION(TransceiverState, ReadRequest, WriteReaction),
-    TRANSITION(TransceiverState, WriteReaction, WriteRequest),
+    TRANSITION(Transceiver, WriteRequest, ReadReaction),
+    TRANSITION(Transceiver, ReadReaction, ReadRequest),
+    TRANSITION(Transceiver, ReadRequest, WriteReaction),
+    TRANSITION(Transceiver, WriteReaction, WriteRequest),
 };
 
 constexpr std::array readWriteTurnTransitions{
-    TRANSITION(TransceiverState, ReadRequest, WriteReaction),
-    TRANSITION(TransceiverState, WriteReaction, WriteRequest),
-    TRANSITION(TransceiverState, WriteRequest, ReadReaction),
-    TRANSITION(TransceiverState, ReadReaction, ReadRequest),
+    TRANSITION(Transceiver, ReadRequest, WriteReaction),
+    TRANSITION(Transceiver, WriteReaction, WriteRequest),
+    TRANSITION(Transceiver, WriteRequest, ReadReaction),
+    TRANSITION(Transceiver, ReadReaction, ReadRequest),
 };
 
 template <TransceiverMode Mode> class TurnStateMachine {
     static constexpr auto Transitions = Mode == TransceiverMode::WriteRead
                                             ? writeReadTurnTransitions
                                             : readWriteTurnTransitions;
-    using Machine = StateMachine<TransceiverState, Transitions>;
+    using Machine =
+        StateMachine<TransceiverState, TransceiverEvent, Transitions>;
 
   public:
     explicit TurnStateMachine(const char *ownerName)
         : _state(ownerName, startState()) {}
 
-    [[nodiscard]] TransceiverState current() const {
-        return _state.current();
-    }
+    [[nodiscard]] TransceiverState current() const { return _state.current(); }
 
     [[nodiscard]] bool canRead() const {
         const auto state = current();
@@ -95,7 +95,8 @@ template <TransceiverMode Mode> class TurnStateMachine {
                 ERR(CoreError, InvalidState),
                 "RS485 turn cannot read while in state %u",
                 static_cast<unsigned>(state));
-        FAIL_IF(type == FrameType::Grant && state != TransceiverState::ReadRequest,
+        FAIL_IF(type == FrameType::Grant &&
+                    state != TransceiverState::ReadRequest,
                 ERR(CoreError, InvalidState),
                 "RS485 grant cannot be read while in state %u",
                 static_cast<unsigned>(state));
@@ -117,8 +118,7 @@ template <TransceiverMode Mode> class TurnStateMachine {
     Machine _state;
 };
 
-template <TransceiverMode Mode>
-class Transceiver {
+template <TransceiverMode Mode> class Transceiver {
   public:
     using BeforeWriteCallback = ReturnCode (*)(void *owner, int64_t sentAtUs);
 
@@ -139,8 +139,7 @@ class Transceiver {
         return OK();
     }
 
-    ReturnCode registerUartCallback(void *owner,
-                                    UartEventCallback callback) {
+    ReturnCode registerUartCallback(void *owner, UartEventCallback callback) {
         return _uart.registerCallback(owner, callback);
     }
 
@@ -272,14 +271,10 @@ class Transceiver {
 
     ReturnCode discardRx() { return _uart.discardRx(); }
 
-    [[nodiscard]] TransceiverState turnState() const {
-        return _turn.current();
-    }
+    [[nodiscard]] TransceiverState turnState() const { return _turn.current(); }
 
     [[nodiscard]] bool canRead() const { return _turn.canRead(); }
-    [[nodiscard]] bool canReadRequest() const {
-        return _turn.canReadRequest();
-    }
+    [[nodiscard]] bool canReadRequest() const { return _turn.canReadRequest(); }
     [[nodiscard]] bool canInitiateWrite() const {
         return _turn.canInitiateWrite();
     }

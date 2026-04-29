@@ -3,6 +3,7 @@
 #include "LoggingBackend/Interfaces/IHasLogLevel.hpp"
 #include "LoggingBackend/Interfaces/Types.hpp"
 #include "Macros/Facade.hpp"
+#include "StaticConfig/Logging.hpp"
 #include "Types/Error.hpp"
 #include <array>
 #include <cstddef>
@@ -61,7 +62,7 @@ class HasLogLevel : public IHasLogLevel {
 
   private:
     const char *const _ownerName;
-    LogLevel _logLevel = LogLevel::Info;
+    LogLevel _logLevel = LoggingConfig::defaultLogLevel;
     std::array<std::optional<LogLevel>, magic_enum::enum_count<LogComponent>()>
         _componentLogLevels{std::nullopt};
 };

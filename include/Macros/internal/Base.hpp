@@ -6,5 +6,6 @@
 #define INTERNAL_GET_MACRO_2(_1, _2, NAME, ...) NAME
 #define INTERNAL_GET_MACRO_3(_1, _2, _3, NAME, ...) NAME
 #define INTERNAL_GET_MACRO_4(_1, _2, _3, _4, NAME, ...) NAME
+#define INTERNAL_GET_MACRO_5(_1, _2, _3, _4, _5, NAME, ...) NAME
 
 #define CONCAT(a, b) a##b

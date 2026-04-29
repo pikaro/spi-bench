@@ -11,6 +11,7 @@
 #include "internal/Error.hpp"
 #include "internal/Fail.hpp"
 #include "internal/Format.hpp"
+#include "internal/Hardware.hpp"
 #include "internal/Log.hpp"
 #include "internal/Markers.hpp"
 #include "internal/Metrics.hpp"

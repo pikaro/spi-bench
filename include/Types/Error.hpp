@@ -18,17 +18,28 @@ enum class CoreError : uint8_t {
     Unknown = 0,
     Ok,
     Abort,
-    InvalidArgument,
-    OutOfMemory,
-    NotFound,
-    OperationFailed,
     AlreadyExists,
-    Timeout,
-    Unexpected,
-    InvalidState,
+    Forbidden,
+    InvalidArgument,
     InvalidData,
+    InvalidResponse,
+    InvalidSize,
+    InvalidState,
+    InvalidVersion,
+    NotFound,
+    NotSupported,
+    OperationFailed,
+    OutOfMemory,
     Overflow,
+    Timeout,
     Underflow,
+    Unexpected,
+    // TODO: What's this?
+    NotFinished,
+    // FIXME: This should go to a net error type
+    InvalidMac,
+    // TODO: Should this be separate from wire?
+    CrcError,
 };
 
 enum class StorageError : uint8_t {

@@ -7,6 +7,7 @@
 #include <cstdint>
 
 CoreSetup core{};
+Totem::Clock::Clock clockSlave{Totem::Clock::Clock::Role::Slave};
 Totem::Wire::Spi::Slave spiSlave{core.taskRegistry};
 
 void setup() {

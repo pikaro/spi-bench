@@ -12,6 +12,7 @@ inline Totem::Wire::Spi::SlaveConfig spiSlaveConfig{
         },
     .csPin = Pin::VSPI_CS,
     .maxTransferSize = 4096,
+    .mode = Totem::Wire::Spi::Mode::Mode0,
     .queueSize = 1,
     .attentionPin = Pin::GPIO17,
 };

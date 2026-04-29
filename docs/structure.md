@@ -62,6 +62,18 @@ Component-specific config can stay in `detail/` if callers only pass it inline
 at construction, as RS485 currently does. Move such types to an `Interfaces/`
 folder only when external code needs to name or store them independently.
 
+`include/Wire/Spi/` currently follows that component-local shape: public
+construction goes through `Wire/Spi/Facade.hpp`, externally instantiated
+config/types live in `Wire/Spi/Interfaces/`, and the ESP32 SPI driver wrapper is
+owned by `Wire/Spi/detail/platform/`. Do not move SPI into top-level
+`Platform/` unless a second component starts using the same abstraction
+directly.
+
+Wire-level helpers that are reused across physical transports belong in
+`include/Wire/detail/`. `Wire/detail/AttentionLine.hpp` is one such helper: it
+owns the active-low open-drain GPIO attention-line behavior used by RS485 and
+SPI while transport-specific code decides which side observes or drives it.
+
 ## Editing Guidance
 
 - Prefer changes in the owning subsystem instead of cross-cutting edits

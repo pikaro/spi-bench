@@ -9,7 +9,7 @@
     "f_cpu": "240000000L",
     "f_flash": "40000000L",
     "flash_mode": "qio",
-    "psram_type": "opi",
+    "psram_type": "qspi",
     "hwids": [
       [
         "0x303A",

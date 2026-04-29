@@ -70,8 +70,8 @@ struct Platform {
             .totalBytes = total,
             .freeBytes = totalFree,
             .minFreeBytes = totalMin,
-            .freePct = safe_pct(totalFree, total),
-            .minFreePct = safe_pct(totalMin, total),
+            .freePct = ::safe_pct<float>(totalFree, total),
+            .minFreePct = ::safe_pct<float>(totalMin, total),
             .attrs = 0,
             .flags = to_bits(MemoryStatFlags::Specialized),
         };
@@ -115,8 +115,8 @@ struct Platform {
             .totalBytes = max,
             .freeBytes = now,
             .minFreeBytes = min,
-            .freePct = safe_pct(now, max),
-            .minFreePct = safe_pct(min, max),
+            .freePct = ::safe_pct<float>(now, max),
+            .minFreePct = ::safe_pct<float>(min, max),
             .attrs = attrs,
             .flags = flags,
         };

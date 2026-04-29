@@ -31,20 +31,12 @@ class Runner {
     [[nodiscard]] const Config &config() const { return _config; }
 
     ReturnCode start(Config cfg) {
-        _config = cfg;
-        _metricsGroupDesc.name = cfg.name;
-        _metrics = TaskMetrics::create(_metricsGroupDesc);
+        return _start(cfg);
+    }
 
-        if (!_stateManager.tryStart()) {
-            _log_e("Failed to start runner %s: Invalid state", _config.name);
-            return ERR(OperationFailed);
-        }
-
-        FAIL_IF_NOT(_createTask(), ERR(OperationFailed),
-                    "Task creation failed");
-
-        _hasEverStarted.store(true, std::memory_order_release);
-        return OK();
+    ReturnCode restart(Config cfg, TaskHooks hooks) {
+        _hooks = hooks;
+        return _start(cfg);
     }
 
     ReturnCode requestStop() { return signal(Signal::Stop); }
@@ -214,6 +206,26 @@ class Runner {
     }
 
   private:
+    ReturnCode _start(Config cfg) {
+        _config = cfg;
+        if (!_metrics.has_value()) {
+            _metricsGroupDesc.name = cfg.name;
+            _metrics = TaskMetrics::create(_metricsGroupDesc);
+        }
+
+        if (!_stateManager.tryStart()) {
+            _log_e("Failed to start runner %s: Invalid state", _config.name);
+            return ERR(OperationFailed);
+        }
+        _stopResult = std::nullopt;
+        _hasStopResult.store(false, std::memory_order_release);
+
+        FAIL_IF_NOT(_createTask(), ERR(OperationFailed),
+                    "Task creation failed");
+
+        _hasEverStarted.store(true, std::memory_order_release);
+        return OK();
+    }
     static void _run(void *runner) {
         auto *self = static_cast<Runner *>(runner);
         uintptr_t nativeHandle = 0;

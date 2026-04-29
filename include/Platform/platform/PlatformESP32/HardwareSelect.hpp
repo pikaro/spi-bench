@@ -1,3 +1,8 @@
+// IWYU pragma: private
+// IWYU pragma: friend "Platform/platform/PlatformESP32/.*"
+
+// IWYU pragma: private
+
 #pragma once
 
 // IWYU pragma: begin_exports

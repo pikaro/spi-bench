@@ -1,3 +1,5 @@
+// IWYU pragma: private
+
 #pragma once
 
 #define FIND_IN_VEC(vec, name)                                                 \

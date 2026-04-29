@@ -6,7 +6,7 @@
 #include "TaskController/Interfaces/IRegistry.hpp"
 #include "TaskController/Interfaces/TaskHooks.hpp"
 #include "Types/Error.hpp"
-#include "Wire/Rs485/detail/Config.hpp"
+#include "Wire/Rs485/Interfaces/SlaveConfig.hpp"
 #include "Wire/Rs485/detail/Node.hpp"
 #include "Wire/Rs485/detail/Pdu.hpp"
 #include "Wire/Rs485/detail/Types.hpp"

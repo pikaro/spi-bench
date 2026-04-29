@@ -1,3 +1,5 @@
+// IWYU pragma: private
+
 #pragma once
 
 #include "FreeRTOSConfig.h"
@@ -127,14 +129,12 @@ struct Platform {
     static void wdt_reset() { esp_task_wdt_reset(); }
     static ReturnCode wdt_add() {
         auto result = esp_task_wdt_add(nullptr);
-        FAIL_IF_ESP(result, ERR(CoreError, OperationFailed),
-                    "Failed to add task to watchdog");
+        FAIL_IF_PLATFORM_FWD(result, "Failed to add task to watchdog");
         return OK(CoreError);
     }
     static ReturnCode wdt_remove() {
         auto result = esp_task_wdt_delete(nullptr);
-        FAIL_IF_ESP(result, ERR(CoreError, OperationFailed),
-                    "Failed to remove task from watchdog");
+        FAIL_IF_PLATFORM_FWD(result, "Failed to remove task from watchdog");
         return OK(CoreError);
     }
 

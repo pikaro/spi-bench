@@ -1,10 +1,16 @@
+// IWYU pragma: private
+
 #pragma once
 
-#include "LoggingBackend/Interfaces/Types.hpp" // IWYU pragma: export
-#include "Services/Logging.hpp"                // IWYU pragma: export
-#include <array>                               // IWYU pragma: export
-#include <source_location>                     // IWYU pragma: export
-#include <string_view>                         // IWYU pragma: export
+// IWYU pragma: begin_exports
+
+#include "LoggingBackend/Interfaces/Types.hpp"
+#include "Services/Logging.hpp"
+#include <array>
+#include <source_location>
+#include <string_view>
+
+// IWYU pragma: end_exports
 
 namespace Totem::LoggerBackend::detail {
 

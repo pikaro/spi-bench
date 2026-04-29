@@ -1,3 +1,5 @@
+// IWYU pragma: private
+
 #pragma once
 
 #include "Macros/Facade.hpp"

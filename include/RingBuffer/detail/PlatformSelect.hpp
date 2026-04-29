@@ -1,3 +1,6 @@
+// IWYU pragma: private
+// IWYU pragma: friend "RingBuffer/detail/.*"
+
 #pragma once
 
 // IWYU pragma: begin_exports

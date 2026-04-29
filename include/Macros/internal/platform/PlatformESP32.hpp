@@ -1,3 +1,5 @@
+// IWYU pragma: private
+
 #pragma once
 
 #define TICKS_TO_MS(xTicks) ((xTicks * 1000) / configTICK_RATE_HZ)

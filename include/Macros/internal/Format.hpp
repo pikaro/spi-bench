@@ -1,9 +1,11 @@
+// IWYU pragma: private
+
 #pragma once
 
 #include "magic_enum/magic_enum.hpp" // IWYU pragma: export
 
 #define SV_FMT "%*.*s"
-#define INTERNAL_SV_ARG_PLAIN(sv)                                             \
+#define INTERNAL_SV_ARG_PLAIN(sv)                                              \
     0, static_cast<int>((sv).size()),                                          \
         ((sv).data() != nullptr ? (sv).data() : "")
 #define INTERNAL_SV_ARG_PAD(sv, pad)                                           \
@@ -31,7 +33,7 @@
                          MAGIC_CHR_NOCAST)(__VA_ARGS__)
 
 #define MAGIC_PUBSUB_SV_FMT                                                    \
-    "record with topic " SV_FMT " from node " SV_FMT                         \
+    "record with topic " SV_FMT " from node " SV_FMT                           \
     " with message ID %lu at %llu us"
 #define MAGIC_PUBSUB_SV_ARG(header)                                            \
     MAGIC_SV_ARG(Topic, header.topic), MAGIC_SV_ARG(NodeId, header.source),    \

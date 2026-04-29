@@ -1,6 +1,7 @@
+// IWYU pragma: private
+
 #pragma once
 
-#include "Macros/Facade.hpp"
 #include "Platform/platform/PlatformESP32/Uart.hpp"
 #include "StaticConfig/Console.hpp"
 #include "Types/Error.hpp"

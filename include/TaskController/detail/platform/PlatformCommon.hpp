@@ -1,3 +1,5 @@
+// IWYU pragma: private
+
 #pragma once
 
 namespace Totem::TaskController::detail::platform {

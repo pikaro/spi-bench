@@ -1,6 +1,11 @@
+// IWYU pragma: private
+
 #pragma once
 
 #include "FreeRTOSConfig.h"
+#include "Macros/internal/Error.hpp"
+#include "Types/Error.hpp"
+#include "esp_err.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h" // IWYU pragma: keep
@@ -79,6 +84,53 @@ inline void early_log_error(const char *tag, const char *msg) {
         return "<static>";
     }
     return pcTaskGetName(nullptr);
+}
+
+constexpr ReturnCode map_platform_error_core(esp_err_t err) {
+    switch (err) {
+    case ESP_OK:
+        return OK();
+    case ESP_FAIL:
+        return ERR(CoreError, OperationFailed);
+    case ESP_ERR_INVALID_ARG:
+        return ERR(CoreError, InvalidArgument);
+    case ESP_ERR_INVALID_STATE:
+        return ERR(CoreError, InvalidState);
+    case ESP_ERR_INVALID_SIZE:
+        return ERR(CoreError, InvalidSize);
+    case ESP_ERR_NO_MEM:
+        return ERR(CoreError, OutOfMemory);
+    case ESP_ERR_NOT_FOUND:
+        return ERR(CoreError, NotFound);
+    case ESP_ERR_TIMEOUT:
+        return ERR(CoreError, Timeout);
+    case ESP_ERR_NOT_SUPPORTED:
+        return ERR(CoreError, NotSupported);
+    case ESP_ERR_INVALID_RESPONSE:
+        return ERR(CoreError, InvalidResponse);
+    case ESP_ERR_INVALID_CRC:
+        return ERR(CoreError, CrcError);
+    case ESP_ERR_INVALID_VERSION:
+        return ERR(CoreError, InvalidVersion);
+    case ESP_ERR_INVALID_MAC:
+        return ERR(CoreError, InvalidMac);
+    case ESP_ERR_NOT_FINISHED:
+        return ERR(CoreError, NotFinished);
+    case ESP_ERR_NOT_ALLOWED:
+        return ERR(CoreError, Forbidden);
+    default:
+        return ERR(CoreError, Unknown);
+    }
+}
+
+constexpr ReturnCode map_platform_error(esp_err_t err) {
+    if (err >= -1 && err <= 0x3000) {
+        return map_platform_error_core(err);
+    }
+
+    // TODO: Map other error ranges (WiFi, flash, etc.) as needed
+
+    return ERR(CoreError, Unknown);
 }
 
 } // namespace platform

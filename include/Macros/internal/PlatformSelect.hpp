@@ -1,3 +1,6 @@
+// IWYU pragma: private
+// IWYU pragma: friend "Macros/detail/.*"
+
 #pragma once
 
 // IWYU pragma: begin_exports

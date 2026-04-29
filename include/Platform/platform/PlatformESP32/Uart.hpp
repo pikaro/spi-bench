@@ -1,3 +1,5 @@
+// IWYU pragma: private
+
 #pragma once
 
 #include "Macros/Facade.hpp"
@@ -6,8 +8,8 @@
 #include "driver/gpio.h" // IWYU pragma: keep
 #include "driver/uart.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
 #include "freertos/projdefs.h"
+#include "freertos/queue.h"
 #include "freertos/task.h"
 #include "hal/uart_types.h"
 #include "soc/clk_tree_defs.h"
@@ -49,19 +51,19 @@ class Uart {
                 },
         };
 
-        FAIL_IF_ESP(uart_driver_install(_uartNumber(), 2048,
-                                        static_cast<int>(_config.txBufferSize),
-                                        eventQueueDepth, &_eventQueue, 0),
-                    ERR(OperationFailed), "Failed to install UART driver");
-        FAIL_IF_ESP(uart_param_config(_uartNumber(), &uart_config),
-                    ERR(OperationFailed),
-                    "Failed to configure UART parameters");
-        FAIL_IF_ESP(uart_set_pin(_uartNumber(),
-                                 _pinOrNoChange(_config.pins.txPin),
-                                 _pinOrNoChange(_config.pins.rxPin),
-                                 _pinOrNoChange(_config.pins.rtsPin),
-                                 _pinOrNoChange(_config.pins.ctsPin)),
-                    ERR(OperationFailed), "Failed to set UART pins");
+        FAIL_IF_PLATFORM_FWD(
+            uart_driver_install(_uartNumber(), 2048,
+                                static_cast<int>(_config.txBufferSize),
+                                eventQueueDepth, &_eventQueue, 0),
+            "Failed to install UART driver");
+        FAIL_IF_PLATFORM_FWD(uart_param_config(_uartNumber(), &uart_config),
+                             "Failed to configure UART parameters");
+        FAIL_IF_PLATFORM_FWD(uart_set_pin(_uartNumber(),
+                                          _pinOrNoChange(_config.pins.txPin),
+                                          _pinOrNoChange(_config.pins.rxPin),
+                                          _pinOrNoChange(_config.pins.rtsPin),
+                                          _pinOrNoChange(_config.pins.ctsPin)),
+                             "Failed to set UART pins");
 
         auto taskCreated =
             xTaskCreate(_eventTaskMain, "UartEventTask", eventTaskStackSize,
@@ -109,20 +111,19 @@ class Uart {
 
     ReturnCode waitTxComplete(uint32_t timeoutMs) {
         size_t free;
-        FAIL_IF_ESP(uart_get_tx_buffer_free_size(_uartNumber(), &free),
-                    ERR(OperationFailed),
-                    "Failed to get UART TX buffer free size");
+        FAIL_IF_PLATFORM_FWD(uart_get_tx_buffer_free_size(_uartNumber(), &free),
+                             "Failed to get UART TX buffer free size");
         auto waitRet =
             uart_wait_tx_done(_uartNumber(), pdMS_TO_TICKS(timeoutMs));
-        FAIL_IF_ESP(waitRet, ERR(OperationFailed), "Failed to flush UART");
+        FAIL_IF_PLATFORM_FWD(waitRet, "Failed to flush UART");
         return OK();
     }
 
     std::expected<size_t, ReturnCode> available() const {
         size_t available = 0;
-        FAIL_IF_ESP(uart_get_buffered_data_len(_uartNumber(), &available),
-                    std::unexpected(ERR(OperationFailed)),
-                    "Failed to get UART buffered data length");
+        FAIL_IF_PLATFORM_FWD_UNEXPECTED(
+            uart_get_buffered_data_len(_uartNumber(), &available),
+            "Failed to get UART buffered data length");
         return available;
     }
 
@@ -134,9 +135,9 @@ class Uart {
         }
 
         size_t available = 0;
-        FAIL_IF_ESP(uart_get_buffered_data_len(_uartNumber(), &available),
-                    std::unexpected(ERR(OperationFailed)),
-                    "Failed to get UART buffered data length");
+        FAIL_IF_PLATFORM_FWD_UNEXPECTED(
+            uart_get_buffered_data_len(_uartNumber(), &available),
+            "Failed to get UART buffered data length");
 
         if (available == 0) {
             return std::unexpected(ERR(NotFound));
@@ -183,8 +184,8 @@ class Uart {
     }
 
     ReturnCode discardRx() {
-        FAIL_IF_ESP(uart_flush_input(_uartNumber()), ERR(OperationFailed),
-                    "Failed to flush UART input");
+        FAIL_IF_PLATFORM_FWD(uart_flush_input(_uartNumber()),
+                             "Failed to flush UART input");
         return OK();
     }
 
@@ -194,8 +195,8 @@ class Uart {
             _eventTask = nullptr;
             vTaskDelete(task);
         }
-        FAIL_IF_ESP(uart_driver_delete(_uartNumber()), ERR(OperationFailed),
-                    "Failed to delete UART driver");
+        FAIL_IF_PLATFORM_FWD(uart_driver_delete(_uartNumber()),
+                             "Failed to delete UART driver");
         _eventQueue = nullptr;
         return OK();
     }

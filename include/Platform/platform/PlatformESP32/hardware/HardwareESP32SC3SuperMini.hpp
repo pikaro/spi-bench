@@ -1,3 +1,5 @@
+// IWYU pragma: private
+
 #pragma once
 
 #include "soc/gpio_num.h"

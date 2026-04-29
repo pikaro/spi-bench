@@ -1,3 +1,5 @@
+// IWYU pragma: private
+
 #pragma once
 
 #define INTERNAL_FAIL_IF_IMPL(cond, why, action, msg, ...)                     \
@@ -156,25 +158,6 @@
 #define FAIL_IF_IS_NOT_VOID(what, against, msg, ...)                           \
     FAIL_IF_IS_NOT_THEN(what, against, return, msg, ##__VA_ARGS__)
 
-#if defined(ESP_PLATFORM)
-#include "esp_err.h"
-
-// Fail if ESP error
-#define FAIL_IF_ERR_ESP_THEN(expr, action, msg, ...)                           \
-    do {                                                                       \
-        auto _err_ = (expr);                                                   \
-        INTERNAL_FAIL_IF_IMPL_CODE(_err_ != ESP_OK, esp_err_to_name(_err_),    \
-                                   action, msg, _err_, ##__VA_ARGS__);         \
-    } while (0)
-#define ABORT_IF_ERR_ESP(expr, msg, ...)                                       \
-    FAIL_IF_ERR_ESP_THEN(expr, abort(), msg, ##__VA_ARGS__)
-#define FAIL_IF_ESP(what, ret, msg, ...)                                       \
-    FAIL_IF_ERR_ESP_THEN(what, return (ret), msg, ##__VA_ARGS__)
-#define FAIL_IF_ESP_VOID(what, msg, ...)                                       \
-    FAIL_IF_ERR_ESP_THEN(what, return, msg, ##__VA_ARGS__)
-
-#endif
-
 // Fail if ReturnCode error
 #define FAIL_IF_ERR_THEN(expr, action, msg, ...)                               \
     if (auto _rc_ = (expr); !_rc_.ok()) {                                      \
@@ -192,6 +175,22 @@
 #define FAIL_IF_ERR_FWD_UNEXPECTED(expr, msg, ...)                             \
     FAIL_IF_ERR_THEN(expr, return std::unexpected(_rc_), msg, ##__VA_ARGS__)
 #define ABORT_IF_ERR_BEGIN(expr) ABORT_IF_ERR(expr, "Failed to begin: " #expr)
+
+// Fail if platform error
+#define FAIL_IF_PLATFORM_THEN(expr, action, msg, ...)                          \
+    FAIL_IF_ERR_THEN(::platform::map_platform_error(expr), action, msg,        \
+                     ##__VA_ARGS__)
+#define ABORT_IF_ERR_PLATFORM(expr, msg, ...)                                  \
+    FAIL_IF_PLATFORM_THEN(expr, abort(), msg, ##__VA_ARGS__)
+#define FAIL_IF_PLATFORM(what, ret, msg, ...)                                  \
+    FAIL_IF_PLATFORM_THEN(what, return (ret), msg, ##__VA_ARGS__)
+#define FAIL_IF_PLATFORM_VOID(what, msg, ...)                                  \
+    FAIL_IF_PLATFORM_THEN(what, return, msg, ##__VA_ARGS__)
+#define FAIL_IF_PLATFORM_FWD(what, msg, ...)                                   \
+    FAIL_IF_PLATFORM_THEN(what, return _rc_, msg, ##__VA_ARGS__)
+#define FAIL_IF_PLATFORM_FWD_UNEXPECTED(what, msg, ...)                        \
+    FAIL_IF_PLATFORM_THEN(what, return std::unexpected(_rc_), msg,             \
+                          ##__VA_ARGS__)
 
 // Fail if optional has no value
 #define FAIL_IF_NOT_OPT_THEN(var, expr, action, msg, ...)                      \

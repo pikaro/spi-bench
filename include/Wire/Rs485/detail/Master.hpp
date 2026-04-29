@@ -3,10 +3,11 @@
 #include "Base/HasLifecycle.hpp"
 #include "Base/HasTaskController.hpp"
 #include "Macros/Facade.hpp"
+#include "Platform/PlatformSelect.hpp"
 #include "TaskController/Interfaces/IRegistry.hpp"
 #include "TaskController/Interfaces/TaskHooks.hpp"
 #include "Types/Error.hpp"
-#include "Wire/Rs485/detail/Config.hpp"
+#include "Wire/Rs485/Interfaces/MasterConfig.hpp"
 #include "Wire/Rs485/detail/Node.hpp"
 #include "Wire/Rs485/detail/Pdu.hpp"
 #include "Wire/Rs485/detail/Types.hpp"
@@ -15,8 +16,7 @@
 
 namespace Totem::Wire::Rs485::detail {
 
-class Master
-    : public Node<Master, MasterConfig, TransceiverMode::WriteRead> {
+class Master : public Node<Master, MasterConfig, TransceiverMode::WriteRead> {
     friend class HasLifecycle<Master, MasterConfig>;
     friend struct LifecycleContract<Master, MasterConfig>;
 

@@ -1,3 +1,6 @@
+// IWYU pragma: private
+// IWYU pragma: friend "Queue/detail/.*"
+
 #pragma once
 
 // IWYU pragma: begin_exports

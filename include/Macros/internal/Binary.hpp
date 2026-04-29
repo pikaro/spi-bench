@@ -1,3 +1,5 @@
+// IWYU pragma: private
+
 #pragma once
 
 #define BIT_MASK(pos) static_cast<uint8_t>(1U << static_cast<uint8_t>(pos))

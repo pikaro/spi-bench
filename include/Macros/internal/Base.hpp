@@ -1,3 +1,5 @@
+// IWYU pragma: private
+
 #pragma once
 
 #define INTERNAL_GET_MACRO_1(_1, NAME, ...) NAME

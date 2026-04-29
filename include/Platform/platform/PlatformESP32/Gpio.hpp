@@ -1,3 +1,5 @@
+// IWYU pragma: private
+
 #pragma once
 
 #include "Macros/Facade.hpp"
@@ -6,6 +8,8 @@
 #include "Types/Gpio.hpp"
 #include "driver/gpio.h"
 #include "esp_err.h"
+#include "hal/gpio_types.h"
+#include "soc/gpio_num.h"
 #include <cstdint>
 #include <expected>
 #include <optional>
@@ -27,14 +31,14 @@ class Gpio {
         const gpio_config_t config{
             .pin_bit_mask = _pinMask(pin),
             .mode = GPIO_MODE_INPUT,
-            .pull_up_en = pull == GpioPull::Up ? GPIO_PULLUP_ENABLE
-                                               : GPIO_PULLUP_DISABLE,
+            .pull_up_en =
+                pull == GpioPull::Up ? GPIO_PULLUP_ENABLE : GPIO_PULLUP_DISABLE,
             .pull_down_en = pull == GpioPull::Down ? GPIO_PULLDOWN_ENABLE
                                                    : GPIO_PULLDOWN_DISABLE,
             .intr_type = _toInterruptType(interrupt),
         };
-        FAIL_IF_ESP(gpio_config(&config), ERR(CoreError, OperationFailed),
-                    "Failed to configure GPIO input");
+        FAIL_IF_PLATFORM_FWD(gpio_config(&config),
+                             "Failed to configure GPIO input");
         return OK();
     }
 
@@ -52,21 +56,22 @@ class Gpio {
             .pull_down_en = GPIO_PULLDOWN_DISABLE,
             .intr_type = GPIO_INTR_DISABLE,
         };
-        FAIL_IF_ESP(gpio_config(&config), ERR(CoreError, OperationFailed),
-                    "Failed to configure GPIO output");
+        FAIL_IF_PLATFORM_FWD(gpio_config(&config),
+                             "Failed to configure GPIO output");
         return setLevel(initialLevel);
     }
 
     ReturnCode setLevel(bool high) {
         FAIL_IF(!_pin.has_value(), ERR(CoreError, InvalidState),
                 "Cannot set unconfigured GPIO");
-        FAIL_IF_ESP(gpio_set_level(_gpio(), high ? 1 : 0),
-                    ERR(CoreError, OperationFailed), "Failed to set GPIO");
+        FAIL_IF_PLATFORM_FWD(gpio_set_level(_gpio(), high ? 1 : 0),
+                             "Failed to set GPIO");
         return OK();
     }
 
     std::expected<bool, ReturnCode> level() const {
-        FAIL_IF(!_pin.has_value(), std::unexpected(ERR(CoreError, InvalidState)),
+        FAIL_IF(!_pin.has_value(),
+                std::unexpected(ERR(CoreError, InvalidState)),
                 "Cannot read unconfigured GPIO");
         return gpio_get_level(_gpio()) != 0;
     }
@@ -87,9 +92,8 @@ class Gpio {
         FAIL_IF(installRet != ESP_OK && installRet != ESP_ERR_INVALID_STATE,
                 ERR(CoreError, OperationFailed),
                 "Failed to install GPIO ISR service");
-        FAIL_IF_ESP(gpio_isr_handler_add(_gpio(), _isr, this),
-                    ERR(CoreError, OperationFailed),
-                    "Failed to register GPIO ISR handler");
+        FAIL_IF_PLATFORM_FWD(gpio_isr_handler_add(_gpio(), _isr, this),
+                             "Failed to register GPIO ISR handler");
         _isrRegistered = true;
         return OK();
     }
@@ -119,12 +123,11 @@ class Gpio {
             return;
         }
         const bool level = gpio_get_level(self->_gpio()) != 0;
-        self->_isrCallback(
-            self->_owner,
-            GpioEvent{.pin = *self->_pin,
-                      .type = level ? GpioEventType::Rising
-                                    : GpioEventType::Falling,
-                      .level = level});
+        self->_isrCallback(self->_owner,
+                           GpioEvent{.pin = *self->_pin,
+                                     .type = level ? GpioEventType::Rising
+                                                   : GpioEventType::Falling,
+                                     .level = level});
     }
 
     [[nodiscard]] static uint64_t _pinMask(Pin pin) {

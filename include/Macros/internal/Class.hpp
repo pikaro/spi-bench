@@ -1,3 +1,5 @@
+// IWYU pragma: private
+
 #pragma once
 
 #define DELETE_COPY_CONSTRUCTOR(Class) Class(const Class &) = delete;

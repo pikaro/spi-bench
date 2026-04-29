@@ -1,3 +1,5 @@
+// IWYU pragma: private
+
 #pragma once
 
 // IWYU pragma: begin_exports

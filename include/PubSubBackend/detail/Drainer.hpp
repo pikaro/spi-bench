@@ -239,20 +239,52 @@ class Drainer {
         }
         for (size_t i = 0; i < targetCount; ++i) {
             const auto &target = targets[i];
+            if ((*storeResult)->pendingCount == 0) {
+                break;
+            }
             log_trace_packet("drainer.transport.enqueue", item.header,
                              target.name.data());
             _log_d("Drainer: enqueue to transport " SV_FMT
                    " (%u) for " MAGIC_PUBSUB_SV_FMT,
                    SV_ARG(target.name), target.transportId,
                    MAGIC_PUBSUB_SV_ARG(item.header));
-            FAIL_IF_ERR_FWD(
-                target.transporter->enqueue(*storeResult, target.dispatch),
-                "Failed to enqueue message to transport " SV_FMT
-                " for topic " SV_FMT,
-                SV_ARG(target.name),
-                MAGIC_SV_ARG(Spec::Topic, item.header.topic));
+            auto enqueueRet =
+                target.transporter->enqueue(*storeResult, target.dispatch);
+            if (!enqueueRet.ok()) {
+                _log_w("Drainer: dropping transport target " SV_FMT
+                       " for " MAGIC_PUBSUB_SV_FMT " after enqueue failed: "
+                       ERR_FMT,
+                       SV_ARG(target.name),
+                       MAGIC_PUBSUB_SV_ARG(item.header),
+                       ERR_ARG(enqueueRet));
+                FAIL_IF_ERR_FWD(_releaseTransportTarget(
+                                    **storeResult, target.transportId),
+                                "Failed to release failed transport target");
+            }
         }
         return ret;
+    }
+
+    ReturnCode _releaseTransportTarget(StoredFrame &frame,
+                                       TransportId transportId) {
+        if (frame.pendingCount == 0) {
+            return OK();
+        }
+        const auto mask = static_cast<TransportMask>(transportId);
+        if ((frame.pendingMask & mask) == 0) {
+            return OK();
+        }
+        frame.pendingMask &= ~mask;
+        --frame.pendingCount;
+        if (frame.pendingCount != 0) {
+            return OK();
+        }
+        auto envelope = frame.envelope;
+        frame = StoredFrame{};
+        if (envelope.release == nullptr) {
+            return OK();
+        }
+        return envelope.ack();
     }
 
     TransportDirectory &_transporters;

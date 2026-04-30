@@ -140,6 +140,18 @@ class Controller : public HasLifecycle<Controller, Config>,
         runner->signalFromIsr(signal);
     }
 
+    ReturnCode signalTaskDirect(RunnerKey ref, Signal signal = Signal::Ping) {
+        FAIL_IF(ref == 0, ERR(InvalidArgument),
+                "Cannot directly signal %s of %s: invalid runner key", name,
+                _ownerName);
+        // RunnerKey is the Runner pointer assigned by Directory::add().
+        // This path is for already-owned runner keys where taking the
+        // controller directory lock would risk nested lock acquisition from
+        // another managed task.
+        auto *runner = reinterpret_cast<Runner *>(ref);
+        return runner->signalDirect(signal);
+    }
+
     ReturnCode signalTask(std::string_view refName,
                           Signal signal = Signal::Ping) {
         FAIL_IF_INACTIVE_ERR("%s of %s", name, _ownerName);

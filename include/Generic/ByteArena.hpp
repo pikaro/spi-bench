@@ -29,9 +29,10 @@ class ByteArena : public HasMutex<Derived> {
     };
 
   public:
-    explicit ByteArena(LogComponent logComponent)
-        : logComponent(logComponent),
-          _spans{Span{
+    static constexpr LogComponent logComponent = Derived::logComponent;
+
+    ByteArena()
+        : _spans{Span{
               .offset = 0, .size = Config::bufferSize, .occupied = false}} {}
 
     ReturnCode clean() {
@@ -159,9 +160,6 @@ class ByteArena : public HasMutex<Derived> {
             false, "Timed out locking ByteArena for contains check of item");
         return _hasRecord(stored);
     }
-
-  protected:
-    LogComponent logComponent;
 
   private:
     [[nodiscard]] bool _hasRecord(const T &stored) const {

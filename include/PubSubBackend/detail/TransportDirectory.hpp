@@ -33,13 +33,15 @@ class TransportDirectory : public TransporterDirectoryImpl {
     using Base = TransporterDirectoryImpl;
 
   public:
+    static constexpr LogComponent logComponent =
+        Totem::PubSubBackend::detail::logComponent;
+
     struct Snapshot {
         std::array<TransporterEntry, Spec::Limits::maxTransports> entries{};
         size_t count = 0;
     };
 
-    explicit TransportDirectory(const char *ownerName)
-        : Base(ownerName, Totem::PubSubBackend::detail::logComponent) {}
+    explicit TransportDirectory(const char *ownerName) : Base(ownerName) {}
 
     std::expected<TransportId, ReturnCode> add(TransportId transportId,
                                                std::string_view transporterName,

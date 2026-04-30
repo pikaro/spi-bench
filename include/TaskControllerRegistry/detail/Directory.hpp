@@ -32,9 +32,10 @@ using DirectoryImpl = BaseDirectory<Directory, SourceKey, SourceEntry,
 
 class Directory : public DirectoryImpl {
   public:
-    explicit Directory()
-        : DirectoryImpl("TaskControllerRegistry",
-                        Totem::TaskControllerRegistry::detail::logComponent) {}
+    static constexpr LogComponent logComponent =
+        Totem::TaskControllerRegistry::detail::logComponent;
+
+    explicit Directory() : DirectoryImpl("TaskControllerRegistry") {}
 
     std::expected<SourceKey, ReturnCode>
     add(SourceKey sourceKey, ITaskSource &source, TaskSourceInfo info) {

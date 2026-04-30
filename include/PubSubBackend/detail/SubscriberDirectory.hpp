@@ -28,9 +28,11 @@ using SubscriberDirectoryImpl =
 
 class SubscriberDirectory : public SubscriberDirectoryImpl {
   public:
+    static constexpr LogComponent logComponent =
+        Totem::PubSubBackend::detail::logComponent;
+
     explicit SubscriberDirectory(const char *ownerName)
-        : SubscriberDirectoryImpl(ownerName,
-                                  Totem::PubSubBackend::detail::logComponent) {}
+        : SubscriberDirectoryImpl(ownerName) {}
 
     std::expected<SubscriberKey, ReturnCode> add(const char *subscriberName,
                                                  const Subscriber &subscriber,

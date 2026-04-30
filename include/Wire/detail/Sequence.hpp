@@ -26,6 +26,10 @@ struct Sequence {
             std::memory_order_acquire);
     }
 
+    [[nodiscard]] T current() const {
+        return _sequenceNumber.load(std::memory_order_acquire);
+    }
+
     void reset(T num = 0) {
         _sequenceNumber.store(num, std::memory_order_release);
     }

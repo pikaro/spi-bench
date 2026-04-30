@@ -449,7 +449,7 @@ class Node : public HasLifecycle<Derived, ConfT>,
     static constexpr uint32_t transactionResponseTimeoutMs = 50;
     static constexpr uint8_t maxMissedHeartbeats = 3;
 
-    static const LogComponent logComponent =
+    static constexpr LogComponent logComponent =
         Totem::Wire::Rs485::detail::logComponent;
 
   private:

@@ -160,8 +160,9 @@ struct Metrics {
     GaugeHandle maxTurnUs;
     uint32_t maxTurnUsValue = 0;
 
+    static constexpr LogLevel minimumLogLevel = MetricCollection::spi;
     static constexpr bool enabled =
-        MetricCollection::enabled && MetricCollection::spi;
+        metrics_enabled(groupDef.logLevel, minimumLogLevel);
 };
 
 inline Metrics &metrics() {

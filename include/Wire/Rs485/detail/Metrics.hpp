@@ -179,8 +179,9 @@ struct Metrics {
     GaugeHandle maxStepUs;
     uint32_t maxStepUsValue = 0;
 
+    static constexpr LogLevel minimumLogLevel = MetricCollection::rs485;
     static constexpr bool enabled =
-        MetricCollection::enabled && MetricCollection::rs485;
+        metrics_enabled(groupDef.logLevel, minimumLogLevel);
 };
 
 inline Metrics &metrics() {

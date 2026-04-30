@@ -198,7 +198,7 @@ class BINDING Aggregator : public HasLifecycle<Aggregator, AggregatorConfig>,
 
     Metrics _metrics = Metrics::create();
 
-    static const LogComponent logComponent =
+    static constexpr LogComponent logComponent =
         Totem::LoggingBackend::detail::logComponent;
 };
 

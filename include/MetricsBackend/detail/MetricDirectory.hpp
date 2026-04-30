@@ -28,9 +28,11 @@ using MetricDirectoryImpl =
 
 class MetricDirectory : public MetricDirectoryImpl {
   public:
+    static constexpr LogComponent logComponent =
+        Totem::MetricsBackend::detail::logComponent;
+
     explicit MetricDirectory(MetricGroupDirectory &groupDirectory)
-        : MetricDirectoryImpl("MetricDirectory",
-                              Totem::MetricsBackend::detail::logComponent),
+        : MetricDirectoryImpl("MetricDirectory"),
           _groupDirectory(groupDirectory) {}
 
     std::expected<MetricKey, ReturnCode> add(MetricKey metricKey,

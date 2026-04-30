@@ -1,5 +1,6 @@
 #pragma once
 
+#include "LoggingBackend/Interfaces/Types.hpp"
 #include "Macros/Facade.hpp"
 #include "MetricsBackend/Interfaces/Types.hpp"
 #include "Services/Metrics.hpp" // IWYU pragma: keep
@@ -39,8 +40,10 @@ struct TaskMetrics {
     Totem::MetricsBackend::CounterHandle startedCount;
     Totem::MetricsBackend::CounterHandle stoppedCount;
 
+    static constexpr LogLevel minimumLogLevel =
+        MetricCollection::taskController;
     static constexpr bool enabled =
-        MetricCollection::enabled && MetricCollection::taskController;
+        metrics_enabled(LogLevel::Info, minimumLogLevel);
 };
 
 } // namespace Totem::TaskController::detail

@@ -37,7 +37,7 @@ struct MasterConfig {
     Totem::TaskController::Config task{
         .name = "SpiMasterTask",
         .priority = 2,
-        .stackSize = 4096,
+        .stackSize = 8192,
         .intervalMs = 100,
         .noCatchup = true,
         .useNotify = true,

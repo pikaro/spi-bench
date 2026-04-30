@@ -20,9 +20,10 @@ class EgressBuffer : public ByteArena<EgressBuffer<Config>, Header, Config> {
     using NodeId = typename Spec::NodeId;
 
   public:
-    EgressBuffer()
-        : ByteArena<EgressBuffer<Config>, Header, Config>(
-              Totem::PubSubBackend::detail::logComponent) {}
+    static constexpr LogComponent logComponent =
+        Totem::PubSubBackend::detail::logComponent;
+
+    EgressBuffer() = default;
 
     static constexpr const char *name = "PubSub::EgressBuffer";
 

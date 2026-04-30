@@ -291,6 +291,16 @@ Each peer needs a two-way handshake:
 3. Master marks peer ready and publishes transport availability.
 4. Peer sequence and connection id reset on reconnect.
 
+`Hello` is an epoch boundary while the link is handshaking. Once the link is
+ready, forward/in-order `Hello` slots are consumed as stale queued handshake
+output without moving the receive cursor; they must not reset the link, dispatch
+frame payloads, fail pending operations, or trigger another automatic `Hello`
+response. A ready-state `Hello` whose slot sequence moves backwards is treated
+as a peer restart and re-enters the handshake. A future connection-id change
+should become the explicit "new peer epoch" signal, but with the current fixed
+connection id this sequence-direction rule keeps stale queued output and fresh
+reconnect attempts distinct.
+
 The attention GPIO can serve as the initial slave-to-master readiness signal.
 Before protocol handshake, the line has no other useful semantic meaning: it
 only tells the master that the slave wants to be clocked. Protocol readiness
@@ -315,6 +325,7 @@ Recovery should:
 
 - discard pending per-peer SPI protocol state
 - nack or drop in-flight PubSub egress for that peer
+- preserve registered L3 handlers and callbacks across link reset
 - preserve unrelated peer queues
 - increment metrics
 - publish transport availability change to PubSub
@@ -558,7 +569,7 @@ existing metrics/logging infrastructure at low frequency.
 
 Add `Wire/Spi/detail/Trace.hpp` similar to RS485:
 
-- gated by `tracing_for(Tracing::spi)`
+- gated by the static `LoggingMinimum::spi` level
 - inline `log_trace_slot(...)`
 - inline `log_trace_frame(...)`
 - compiled to no-op when disabled
@@ -616,7 +627,7 @@ Critical checks:
    - parse iterator
 4. Add host-side or compile-time tests if practical; otherwise add a small
    on-device self-check path behind a setup flag.
-5. Add SPI trace helpers using `tracing_for(Tracing::spi)`.
+5. Add SPI trace helpers using the static `LoggingMinimum::spi` level.
 
 Critical checks:
 
@@ -661,9 +672,42 @@ Implementation status:
 - Handshake state uses the shared event-capable `Generic::StateMachine`.
   `SendHello`, `RetryHello`, and `ReceiveHello` events make hello retries and
   passive hello receipt explicit while reconnects remain explicit resets.
+- Forward/in-order `Hello` frames after readiness are consumed as stale
+  handshake output without moving the receive cursor. Backward ready-state
+  `Hello` frames are treated as peer restarts and re-enter the handshake. A
+  later connection-id handshake can make this explicit without relying on
+  sequence direction.
 - Slot and frame transmit counters use the shared `Wire/detail/Sequence`
   helper. The helper is now width-parameterized with an unchanged `uint8_t`
   default for RS485 and `uint16_t` use in SPI.
+- The master preserves its TX slot sequence across link resets and rehandshakes.
+  Master MOSI slot sequence is the bus-authoritative stream that slaves resync
+  to; rewinding it during reconnect breaks multi-peer scheduling and causes
+  slaves to reject the first post-handshake data slot.
+- Resizing an empty TX slot to fit a larger frame reuses the already allocated
+  slot sequence. Only advancing to the next physical TX slot consumes a new slot
+  sequence, otherwise peers observe gaps when a default empty slot is replaced
+  by queued PubSub or Clock data before it is clocked.
+- An all-zero RX bucket is treated as an empty/no-slot observation and does not
+  reset the link. Hardware tests showed the master can receive zeros on MISO
+  while the same full-duplex turn still clocks a valid MOSI data frame into the
+  slave; the slave response or ack is therefore expected in a later queued slot.
+- Once the link is ready, malformed or short RX observations are also treated as
+  no-slot observations. A concurrent opposite-direction frame may already have
+  been delivered by the same SPI transaction, so resetting the whole link on a
+  missing/partial return slot creates false reconnect loops. Structured CRC
+  errors before readiness still remain visible as parse failures.
+- A valid SPI slot with no frames, no payload bytes, and no flags is scheduler
+  filler. In ready state it updates the receive cursor, but it is not treated as
+  application/control traffic and sequence gaps around filler do not imply
+  payload loss. During handshake it is ignored so stale ready-state filler does
+  not prevent accepting a later `Hello`.
+- Slot sequence mismatches are treated as stream resynchronization, not an
+  automatic link reset. A forward gap is logged and the current CRC-valid slot
+  is processed after moving the receive cursor to it; a backward non-`Hello`
+  slot is stale and ignored. Critical delivery is handled by frame-level
+  acknowledgement and higher protocols rather than by resetting the whole link
+  on scheduler-slot gaps.
 - `Spi::Master` and `Spi::Slave` now drive one-peer SPI DMA turns from
   TaskController runners.
 - The master retries `Hello` until the slave answers; the slave auto-queues a
@@ -712,14 +756,18 @@ Implementation status:
 - The first practical wire test can now validate SPI driver initialization,
   two-way hello readiness, attention wakeups when configured, and a single
   deferred request/response exchange such as Clock sync.
+- Hardware bring-up has validated both currently wired SPI buses. On the
+  ESP32-S3 master, slower clock rates produced a stable one-bit-late MISO
+  sample pattern even though the protocol bytes were otherwise coherent; raising
+  the bus to the empirically working clock fixed the issue. Do not add software
+  bit-slip repair unless this reappears in a way that cannot be fixed by bus
+  timing.
 
-Remaining before PubSub work:
+Remaining before shared-bus PubSub routing:
 
-- Publish transport availability changes to PubSub once the SPI PubSub
-  transport exists.
 - Add heartbeat/status recovery to the running link, not only hello/readiness.
-- Replace the one-exchange shortcut with the bounded per-peer egress and
-  in-flight tables planned for PubSub.
+- Replace the one-exchange shortcut with the bounded per-peer exchange tables
+  planned for multi-peer Clock traffic.
 
 ### Phase 5: PubSub Edge Transport
 
@@ -735,6 +783,34 @@ Critical checks:
 - Control-plane PubSub traffic must survive normal pressure.
 - Noncritical drops must be visible in stats.
 - PubSub task must wake on SPI ingress.
+
+Implementation status:
+
+- `Spi::Master` and `Spi::Slave` now expose a queued `send(WriteRequest)` path
+  for `Data` frames, matching the generic wire API used by PubSub transports.
+- SPI `Data` frames sent through that path set `FrameFlags::RequiresAck`.
+  Receivers append an `Ack` or `Nack` frame after dispatch, and the sender
+  completes the original `WriteRequest` from a bounded pending-write table only
+  after the peer acknowledgement is received.
+- `Transceiver` now picks the smallest bucket that fits a single data, request,
+  or response frame when the current TX slot is empty. This keeps PubSub-sized
+  frames out of the 64-byte hello/status bucket.
+- `PubSubBackend/Transports/SpiTransport.hpp` provides the first point-to-point
+  SPI PubSub transport. It mirrors the RS485 transport shape: serialize into a
+  bounded in-flight buffer, enqueue the bytes on the SPI link, receive
+  `PayloadType::PubSub` data through a wire handler, and wake the PubSub node
+  after ingress.
+- `Setups/PubSubSpiTest.hpp` provides an RS485-test-style harness for one
+  SPI master/slave pair with aggregated throughput and latency reporting.
+- The initial hardware wiring instantiates that harness on the master/media
+  low-speed SPI link. The high-speed GPU bus is still link-only until the
+  shared-bus router and multi-peer scheduler phases are implemented.
+
+Remaining caveat:
+
+- The acknowledgement is still point-to-point and confirms receiver transport
+  ingress only. Router forwarding will need per-target acknowledgements before
+  a master-side shared-bus router can release a multi-peer PubSub egress frame.
 
 ### Phase 6: PubSub Router Transport
 

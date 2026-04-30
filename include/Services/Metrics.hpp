@@ -15,17 +15,17 @@ struct IRegistrar {
 
     virtual std::expected<GroupHandle, ReturnCode>
     addGroup(std::reference_wrapper<const MetricGroupDesc> groupDesc,
-             bool enabled) = 0;
+             LogLevel minimumLogLevel) = 0;
 
     virtual std::expected<CounterHandle, ReturnCode>
     addCounter(MetricGroupKey groupKey,
                std::reference_wrapper<const MetricDesc> metricDesc,
-               bool enabled) = 0;
+               LogLevel groupLogLevel, LogLevel minimumLogLevel) = 0;
 
     virtual std::expected<GaugeHandle, ReturnCode>
     addGauge(MetricGroupKey groupKey,
              std::reference_wrapper<const MetricDesc> metricDesc,
-             bool enabled) = 0;
+             LogLevel groupLogLevel, LogLevel minimumLogLevel) = 0;
 };
 
 struct IRecorder {

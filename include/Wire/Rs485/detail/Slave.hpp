@@ -55,7 +55,7 @@ class Slave : public Node<Slave, SlaveConfig, TransceiverMode::ReadWrite> {
         return ret;
     }
 
-    static const LogComponent logComponent =
+    static constexpr LogComponent logComponent =
         Totem::Wire::Rs485::detail::logComponent;
 };
 

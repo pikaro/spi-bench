@@ -129,7 +129,7 @@ class Controller : public HasLifecycle<Controller, Config>,
     Registrar _registrar;
     std::array<ITransport *, CommandConfig::maxTransports> _transports{nullptr};
 
-    static const LogComponent logComponent =
+    static constexpr LogComponent logComponent =
         Totem::CommandBackend::detail::logComponent;
 };
 

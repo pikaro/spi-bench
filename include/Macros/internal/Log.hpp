@@ -6,6 +6,7 @@
 
 #include "LoggingBackend/Interfaces/Types.hpp"
 #include "Services/Logging.hpp"
+#include "StaticConfig/Logging.hpp"
 #include <array>
 #include <source_location>
 #include <string_view>
@@ -50,21 +51,34 @@ constexpr std::string_view logFunctionName(std::string_view function) {
 
 #define LOG_LOC(msg, ...)                                                      \
     do {                                                                       \
-        auto loc = std::source_location::current();                            \
-        auto _logFile =                                                        \
-            Totem::LoggerBackend::detail::logFileName(loc.file_name());        \
-        auto _logFunction = Totem::LoggerBackend::detail::logFunctionName(     \
-            loc.function_name());                                              \
-        (void)LoggingService::logf(                                            \
-            LogLevel::Error, logComponent, "[%.*s:%d:%.*s] " msg,              \
-            static_cast<int>(_logFile.size()), _logFile.data(), loc.line(),    \
-            static_cast<int>(_logFunction.size()), _logFunction.data(),        \
-            ##__VA_ARGS__);                                                    \
+        if constexpr (static_logging_for(LogLevel::Error, logComponent)) {     \
+            auto loc = std::source_location::current();                        \
+            auto _logFile =                                                    \
+                Totem::LoggerBackend::detail::logFileName(loc.file_name());    \
+            auto _logFunction = Totem::LoggerBackend::detail::logFunctionName( \
+                loc.function_name());                                          \
+            (void)LoggingService::logf(                                        \
+                LogLevel::Error, logComponent, "[%.*s:%d:%.*s] " msg,          \
+                static_cast<int>(_logFile.size()), _logFile.data(),            \
+                loc.line(), static_cast<int>(_logFunction.size()),             \
+                _logFunction.data(), ##__VA_ARGS__);                           \
+        }                                                                      \
     } while (0)
 
 #define INTERNAL_LOG_IMPL(logLevel, logTag, logFormat, ...)                    \
     do {                                                                       \
-        if (LoggingService::loggingFor(logLevel, logTag)) {                    \
+        if constexpr (static_logging_for(logLevel, logTag)) {                  \
+            if (LoggingService::loggingFor(logLevel, logTag)) {                \
+                (void)LoggingService::logf(logLevel, logTag, logFormat,        \
+                                           ##__VA_ARGS__);                     \
+            }                                                                  \
+        }                                                                      \
+    } while (0)
+
+#define INTERNAL_LOG_RUNTIME_IMPL(logLevel, logTag, logFormat, ...)            \
+    do {                                                                       \
+        if (static_logging_for(logLevel, logTag) &&                            \
+            LoggingService::loggingFor(logLevel, logTag)) {                    \
             (void)LoggingService::logf(logLevel, logTag, logFormat,            \
                                        ##__VA_ARGS__);                         \
         }                                                                      \
@@ -82,4 +96,4 @@ constexpr std::string_view logFunctionName(std::string_view function) {
     INTERNAL_LOG_IMPL(LogLevel::Error, logComponent, format, ##__VA_ARGS__)
 
 #define _log(level, format, ...)                                               \
-    INTERNAL_LOG_IMPL(level, logComponent, format, ##__VA_ARGS__)
+    INTERNAL_LOG_RUNTIME_IMPL(level, logComponent, format, ##__VA_ARGS__)

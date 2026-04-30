@@ -105,6 +105,7 @@ class BaseDirectory
 
   public:
     static constexpr const char *name = "Directory";
+    static constexpr LogComponent logComponent = Derived::logComponent;
 
     using EntryKey = Key;
 
@@ -128,8 +129,7 @@ class BaseDirectory
 
     using SlottedMapType = SlottedMap<EntryKey, Entry, N>;
 
-    explicit BaseDirectory(const char *ownerName, LogComponent logComponent)
-        : _ownerName(ownerName), logComponent(logComponent) {}
+    explicit BaseDirectory(const char *ownerName) : _ownerName(ownerName) {}
 
     [[nodiscard]] const char *ownerName() const { return _ownerName; }
 
@@ -158,7 +158,7 @@ class BaseDirectory
     ReturnCode withEntry(const EntryKey &entryKey, Fn &&fn) {
         FAIL_IF_MUTEX_TIMEOUT_DEFAULT(ERR(Timeout), "Directory::withEntry");
         return _withEntryImpl(_entries, entryKey,
-                              std::forward<decltype(fn)>(fn), logComponent);
+                              std::forward<decltype(fn)>(fn));
     }
 
     template <typename Fn>
@@ -175,8 +175,7 @@ class BaseDirectory
     ReturnCode withAll(Fn &&fn, Filter &&filter) {
         FAIL_IF_MUTEX_TIMEOUT_DEFAULT(ERR(Timeout), "Directory::withAll");
         return _withAllImpl(_entries, std::forward<decltype(fn)>(fn),
-                            std::forward<decltype(filter)>(filter),
-                            logComponent);
+                            std::forward<decltype(filter)>(filter));
     }
 
     template <typename Fn>
@@ -195,7 +194,7 @@ class BaseDirectory
         FAIL_IF_MUTEX_TIMEOUT_DEFAULT(ERR(Timeout),
                                       "Directory::withEntryConst");
         return _withEntryImpl(_entries, entryKey,
-                              std::forward<decltype(fn)>(fn), logComponent);
+                              std::forward<decltype(fn)>(fn));
     }
 
     template <typename Fn>
@@ -213,8 +212,7 @@ class BaseDirectory
     ReturnCode withAllConst(Fn &&fn, Filter &&filter) const {
         FAIL_IF_MUTEX_TIMEOUT_DEFAULT(ERR(Timeout), "Directory::withAllConst");
         return _withAllImpl(_entries, std::forward<decltype(fn)>(fn),
-                            std::forward<decltype(filter)>(filter),
-                            logComponent);
+                            std::forward<decltype(filter)>(filter));
     }
 
     template <typename Filter>
@@ -405,7 +403,7 @@ class BaseDirectory
 
     template <typename MapT, typename Fn>
     static ReturnCode _withEntryImpl(MapT &entries, const EntryKey &key,
-                                     Fn &&fn, LogComponent logComponent) {
+                                     Fn &&fn) {
         auto ret = entries.get(key);
         FAIL_IF_UNEXPECTED(item, ret, ret.error(),
                            "Directory entry " SV_FMT " not found for withEntry",
@@ -416,8 +414,7 @@ class BaseDirectory
     template <typename MapT, typename Fn, typename Filter>
         requires(std::is_invocable_r_v<bool, Filter, const EntryKey &,
                                        const Entry &>)
-    static ReturnCode _withAllImpl(MapT &entries, Fn &&fn, Filter &&filter,
-                                   LogComponent logComponent) {
+    static ReturnCode _withAllImpl(MapT &entries, Fn &&fn, Filter &&filter) {
         auto result = OK();
         EntryKeySnapshot snap{};
         _snapshotKeysImpl(snap, entries, std::forward<Filter>(filter));
@@ -456,7 +453,6 @@ class BaseDirectory
     std::atomic<bool> _permitRegistration{false};
     SlottedMapType _entries;
     const char *_ownerName;
-    LogComponent logComponent;
 };
 
 template <class Derived, typename Key, typename Entry, size_t N,
@@ -467,9 +463,7 @@ class BaseGettableDirectory
     using Base = BaseDirectory<Derived, Key, Entry, N, Representation>;
 
   public:
-    explicit BaseGettableDirectory(const char *ownerName,
-                                   LogComponent component)
-        : Base(ownerName, component) {}
+    explicit BaseGettableDirectory(const char *ownerName) : Base(ownerName) {}
 
     using typename Base::EntryArray;
     using typename Base::EntryKey;

@@ -33,9 +33,12 @@ using DirectoryImpl = BaseDirectory<Directory, RunnerKey, RunnerEntry,
 
 class Directory : public DirectoryImpl {
   public:
-    explicit Directory(const char *ownerName, LogComponent component,
+    static constexpr LogComponent logComponent =
+        LogComponent::TaskControllerRegistry;
+
+    explicit Directory(const char *ownerName, LogComponent,
                        IRegistry &registryHooks)
-        : DirectoryImpl(ownerName, component), _registry(registryHooks) {}
+        : DirectoryImpl(ownerName), _registry(registryHooks) {}
 
     std::expected<RunnerKey, ReturnCode> add(const char *runnerName,
                                              TaskHooks taskHooks) {

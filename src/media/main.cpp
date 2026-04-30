@@ -1,6 +1,7 @@
 #include "Clock/Facade.hpp"
 #include "Macros/Facade.hpp"
 #include "Platform/PlatformSelect.hpp"
+#include "Setups/PubSubSpiTest.hpp"
 #include "Setups/Core.hpp"
 #include "Wire/Spi/Facade.hpp"
 #include "config.hpp"
@@ -9,6 +10,9 @@
 CoreSetup core{};
 Totem::Clock::Clock clockSlave{Totem::Clock::Clock::Role::Slave};
 Totem::Wire::Spi::Slave spiSlave{core.taskRegistry};
+PubSubSpiTestSetup<Totem::Wire::Spi::Slave> pubSubSpi{
+    core.taskRegistry, spiSlave,
+    PubSubSpiTestSetup<Totem::Wire::Spi::Slave>::Role::Slave};
 
 void setup() {
     ::platform::delay(::platform::ms_to_ticks(3000));
@@ -17,6 +21,8 @@ void setup() {
     _log_i("Core setup complete");
 
     ABORT_IF_ERR_BEGIN(spiSlave.begin(spiSlaveConfig));
+
+    pubSubSpi.setup();
 
     _log_i("Setup complete");
 }
@@ -32,6 +38,19 @@ void app_main() {
     for (;;) {
         const auto nowMs = ::platform::get_time();
         (void)core.work(nowMs);
+        (void)pubSubSpi.work(nowMs);
+
+        if (spiSlave.ready() &&
+            (!clockSlave.synced() || epoch % 10000 == 0) &&
+            !clockSlave.syncing()) {
+            const auto syncResult = clockSlave.sync(spiSlave);
+            if (!syncResult.ok()) {
+                _log_e("Clock sync request failed: " ERR_FMT,
+                       ERR_ARG(syncResult));
+            } else {
+                _log_i("Clock sync requested");
+            }
+        }
 
         ::platform::delay(::platform::ms_to_ticks(1));
         epoch++;

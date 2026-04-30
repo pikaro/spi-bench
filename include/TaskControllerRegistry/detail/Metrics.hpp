@@ -48,8 +48,10 @@ struct Metrics {
     Totem::MetricsBackend::CounterHandle controllerCount;
     Totem::MetricsBackend::CounterHandle reapedCount;
 
+    static constexpr LogLevel minimumLogLevel =
+        MetricCollection::taskControllerRegistry;
     static constexpr bool enabled =
-        MetricCollection::enabled && MetricCollection::taskControllerRegistry;
+        metrics_enabled(groupDef.logLevel, minimumLogLevel);
 };
 
 } // namespace Totem::TaskControllerRegistry::detail

@@ -110,8 +110,9 @@ struct Metrics {
     CounterHandle egressDroppedNoncritical;
     CounterHandle egressRejectedCritical;
 
+    static constexpr LogLevel minimumLogLevel = MetricCollection::pubSub;
     static constexpr bool enabled =
-        MetricCollection::enabled && MetricCollection::pubSub;
+        metrics_enabled(groupDef.logLevel, minimumLogLevel);
 };
 
 inline Metrics &metrics() {

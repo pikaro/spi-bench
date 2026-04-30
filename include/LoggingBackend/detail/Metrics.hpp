@@ -57,8 +57,9 @@ struct Metrics {
     GaugeHandle processedRecords;
     GaugeHandle droppedRecords;
 
+    static constexpr LogLevel minimumLogLevel = MetricCollection::logging;
     static constexpr bool enabled =
-        MetricCollection::enabled && MetricCollection::logging;
+        metrics_enabled(groupDef.logLevel, minimumLogLevel);
 };
 
 } // namespace Totem::LoggingBackend::detail

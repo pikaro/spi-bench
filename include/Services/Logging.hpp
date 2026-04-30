@@ -6,6 +6,7 @@
 #include "Macros/internal/Format.hpp"
 #include "Platform/PlatformSelect.hpp"
 #include "Services/Clock.hpp"
+#include "StaticConfig/Logging.hpp"
 #include "Types/Error.hpp"
 #include <atomic>
 #include <cstdarg>
@@ -64,6 +65,9 @@ class LoggingService {
     [[nodiscard]] static bool
     loggingFor(LogLevel level,
                std::optional<LogComponent> component = std::nullopt) {
+        if (component && !static_logging_for(level, *component)) {
+            return false;
+        }
         return get().loggingFor(level, component);
     }
 

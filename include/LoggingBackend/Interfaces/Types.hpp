@@ -16,6 +16,7 @@ enum class LogLevel : uint8_t {
     Info,
     Warning,
     Error,
+    Off,
 };
 
 constexpr const char *log_level_to_string(LogLevel level) {
@@ -30,6 +31,8 @@ constexpr const char *log_level_to_string(LogLevel level) {
         return "WRN";
     case LogLevel::Error:
         return "ERR";
+    case LogLevel::Off:
+        return "OFF";
     default:
         return "???";
     }

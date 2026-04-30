@@ -99,11 +99,17 @@ they immediately release it after queueing bytes into a link. That pattern adds
 locks, scans, copies, and static storage without representing the final wire
 driver.
 
-The active hardware harness for current work is
-`include/Setups/PubSubRs485Test.hpp`, instantiated by both `src/master/main.cpp`
-and `src/slave/main.cpp`. It uses the real RS485 wire transport between one
-master and one slave, records aggregate throughput/latency stats, and is the
-reference harness for PubSub-over-RS485 behavior.
+The active hardware harnesses for current wire work are
+`include/Setups/PubSubRs485Test.hpp` and
+`include/Setups/PubSubSpiTest.hpp`. They use the real RS485 or SPI wire
+transport between one master and one slave, record aggregate
+throughput/latency stats, and act as the reference harnesses for transport
+bring-up behavior.
+
+Transport availability can change while the drainer is publishing a frame. A
+transport enqueue failure after in-flight storage should release that target and
+drop the frame for that transport instead of stopping the PubSub task; later
+availability replay is responsible for control-plane recovery.
 
 ## Scheduling Rules
 
@@ -140,10 +146,11 @@ When optimizing PubSub, measure and reason at the path level:
 - keep direct-relay paths conservative unless routing correctness is obvious
 - prefer bounded static buffers over dynamic allocation
 
-`Tracing::pubSub` and `Tracing::rs485`, gated through `tracing_for(...)`, enable
-hot-path packet trace logs for PubSub and RS485 respectively. Leave tracing
-disabled for throughput runs; the trace points are meant to localize queueing,
-task wakeup, and wire transaction delays during diagnosis.
+`LoggingMinimum::pubSub` and `LoggingMinimum::rs485` control whether verbose
+hot-path packet trace logs are compiled for PubSub and RS485 respectively.
+Leave the static minimum above `LogLevel::Verbose` for throughput runs; the trace
+points are meant to localize queueing, task wakeup, and wire transaction delays
+during diagnosis.
 
 The current hot path is expected to be dominated by task scheduling, queue
 handoff, transport fanout, and payload serialization only when local delivery is

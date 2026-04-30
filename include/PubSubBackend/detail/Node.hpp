@@ -384,7 +384,7 @@ class Node : public HasLifecycle<Node, Config>,
 
     IngressBuffer _ingress;
 
-    static const LogComponent logComponent =
+    static constexpr LogComponent logComponent =
         Totem::PubSubBackend::detail::logComponent;
 };
 

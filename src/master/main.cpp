@@ -3,6 +3,7 @@
 #include "Platform/PlatformSelect.hpp"
 #include "Services/Clock.hpp"
 #include "Setups/Core.hpp"
+#include "Setups/PubSubSpiTest.hpp"
 // #include "Setups/PubSubRs485Test.hpp"
 // #include "Wire/Rs485/Facade.hpp"
 #include "Wire/Spi/Facade.hpp"
@@ -15,6 +16,9 @@ CoreSetup core{};
 Totem::Wire::Spi::Master spiMasterHighSpeed{core.taskRegistry};
 Totem::Wire::Spi::Master spiMasterLowSpeed{core.taskRegistry};
 Totem::Clock::Clock clockMaster{Totem::Clock::Clock::Role::Master};
+PubSubSpiTestSetup<Totem::Wire::Spi::Master> pubSubSpi{
+    core.taskRegistry, spiMasterLowSpeed,
+    PubSubSpiTestSetup<Totem::Wire::Spi::Master>::Role::Master};
 // PubSubRs485TestSetup<Totem::Wire::Rs485::Master> pubSubRs485{
 //     core.taskRegistry, rs485master,
 //     PubSubRs485TestSetup<Totem::Wire::Rs485::Master>::Role::Master};
@@ -34,9 +38,15 @@ void setup() {
     ABORT_IF_ERR_BEGIN(spiMasterHighSpeed.begin(spiMasterBusHighSpeedConfig))
     ABORT_IF_ERR_BEGIN(spiMasterLowSpeed.begin(spiMasterBusLowSpeedConfig))
 
+    ABORT_IF_ERR(clockMaster.registerHandler(spiMasterLowSpeed),
+                 "Failed to register low-speed SPI clock handler");
+    ABORT_IF_ERR(clockMaster.registerHandler(spiMasterHighSpeed),
+                 "Failed to register high-speed SPI clock handler");
+
     // ABORT_IF_ERR(clockMaster.registerHandler(rs485master),
     //              "Failed to register RS485 clock handler");
 
+    pubSubSpi.setup();
     // pubSubRs485.setup();
 
     _log_i("Setup complete");
@@ -53,6 +63,7 @@ void app_main() {
     for (;;) {
         const auto nowMs = ::platform::get_time();
         (void)core.work(nowMs);
+        (void)pubSubSpi.work(nowMs);
         // (void)pubSubRs485.work(nowMs);
 
         ::platform::delay(::platform::ms_to_ticks(1));

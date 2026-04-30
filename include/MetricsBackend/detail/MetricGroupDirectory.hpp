@@ -19,10 +19,11 @@ using MetricGroupDirectoryImpl =
 
 class MetricGroupDirectory : public MetricGroupDirectoryImpl {
   public:
-    explicit MetricGroupDirectory()
-        : MetricGroupDirectoryImpl(
-              "MetricGroupDirectory",
-              Totem::MetricsBackend::detail::logComponent) {}
+    static constexpr LogComponent logComponent =
+        Totem::MetricsBackend::detail::logComponent;
+
+    explicit MetricGroupDirectory() : MetricGroupDirectoryImpl(
+                                          "MetricGroupDirectory") {}
 
     std::expected<MetricGroupKey, ReturnCode>
     add(MetricGroupKey metricGroupNameKey,

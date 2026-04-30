@@ -61,8 +61,10 @@ class IngressBuffer : public ByteArenaImpl {
     };
 
   public:
-    IngressBuffer()
-        : ByteArenaImpl(Totem::PubSubBackend::detail::logComponent) {}
+    static constexpr LogComponent logComponent =
+        Totem::PubSubBackend::detail::logComponent;
+
+    IngressBuffer() = default;
 
     static constexpr const char *name = "PubSub::IngressBuffer";
 

@@ -19,7 +19,7 @@ struct SlaveConfig {
     Totem::TaskController::Config task{
         .name = "SpiSlaveTask",
         .priority = 2,
-        .stackSize = 4096,
+        .stackSize = 8192,
         .intervalMs = 100,
         .noCatchup = true,
         .useNotify = true,

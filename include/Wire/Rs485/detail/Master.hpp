@@ -92,7 +92,7 @@ class Master : public Node<Master, MasterConfig, TransceiverMode::WriteRead> {
     static constexpr uint32_t handshakeRetryMs = 500;
     uint32_t _lastHandshakeAttemptMs = 0;
 
-    static const LogComponent logComponent =
+    static constexpr LogComponent logComponent =
         Totem::Wire::Rs485::detail::logComponent;
 };
 

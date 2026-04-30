@@ -45,8 +45,9 @@ struct Metrics {
     Totem::MetricsBackend::CounterHandle timeoutsCounter;
     Totem::MetricsBackend::CounterHandle failureCounter;
 
+    static constexpr LogLevel minimumLogLevel = MetricCollection::mutex;
     static constexpr bool enabled =
-        MetricCollection::enabled && MetricCollection::mutex;
+        metrics_enabled(groupDef.logLevel, minimumLogLevel);
 };
 
 inline Metrics &metrics() {

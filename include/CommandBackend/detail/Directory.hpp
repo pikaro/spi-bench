@@ -24,9 +24,10 @@ using DirectoryImpl =
 
 class Directory : public DirectoryImpl {
   public:
-    explicit Directory()
-        : DirectoryImpl("Command::Directory",
-                        Totem::CommandBackend::detail::logComponent) {}
+    static constexpr LogComponent logComponent =
+        Totem::CommandBackend::detail::logComponent;
+
+    explicit Directory() : DirectoryImpl("Command::Directory") {}
 
     std::expected<CommandNameKey, ReturnCode>
     add(void *ctx, const CommandDesc &metricDesc) {

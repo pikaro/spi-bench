@@ -119,6 +119,7 @@ class SlotReader {
     }
 
     [[nodiscard]] const SlotHeader &header() const { return _header; }
+    [[nodiscard]] uint8_t framesRead() const { return _framesRead; }
 
     std::expected<FrameView, ReturnCode> next() {
         if (_framesRead >= _header.frameCount) {

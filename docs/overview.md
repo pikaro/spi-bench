@@ -16,7 +16,9 @@ events and render their own LED segment locally.
 
 ## Current Scope
 
-- `env:master` and `env:slave` are both active targets for current RS485 and
+- `env:master`, `env:media`, `env:gpu0`, and `env:gpu1` are active targets for
+    current SPI wire bring-up and PubSub-over-SPI work.
+- `env:master` and `env:slave` remain active targets for RS485 and
     PubSub-over-RS485 work.
 - `env:orig` builds the master source root for the classic ESP32 board variant.
 - When a task touches shared wire, PubSub, Clock, or platform abstractions,
@@ -95,6 +97,12 @@ so `env:master` deliberately disables PSRAM through `sdkconfig.stack.master`.
 Changing this requires changing the board wiring or the SPI pin configuration;
 otherwise the SPI driver can wedge external memory access and trigger a system
 watchdog reset instead of a normal panic.
+
+The ESP32-S3 master has also shown a practical MISO sample-point quirk during
+SPI bring-up: slower clocks can produce a stable one-bit-late receive stream,
+while the same wiring works at the empirically selected higher clock. Treat SPI
+clock reductions as a signal-integrity/timing change that must be revalidated
+on hardware, not as automatically safer.
 
 ## Verification Model
 

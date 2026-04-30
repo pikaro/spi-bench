@@ -50,6 +50,15 @@ class Runner {
         return OK();
     }
 
+    ReturnCode signalDirect(Signal signal = Signal::Ping) {
+        auto *handle = _isrSignalHandle.load(std::memory_order_acquire);
+        FAIL_IF_NULL(handle, ERR(OperationFailed),
+                     "Cannot signal unstarted runner");
+        auto result = Platform::signal_task(handle, signal);
+        FAIL_IF_ERR(result, ERR(OperationFailed), "Failed to signal task");
+        return OK();
+    }
+
     void signalFromIsr(Signal signal = Signal::Ping) {
         auto *handle = _isrSignalHandle.load(std::memory_order_acquire);
         if (handle == nullptr) {

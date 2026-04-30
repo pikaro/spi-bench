@@ -399,12 +399,12 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
             if (!_transceiver.ready() && result.error() == ERR(CoreError, Timeout)) {
                 _waitTimeouts++;
                 if (_waitTimeouts <= 5) {
-                    _log_d("SPI slave debug wait timeout=%lu transferQueued=%u",
+                    _log_v("SPI slave debug wait timeout=%lu transferQueued=%u",
                            static_cast<unsigned long>(_waitTimeouts),
                            static_cast<unsigned>(_transferQueued));
                 }
                 if ((_waitTimeouts % 50) == 0) {
-                    _log_i("SPI slave waiting for master clock timeouts=%lu "
+                    _log_v("SPI slave waiting for master clock timeouts=%lu "
                            "isrCompletions=%lu",
                            static_cast<unsigned long>(_waitTimeouts),
                            static_cast<unsigned long>(_completionCount.load(
@@ -421,7 +421,7 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
                                ? result->bytesTransferred
                                : _queuedRxSize;
         if (!_transceiver.ready()) {
-            _log_i("SPI slave transfer complete count=%lu bytes=%u first=%02x "
+            _log_v("SPI slave transfer complete count=%lu bytes=%u first=%02x "
                    "second=%02x isrCompletions=%lu",
                    static_cast<unsigned long>(_completedTransfers),
                    static_cast<unsigned>(bytes),
@@ -436,7 +436,7 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
             return OK();
         }
         if (bytes < SlotHeader::size) {
-            _log_i("SPI slave short transfer ignored bytes=%u",
+            _log_v("SPI slave short transfer ignored bytes=%u",
                    static_cast<unsigned>(bytes));
             return OK();
         }
@@ -448,7 +448,7 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
             if (ret == ERR(WireError, Corrupted) ||
                 ret == ERR(WireError, CrcError) ||
                 ret == ERR(WireError, SequenceError)) {
-                _log_w("SPI slave RX invalid before handshake bytes=%u "
+                _log_v("SPI slave RX invalid bytes=%u "
                        "first=%02x second=%02x: " ERR_FMT,
                        static_cast<unsigned>(bytes),
                        std::to_integer<unsigned>(_rxBuffer[0]),
@@ -460,7 +460,7 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
             return ret;
         }
         if (helloResynced) {
-            _log_w("SPI slave accepted peer hello resync; dropping stale "
+            _log_v("SPI slave accepted peer hello resync; dropping stale "
                    "pending operations");
             FAIL_IF_ERR_FWD(_failExchange(ERR(WireError, SequenceError)),
                             "Failed to fail stale SPI slave exchange");

@@ -112,9 +112,9 @@ class SlotReader {
             return std::unexpected(headerResult.error());
         }
         const auto header = *headerResult;
-        FAIL_IF(bytes.size() < header.slotLength,
-                std::unexpected(ERR(CoreError, Underflow)),
-                "SPI slot buffer shorter than declared slot length");
+        if (bytes.size() < header.slotLength) {
+            return std::unexpected(ERR(WireError, Corrupted));
+        }
         return SlotReader{bytes.first(header.slotLength), header};
     }
 
@@ -125,9 +125,9 @@ class SlotReader {
         if (_framesRead >= _header.frameCount) {
             return std::unexpected(ERR(CoreError, NotFound));
         }
-        FAIL_IF(_offset + FrameHeader::size > _bytes.size(),
-                std::unexpected(ERR(CoreError, Underflow)),
-                "SPI frame header exceeds slot");
+        if (_offset + FrameHeader::size > _bytes.size()) {
+            return std::unexpected(ERR(WireError, Corrupted));
+        }
         auto frameResult =
             FrameHeader::fromBytes(_bytes.subspan(_offset, FrameHeader::size));
         if (!frameResult) {
@@ -135,9 +135,9 @@ class SlotReader {
         }
         _offset += FrameHeader::size;
         auto frame = *frameResult;
-        FAIL_IF(_offset + frame.payloadLength > _bytes.size(),
-                std::unexpected(ERR(CoreError, Underflow)),
-                "SPI frame payload exceeds slot");
+        if (_offset + frame.payloadLength > _bytes.size()) {
+            return std::unexpected(ERR(WireError, Corrupted));
+        }
         auto payload = _bytes.subspan(_offset, frame.payloadLength);
         _offset += frame.payloadLength;
         _framesRead++;

@@ -10,6 +10,7 @@
 #include "Types/Error.hpp"
 #include <atomic>
 #include <cstdarg>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <optional>
@@ -48,6 +49,40 @@ struct NullLogger : public ILogger {
 static inline NullLogger nullLogger{};
 
 } // namespace Totem::LoggingBackend::detail
+
+static constexpr LogLevel logging_minimum_for(LogComponent component) {
+    switch (component) {
+    case LogComponent::System:
+        return LoggingMinimumLevel::system;
+    case LogComponent::Monitoring:
+        return LoggingMinimumLevel::monitoring;
+    case LogComponent::Metrics:
+        return LoggingMinimumLevel::metrics;
+    case LogComponent::PubSub:
+        return LoggingMinimumLevel::pubSub;
+    case LogComponent::Command:
+        return LoggingMinimumLevel::command;
+    case LogComponent::TaskControllerRegistry:
+        return LoggingMinimumLevel::taskControllerRegistry;
+    case LogComponent::Output:
+        return LoggingMinimumLevel::output;
+    case LogComponent::Rs485:
+        return LoggingMinimumLevel::rs485;
+    case LogComponent::Spi:
+        return LoggingMinimumLevel::spi;
+    case LogComponent::Clock:
+        return LoggingMinimumLevel::clock;
+    case LogComponent::Unknown:
+    default:
+        return LoggingMinimumLevel::defaultMinimum;
+    }
+}
+
+static constexpr bool static_logging_for(LogLevel level,
+                                         LogComponent component) {
+    return static_cast<uint8_t>(level) >=
+           static_cast<uint8_t>(logging_minimum_for(component));
+}
 
 class LoggingService {
     using ILogger = Totem::LoggingBackend::detail::ILogger;

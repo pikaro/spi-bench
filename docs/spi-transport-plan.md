@@ -563,7 +563,12 @@ Per peer metrics:
 - DMA/platform errors
 
 Metrics should be cheap counters updated in hot paths and reported by the
-existing metrics/logging infrastructure at low frequency.
+existing metrics/logging infrastructure at low frequency. The current SPI metric
+group is `LogLevel::Verbose` because most counters are per-turn hot-path
+instrumentation. To inspect them during bring-up, set both
+`MetricCollection::minimum` and `MetricCollection::spi` low enough for verbose
+metrics in `include/StaticConfig/Metrics.hpp`; leave them compiled out for
+normal throughput runs.
 
 ## Trace Logging
 
@@ -688,26 +693,41 @@ Implementation status:
   slot sequence. Only advancing to the next physical TX slot consumes a new slot
   sequence, otherwise peers observe gaps when a default empty slot is replaced
   by queued PubSub or Clock data before it is clocked.
-- An all-zero RX bucket is treated as an empty/no-slot observation and does not
-  reset the link. Hardware tests showed the master can receive zeros on MISO
-  while the same full-duplex turn still clocks a valid MOSI data frame into the
-  slave; the slave response or ack is therefore expected in a later queued slot.
-- Once the link is ready, malformed or short RX observations are also treated as
-  no-slot observations. A concurrent opposite-direction frame may already have
-  been delivered by the same SPI transaction, so resetting the whole link on a
-  missing/partial return slot creates false reconnect loops. Structured CRC
-  errors before readiness still remain visible as parse failures.
+- RX bytes that do not begin with the SPI protocol preamble/version are treated
+  as no-slot observations and do not reset the link. This covers all-zero MISO
+  while the peer is absent, being reflashed, or has not queued a response yet.
+  Hardware tests showed the master can receive such a no-slot bucket while the
+  same full-duplex turn still clocks a valid MOSI data frame into the slave; the
+  slave response or ack is therefore expected in a later queued slot.
+- RX bytes that do begin with the SPI protocol preamble/version but fail header
+  length, metadata CRC, or frame parsing are treated as real corrupted protocol
+  observations. They remain warning-level faults after readiness; during hello
+  bring-up the master/slave wrappers tolerate them by requeueing handshake work
+  with verbose diagnostics. Parser bounds failures return `Wire::Corrupted`
+  rather than `Core::Underflow` so malformed wire data is recovered by the link
+  instead of escaping as a task-runner failure.
 - A valid SPI slot with no frames, no payload bytes, and no flags is scheduler
   filler. In ready state it updates the receive cursor, but it is not treated as
   application/control traffic and sequence gaps around filler do not imply
   payload loss. During handshake it is ignored so stale ready-state filler does
   not prevent accepting a later `Hello`.
 - Slot sequence mismatches are treated as stream resynchronization, not an
-  automatic link reset. A forward gap is logged and the current CRC-valid slot
-  is processed after moving the receive cursor to it; a backward non-`Hello`
-  slot is stale and ignored. Critical delivery is handled by frame-level
-  acknowledgement and higher protocols rather than by resetting the whole link
-  on scheduler-slot gaps.
+  automatic link reset. A forward gap is counted/logged at verbose level and
+  the current CRC-valid slot is processed after moving the receive cursor to it;
+  a backward non-`Hello` slot is counted/logged as stale and ignored. Critical
+  delivery is handled by frame-level acknowledgement and higher protocols
+  rather than by resetting the whole link on scheduler-slot gaps.
+- Normal-level SPI logging is reserved for lifecycle changes and actionable
+  faults. Tolerated scheduler observations (`noSlot`, empty filler slots,
+  forward gaps, stale slots, stale hellos, and hello resyncs) are available as
+  verbose logs and SPI metrics only.
+- The current public master config is still a one-device convenience wrapper
+  around a platform bus that can store multiple ESP-IDF device handles. The
+  multi-node target shape should keep master TX slot sequence bus-authoritative
+  per physical bus, with per-peer receive cursor, readiness, attention,
+  pending-write, and acknowledgement state added above the current single-peer
+  transceiver/link objects rather than by making slaves dictate the master
+  sequence.
 - `Spi::Master` and `Spi::Slave` now drive one-peer SPI DMA turns from
   TaskController runners.
 - The master retries `Hello` until the slave answers; the slave auto-queues a

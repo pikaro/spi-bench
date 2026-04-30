@@ -207,7 +207,7 @@ class Master : public HasLifecycle<Master, MasterConfig>,
             const auto nowMs = ::platform::get_time();
             if (static_cast<uint32_t>(nowMs - _lastHandshakeAttemptMs) >=
                 handshakeRetryMs) {
-                _log_i("SPI master hello retry turn=%lu state=%u pending=%u",
+                _log_v("SPI master hello retry turn=%lu state=%u pending=%u",
                        static_cast<unsigned long>(_turnCount),
                        static_cast<unsigned>(_transceiver.state()),
                        static_cast<unsigned>(_transceiver.hasPendingTx()));
@@ -229,7 +229,7 @@ class Master : public HasLifecycle<Master, MasterConfig>,
         const auto startedAtUs = ::platform::get_time_us();
         _turnCount++;
         if (!_transceiver.ready() && _turnCount <= 5) {
-            _log_d("SPI master debug hello turn=%lu txLen=%u txPtr=%p rxPtr=%p",
+            _log_v("SPI master debug hello turn=%lu txLen=%u txPtr=%p rxPtr=%p",
                    static_cast<unsigned long>(_turnCount),
                    static_cast<unsigned>(tx.size()), _transceiver.txData(),
                    _rxBuffer.data());
@@ -259,14 +259,14 @@ class Master : public HasLifecycle<Master, MasterConfig>,
                 (parseRet == ERR(WireError, Corrupted) ||
                  parseRet == ERR(WireError, CrcError) ||
                  parseRet == ERR(WireError, SequenceError))) {
-                _log_w("SPI master hello RX invalid turn=%lu first=%02x "
+                _log_v("SPI master hello RX invalid turn=%lu first=%02x "
                        "second=%02x len=%u: " ERR_FMT,
                        static_cast<unsigned long>(_turnCount),
                        std::to_integer<unsigned>(rx[0]),
                        std::to_integer<unsigned>(rx[1]),
                        static_cast<unsigned>(rx.size()), ERR_ARG(parseRet));
                 if (rx.size() >= SlotHeader::size) {
-                    _log_w("SPI master invalid header bytes: %02x %02x %02x "
+                    _log_v("SPI master invalid header bytes: %02x %02x %02x "
                            "%02x %02x %02x %02x %02x %02x %02x %02x %02x "
                            "%02x %02x %02x %02x %02x %02x %02x",
                            std::to_integer<unsigned>(rx[0]),
@@ -306,7 +306,7 @@ class Master : public HasLifecycle<Master, MasterConfig>,
             return parseRet;
         }
         if (helloResynced) {
-            _log_w("SPI master accepted peer hello resync; dropping stale "
+            _log_v("SPI master accepted peer hello resync; dropping stale "
                    "pending operations");
             FAIL_IF_ERR_FWD(_failQueuedWrites(ERR(WireError, SequenceError)),
                             "Failed to fail stale SPI master queued writes");

@@ -96,8 +96,6 @@ class BINDING Aggregator : public HasLifecycle<Aggregator, AggregatorConfig>,
                         "Failed to register commands for %s", name);
 
         auto taskHooks = TaskController::TaskHooks::bind(*this);
-        FAIL_IF_ERR_FWD(setLogLevel(config().defaultLogLevel),
-                        "Failed to set default log level for %s", name);
 
         FAIL_IF_ERR_FWD(_beginTaskController(config().task),
                         "Failed to begin task controller for %s", name);

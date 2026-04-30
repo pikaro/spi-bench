@@ -5,10 +5,10 @@
 #include <cstdint>
 
 struct MetricCollection {
-    static constexpr LogLevel minimum = LogLevel::Info;
+    static constexpr LogLevel minimum = LogLevel::Verbose;
     static constexpr LogLevel pubSub = LogLevel::Off;
     static constexpr LogLevel rs485 = LogLevel::Off;
-    static constexpr LogLevel spi = LogLevel::Off;
+    static constexpr LogLevel spi = LogLevel::Verbose;
     static constexpr LogLevel taskController = LogLevel::Info;
     static constexpr LogLevel taskControllerRegistry = LogLevel::Info;
     static constexpr LogLevel logging = LogLevel::Info;

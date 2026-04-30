@@ -20,7 +20,7 @@ struct Metrics {
 
     static constexpr MetricGroupDesc groupDef = {
         .name = "spi",
-        .logLevel = LogLevel::Info,
+        .logLevel = LogLevel::Verbose,
     };
     static constexpr MetricDesc turnsDef = {
         .name = "turns",
@@ -77,6 +77,36 @@ struct Metrics {
         .type = MetricType::Counter,
         .unit = MetricUnit::None,
     };
+    static constexpr MetricDesc noSlotDef = {
+        .name = "noSlot",
+        .type = MetricType::Counter,
+        .unit = MetricUnit::None,
+    };
+    static constexpr MetricDesc emptyDef = {
+        .name = "empty",
+        .type = MetricType::Counter,
+        .unit = MetricUnit::None,
+    };
+    static constexpr MetricDesc badSlotDef = {
+        .name = "badSlot",
+        .type = MetricType::Counter,
+        .unit = MetricUnit::None,
+    };
+    static constexpr MetricDesc missSeqDef = {
+        .name = "missSeq",
+        .type = MetricType::Counter,
+        .unit = MetricUnit::None,
+    };
+    static constexpr MetricDesc staleSeqDef = {
+        .name = "staleSeq",
+        .type = MetricType::Counter,
+        .unit = MetricUnit::None,
+    };
+    static constexpr MetricDesc helloReDef = {
+        .name = "helloRe",
+        .type = MetricType::Counter,
+        .unit = MetricUnit::None,
+    };
     static constexpr MetricDesc resetsDef = {
         .name = "reset",
         .type = MetricType::Counter,
@@ -102,6 +132,12 @@ struct Metrics {
         REGISTER_METRIC("Spi", framesRx, Counter, group);
         REGISTER_METRIC("Spi", framesTx, Counter, group);
         REGISTER_METRIC("Spi", crcErr, Counter, group);
+        REGISTER_METRIC("Spi", noSlot, Counter, group);
+        REGISTER_METRIC("Spi", empty, Counter, group);
+        REGISTER_METRIC("Spi", badSlot, Counter, group);
+        REGISTER_METRIC("Spi", missSeq, Counter, group);
+        REGISTER_METRIC("Spi", staleSeq, Counter, group);
+        REGISTER_METRIC("Spi", helloRe, Counter, group);
         REGISTER_METRIC("Spi", resets, Counter, group);
         REGISTER_METRIC("Spi", maxTurnUs, Gauge, group);
 
@@ -118,6 +154,12 @@ struct Metrics {
             .framesRx = framesRx,
             .framesTx = framesTx,
             .crcErrors = crcErr,
+            .noSlots = noSlot,
+            .emptySlots = empty,
+            .badSlots = badSlot,
+            .missedSequences = missSeq,
+            .staleSequences = staleSeq,
+            .helloResyncs = helloRe,
             .resets = resets,
             .maxTurnUs = maxTurnUs,
         };
@@ -134,6 +176,12 @@ struct Metrics {
     void addFrameRx() const { METRIC_INCR(framesRx, 1); }
     void addFrameTx() const { METRIC_INCR(framesTx, 1); }
     void addCrcError() const { METRIC_INCR(crcErrors, 1); }
+    void addNoSlot() const { METRIC_INCR(noSlots, 1); }
+    void addEmptySlot() const { METRIC_INCR(emptySlots, 1); }
+    void addBadSlot() const { METRIC_INCR(badSlots, 1); }
+    void addMissedSequence() const { METRIC_INCR(missedSequences, 1); }
+    void addStaleSequence() const { METRIC_INCR(staleSequences, 1); }
+    void addHelloResync() const { METRIC_INCR(helloResyncs, 1); }
     void addReset() const { METRIC_INCR(resets, 1); }
 
     void recordTurnDuration(uint32_t durationUs) {
@@ -156,6 +204,12 @@ struct Metrics {
     CounterHandle framesRx;
     CounterHandle framesTx;
     CounterHandle crcErrors;
+    CounterHandle noSlots;
+    CounterHandle emptySlots;
+    CounterHandle badSlots;
+    CounterHandle missedSequences;
+    CounterHandle staleSequences;
+    CounterHandle helloResyncs;
     CounterHandle resets;
     GaugeHandle maxTurnUs;
     uint32_t maxTurnUsValue = 0;

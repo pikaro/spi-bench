@@ -4,7 +4,6 @@
 #include "Macros/Facade.hpp"
 #include "Platform/PlatformSelect.hpp"
 #include "PubSubBackend/Interfaces/Wire.hpp"
-#include "StaticConfig/Logging.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <span>

@@ -189,19 +189,22 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
                        int64_t receivedAtUs = 0) {
         auto readerResult = SlotReader::parse(bytes);
         if (!readerResult) {
-            if (_isEmptySlot(bytes) || ready()) {
-                _log_i("SPI empty slot ignored len=%u",
-                       static_cast<unsigned>(bytes.size()));
+            if (_isNoSlotObservation(bytes)) {
+                metrics().addNoSlot();
+                _log_v("SPI no-slot observation ignored len=%u first=%02x "
+                       "second=%02x",
+                       static_cast<unsigned>(bytes.size()), _byteAt(bytes, 0),
+                       _byteAt(bytes, 1));
                 beginSlot(BucketSize::B64);
                 return OK();
             }
             if (readerResult.error() == ERR(WireError, CrcError)) {
                 metrics().addCrcError();
             }
+            metrics().addBadSlot();
             _log_w("Invalid SPI slot header: first=%02x second=%02x len=%u "
                    "error=" ERR_FMT,
-                   bytes.size() > 0 ? std::to_integer<unsigned>(bytes[0]) : 0,
-                   bytes.size() > 1 ? std::to_integer<unsigned>(bytes[1]) : 0,
+                   _byteAt(bytes, 0), _byteAt(bytes, 1),
                    static_cast<unsigned>(bytes.size()),
                    ERR_ARG(readerResult.error()));
             return readerResult.error();
@@ -213,7 +216,8 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
         const bool containsHello = _slotContainsHello(reader);
         const auto expectedSequence = _receivedSlotSequence.current();
         if (_slotIsEmpty(header)) {
-            _log_i("SPI empty protocol slot consumed seq=%u expected=%u",
+            metrics().addEmptySlot();
+            _log_v("SPI empty protocol slot consumed seq=%u expected=%u",
                    header.sequence, expectedSequence);
             if (ready()) {
                 _receivedSlotSequence.reset(
@@ -227,7 +231,8 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
         }
         if (ready() && containsHello) {
             if (_sequenceBehind(header.sequence, expectedSequence)) {
-                _log_i("SPI peer hello restart from slot sequence %u "
+                metrics().addHelloResync();
+                _log_v("SPI peer hello restart from slot sequence %u "
                        "expected %u",
                        header.sequence, expectedSequence);
                 reset(header.peerId, header.connectionId);
@@ -236,7 +241,7 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
                 _lastReceivedSequence = header.sequence;
                 _helloResynced = true;
             } else {
-                _log_i("SPI stale hello consumed from slot sequence %u",
+                _log_v("SPI stale hello consumed from slot sequence %u",
                        header.sequence);
                 metrics().addSlotRx();
                 metrics().addRxBytes(header.slotLength);
@@ -248,7 +253,8 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
             const bool sequenceOk =
                 _receivedSlotSequence.received(header.sequence);
             if (containsHello && !sequenceOk) {
-                _log_i("SPI hello resync from slot sequence %u expected %u",
+                metrics().addHelloResync();
+                _log_v("SPI hello resync from slot sequence %u expected %u",
                        header.sequence, expectedSequence);
                 reset(header.peerId, header.connectionId);
                 _receivedSlotSequence.reset(
@@ -257,7 +263,8 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
                 _helloResynced = true;
             } else if (!sequenceOk) {
                 if (_sequenceBehind(header.sequence, expectedSequence)) {
-                    _log_w("Stale SPI slot ignored: got %u expected %u "
+                    metrics().addStaleSequence();
+                    _log_v("Stale SPI slot ignored: got %u expected %u "
                            "frames=%u flags=0x%04X payload=%u",
                            header.sequence, expectedSequence,
                            header.frameCount,
@@ -268,7 +275,8 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
                     beginSlot(BucketSize::B64);
                     return OK();
                 }
-                _log_w("Missed SPI slot sequence: got %u expected %u "
+                metrics().addMissedSequence();
+                _log_v("Missed SPI slot sequence: got %u expected %u "
                        "frames=%u flags=0x%04X payload=%u",
                        header.sequence, expectedSequence, header.frameCount,
                        static_cast<unsigned>(header.flags),
@@ -288,6 +296,7 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
                 if (frameResult.error() == ERR(CoreError, NotFound)) {
                     return OK();
                 }
+                metrics().addBadSlot();
                 _log_w("Invalid SPI frame in slot seq=%u frameIndex=%u/%u "
                        "payloadBytes=%u: " ERR_FMT,
                        header.sequence, reader.framesRead(),
@@ -313,9 +322,18 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
     }
 
   private:
+    static unsigned _byteAt(std::span<const std::byte> bytes, size_t index) {
+        return index < bytes.size() ? std::to_integer<unsigned>(bytes[index])
+                                    : 0;
+    }
+
     static bool _slotIsEmpty(const SlotHeader &header) {
         return header.frameCount == 0 && header.payloadBytes == 0 &&
                header.flags == SlotFlags::None;
+    }
+
+    static bool _isNoSlotObservation(std::span<const std::byte> bytes) {
+        return _isEmptySlot(bytes) || !_hasProtocolPreamble(bytes);
     }
 
     static bool _isEmptySlot(std::span<const std::byte> bytes) {
@@ -325,6 +343,12 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
             }
         }
         return true;
+    }
+
+    static bool _hasProtocolPreamble(std::span<const std::byte> bytes) {
+        return bytes.size() >= 2 &&
+               std::to_integer<uint8_t>(bytes[0]) == SlotHeader::preamble &&
+               std::to_integer<uint8_t>(bytes[1]) == SlotHeader::version;
     }
 
     static bool _sequenceBehind(uint16_t sequence, uint16_t expected) {

@@ -59,7 +59,7 @@ dump_metric_snapshot(const MetricsBackend::MetricFrame &snap) {
             printedMetrics++;
         }
 
-        _log(snap.group.desc->logLevel, "%s", buf.data());
+        _log_i("%s", buf.data());
     }
 
     return OK(CoreError);

@@ -42,6 +42,7 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
         Totem::Wire::WriteRequestHandle handle = 0;
         Totem::Wire::WriteRequest request{};
         size_t length = 0;
+        uint32_t sentAtMs = 0;
         bool occupied = false;
     };
 
@@ -89,6 +90,13 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
                 ERR(CoreError, InvalidState), "SPI exchange already pending");
 
         _pendingExchange = request;
+        _log_v("SPI slave exchange queued payload=%u request=%u response=%u",
+               static_cast<unsigned>(request.payloadType),
+               static_cast<unsigned>(request.request.size()),
+               static_cast<unsigned>(request.response.size()));
+        FAIL_IF_ERR_FWD(_updateAttentionLine(),
+                        "Failed to update SPI slave attention after exchange "
+                        "enqueue");
         _wake(Signal::Ping);
         return OK();
     }
@@ -149,6 +157,10 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
     ReturnCode _onTaskStep() {
         metrics().addTaskStep();
         FAIL_IF_ERR_FWD(_completeTransfer(), "Failed to complete SPI transfer");
+        FAIL_IF_ERR_FWD(_expireActiveExchange(::platform::get_time()),
+                        "Failed to expire SPI slave exchange");
+        FAIL_IF_ERR_FWD(_expirePendingWrites(::platform::get_time()),
+                        "Failed to expire SPI slave pending writes");
         if (!_transferQueued) {
             FAIL_IF_ERR_FWD(_preparePendingExchange(),
                             "Failed to prepare pending SPI exchange");
@@ -178,6 +190,10 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
         _pendingExchange.reset();
         _exchangeInFlight = true;
         _exchangeSentAtUs = 0;
+        _exchangeStartedAtMs = ::platform::get_time();
+        _log_v("SPI slave exchange request prepared payload=%u bytes=%u",
+               static_cast<unsigned>(request.payloadType),
+               static_cast<unsigned>(request.request.size()));
         return OK();
     }
 
@@ -187,6 +203,7 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
         const bool asserted = !_transceiver.ready() ||
                               _transceiver.hasPendingTx() ||
                               _pendingExchange.has_value() ||
+                              _exchangeInFlight ||
                               _hasQueuedWrites();
         if (asserted != _attentionAsserted) {
             if (asserted) {
@@ -204,9 +221,13 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
             return OK();
         }
         const auto tx = _transceiver.finalizeTx();
-        FAIL_IF(tx.size() > _rxBuffer.size(), ERR(CoreError, Overflow),
+        const auto transferSize =
+            static_cast<size_t>(this->config().transferWindowBytes);
+        FAIL_IF(tx.size() > transferSize || transferSize > _rxBuffer.size(),
+                ERR(CoreError, Overflow),
                 "SPI slave RX buffer too small");
-        auto rx = std::span<std::byte>(_rxBuffer.data(), tx.size());
+        auto txWindow = std::span<const std::byte>(tx.data(), transferSize);
+        auto rx = std::span<std::byte>(_rxBuffer.data(), transferSize);
         if (!_transceiver.ready() && _queueCount < 5) {
             _log_d("SPI slave debug queue transfer=%lu txLen=%u txPtr=%p "
                    "rxPtr=%p",
@@ -214,11 +235,8 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
                    static_cast<unsigned>(tx.size()), _transceiver.txData(),
                    _rxBuffer.data());
         }
-        if (_exchangeInFlight && _exchangeSentAtUs == 0) {
-            _exchangeSentAtUs = ::platform::get_time_us();
-        }
         FAIL_IF_ERR_FWD(_device.queueTransfer(Transfer{
-                            .txBuffer = tx,
+                            .txBuffer = txWindow,
                             .rxBuffer = rx,
                             .timeoutMs = 0,
                         }),
@@ -241,6 +259,11 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
                                     int64_t receivedAtUs) {
         if (!_exchangeInFlight ||
             frame.header.payloadType != _activeExchange.payloadType) {
+            _log_v("SPI slave unmatched response payload=%u seq=%u "
+                   "exchangeInFlight=%u activePayload=%u",
+                   static_cast<unsigned>(frame.header.payloadType),
+                   frame.header.sequence, static_cast<unsigned>(_exchangeInFlight),
+                   static_cast<unsigned>(_activeExchange.payloadType));
             return OK();
         }
         if (frame.payload.size() > _activeExchange.response.size()) {
@@ -255,6 +278,9 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
             exchangeHandle, static_cast<uint16_t>(frame.payload.size()),
             _exchangeSentAtUs, receivedAtUs);
         _clearActiveExchange();
+        _log_v("SPI slave exchange response completed payload=%u bytes=%u",
+               static_cast<unsigned>(frame.header.payloadType),
+               static_cast<unsigned>(frame.payload.size()));
         return ret;
     }
 
@@ -263,7 +289,7 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
     }
 
     ReturnCode _processOneWrite() {
-        if (_transceiver.hasPendingTx() || !_hasQueuedWrites() ||
+        if (!_hasQueuedWrites() || _exchangeInFlight ||
             _findFreePendingWrite() == nullptr) {
             return OK();
         }
@@ -284,6 +310,7 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
             .handle = item.handle,
             .request = item.request,
             .length = item.request.data.size(),
+            .sentAtMs = ::platform::get_time(),
             .occupied = true,
         };
         return OK();
@@ -328,6 +355,24 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
                            receivedAtUs);
     }
 
+    ReturnCode _expirePendingWrites(uint32_t nowMs) {
+        auto ret = OK();
+        for (auto &pending : _pendingWrites) {
+            if (!pending.occupied ||
+                static_cast<uint32_t>(nowMs - pending.sentAtMs) <
+                    pendingWriteTimeoutMs) {
+                continue;
+            }
+            _log_v("SPI slave write seq=%u timed out after %u ms",
+                   pending.sequence,
+                   static_cast<unsigned>(nowMs - pending.sentAtMs));
+            ret.combine(pending.request.nack(pending.handle,
+                                             ERR(CoreError, Timeout)));
+            pending = {};
+        }
+        return ret;
+    }
+
     ReturnCode _failPendingWrites(ReturnCode error) {
         auto ret = OK();
         for (auto &pending : _pendingWrites) {
@@ -362,6 +407,23 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
         _activeExchange = {};
         _exchangeInFlight = false;
         _exchangeSentAtUs = 0;
+        _exchangeStartedAtMs = 0;
+    }
+
+    ReturnCode _expireActiveExchange(uint32_t nowMs) {
+        if (!_exchangeInFlight ||
+            static_cast<uint32_t>(nowMs - _exchangeStartedAtMs) <
+                exchangeTimeoutMs) {
+            return OK();
+        }
+
+        _log_v("SPI slave exchange payload=%u timed out after %u ms",
+               static_cast<unsigned>(_activeExchange.payloadType),
+               static_cast<unsigned>(nowMs - _exchangeStartedAtMs));
+        auto ret = _activeExchange.nack(exchangeHandle,
+                                        ERR(CoreError, Timeout));
+        _clearActiveExchange();
+        return ret;
     }
 
     ReturnCode _failExchange(ReturnCode error) {
@@ -417,6 +479,9 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
         _transferQueued = false;
         metrics().addTurn();
         _completedTransfers++;
+        if (_exchangeInFlight && _exchangeSentAtUs == 0) {
+            _exchangeSentAtUs = ::platform::get_time_us();
+        }
         const auto bytes = result->bytesTransferred > 0
                                ? result->bytesTransferred
                                : _queuedRxSize;
@@ -499,6 +564,8 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
     }
 
     static constexpr Totem::Wire::ExchangeRequestHandle exchangeHandle = 1;
+    static constexpr uint32_t exchangeTimeoutMs = 500;
+    static constexpr uint32_t pendingWriteTimeoutMs = 250;
     static constexpr size_t txQueueDepth = 8;
     static constexpr size_t pendingWriteDepth = 8;
 
@@ -522,6 +589,7 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
     Totem::Wire::ExchangeRequest _activeExchange{};
     bool _exchangeInFlight = false;
     int64_t _exchangeSentAtUs = 0;
+    uint32_t _exchangeStartedAtMs = 0;
     Totem::Wire::WriteRequestHandle _nextWriteHandle = 1;
 };
 

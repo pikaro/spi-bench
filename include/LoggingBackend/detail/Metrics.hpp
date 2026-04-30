@@ -1,10 +1,8 @@
 #pragma once
 
-#include "LoggingBackend/Interfaces/Types.hpp"
 #include "Macros/Facade.hpp"
 #include "MetricsBackend/Interfaces/Types.hpp"
 #include "Services/Metrics.hpp" // IWYU pragma: keep
-#include "StaticConfig/Metrics.hpp"
 #include <cstdint>
 
 namespace Totem::LoggingBackend::detail {
@@ -20,7 +18,7 @@ struct Metrics {
 
     static constexpr MetricGroupDesc groupDef = {
         .name = "logging",
-        .logLevel = LogLevel::Info,
+        .level = Totem::MetricsBackend::MetricLevel::Baseline,
     };
 
     static constexpr MetricDesc processedRecordsDef = {
@@ -47,19 +45,19 @@ struct Metrics {
         };
     }
 
-    void setDropped(uint32_t count) const { METRIC_SET(droppedRecords, count); }
+    void setDropped(uint32_t count) const {
+        METRIC_SET(group, droppedRecords, count);
+    }
 
     void setProcessed(uint32_t count) const {
-        METRIC_SET(processedRecords, count);
+        METRIC_SET(group, processedRecords, count);
     }
 
     GroupHandle group;
     GaugeHandle processedRecords;
     GaugeHandle droppedRecords;
 
-    static constexpr LogLevel minimumLogLevel = MetricCollection::logging;
-    static constexpr bool enabled =
-        metrics_enabled(groupDef.logLevel, minimumLogLevel);
+    static constexpr auto component = MetricsBackend::MetricComponent::Logging;
 };
 
 } // namespace Totem::LoggingBackend::detail

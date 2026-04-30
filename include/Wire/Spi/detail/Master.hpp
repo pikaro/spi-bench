@@ -40,6 +40,7 @@ class Master : public HasLifecycle<Master, MasterConfig>,
         Totem::Wire::WriteRequestHandle handle = 0;
         Totem::Wire::WriteRequest request{};
         size_t length = 0;
+        uint32_t sentAtMs = 0;
         bool occupied = false;
     };
 
@@ -142,8 +143,29 @@ class Master : public HasLifecycle<Master, MasterConfig>,
 
     ReturnCode _onTaskStep() {
         metrics().addTaskStep();
-        const bool attentionRequested = _consumeAttentionRequest();
-        return _runTurn(attentionRequested);
+        if (this->config().maxTurnsPerStep <= 1 ||
+            this->config().serviceBudgetMs == 0) {
+            return _runTurn(_consumeAttentionRequest());
+        }
+
+        const auto startedAtMs = ::platform::get_time();
+        auto ret = _runTurn(_consumeAttentionRequest());
+        for (uint8_t turn = 1;
+             ret.ok() && turn < this->config().maxTurnsPerStep; turn++) {
+            if (!_transceiver.ready()) {
+                break;
+            }
+            if (static_cast<uint32_t>(::platform::get_time() - startedAtMs) >=
+                this->config().serviceBudgetMs) {
+                break;
+            }
+            if (this->config().interTurnDelayMs > 0) {
+                ::platform::delay(
+                    ::platform::ms_to_ticks(this->config().interTurnDelayMs));
+            }
+            ret.combine(_runTurn(_consumeAttentionRequest()));
+        }
+        return ret;
     }
 
     ReturnCode _onTaskNotify(Signal signal) {
@@ -197,14 +219,23 @@ class Master : public HasLifecycle<Master, MasterConfig>,
             return OK();
         }
 
+        const auto nowMs = ::platform::get_time();
+        bool heartbeatQueued = false;
+        if (_heartbeatDue(nowMs) && !_transceiver.hasPendingTx() &&
+            !_hasQueuedWrites() && !_hasPendingWrites()) {
+            FAIL_IF_ERR_FWD(_transceiver.queueHeartbeat(),
+                            "Failed to queue SPI master heartbeat");
+            heartbeatQueued = true;
+            _nextHeartbeatAtMs = nowMs + heartbeatIntervalMs;
+        }
+
         if (!attentionRequested && _transceiver.ready() &&
             !_transceiver.hasPendingTx() && !_hasQueuedWrites() &&
-            !_hasPendingWrites()) {
+            !_hasPendingWrites() && !heartbeatQueued) {
             return OK();
         }
 
         if (!_transceiver.ready()) {
-            const auto nowMs = ::platform::get_time();
             if (static_cast<uint32_t>(nowMs - _lastHandshakeAttemptMs) >=
                 handshakeRetryMs) {
                 _log_v("SPI master hello retry turn=%lu state=%u pending=%u",
@@ -218,8 +249,16 @@ class Master : public HasLifecycle<Master, MasterConfig>,
         }
 
         if (_transceiver.ready()) {
+            FAIL_IF_ERR_FWD(_expirePendingWrites(::platform::get_time()),
+                            "Failed to expire SPI master pending writes");
             FAIL_IF_ERR_FWD(_processOneWrite(),
                             "Failed to process SPI master write queue");
+            if (_shouldWidenReceiveWindow(attentionRequested)) {
+                FAIL_IF_ERR_FWD(_transceiver.ensureTxWindow(
+                                    this->config().attentionReceiveWindowBytes),
+                                "Failed to widen SPI master active RX "
+                                "window");
+            }
         }
 
         const auto tx = _transceiver.finalizeTx();
@@ -252,6 +291,7 @@ class Master : public HasLifecycle<Master, MasterConfig>,
         metrics().recordTurnDuration(
             static_cast<uint32_t>(receivedAtUs - startedAtUs));
         const bool wasReady = _transceiver.ready();
+        const auto previousRxSequence = _transceiver.lastReceivedSequence();
         auto parseRet = _transceiver.parseRx(rx, receivedAtUs);
         const bool helloResynced = _transceiver.consumeHelloResynced();
         if (!parseRet.ok()) {
@@ -297,13 +337,22 @@ class Master : public HasLifecycle<Master, MasterConfig>,
             if (parseRet == ERR(WireError, Corrupted) ||
                 parseRet == ERR(WireError, CrcError) ||
                 parseRet == ERR(WireError, SequenceError)) {
-                _log_w("Resetting SPI master link after RX error: " ERR_FMT,
+                _log_v("Dropping invalid SPI master RX slot: " ERR_FMT,
                        ERR_ARG(parseRet));
-                FAIL_IF_ERR_FWD(_resetLink(parseRet),
-                                "Failed to reset SPI master link");
+                _transceiver.advanceTxSlot();
                 return OK();
             }
             return parseRet;
+        }
+        if (wasReady &&
+            _transceiver.lastReceivedSequence() != previousRxSequence) {
+            _recordPeerProgress(nowMs);
+        } else if (heartbeatQueued) {
+            FAIL_IF_ERR_FWD(_recordMissedHeartbeat(),
+                            "Failed to handle missed SPI heartbeat");
+            if (!_transceiver.ready()) {
+                return OK();
+            }
         }
         if (helloResynced) {
             _log_v("SPI master accepted peer hello resync; dropping stale "
@@ -320,14 +369,11 @@ class Master : public HasLifecycle<Master, MasterConfig>,
         }
         if (!wasReady && _transceiver.ready()) {
             _log_i("SPI master handshake complete");
+            _recordPeerProgress(nowMs);
         }
         if (!_transceiver.ready()) {
             FAIL_IF_ERR_FWD(_transceiver.queueHello(),
                             "Failed to queue next SPI hello");
-        }
-        if (_transceiver.ready() && _transceiver.hasPendingTx()) {
-            FAIL_IF_ERR_FWD(_wake(Signal::Ping),
-                            "Failed to wake SPI master for pending response");
         }
         return OK();
     }
@@ -353,9 +399,18 @@ class Master : public HasLifecycle<Master, MasterConfig>,
         return false;
     }
 
+    [[nodiscard]] bool _shouldWidenReceiveWindow(
+        bool attentionRequested) const {
+        if (this->config().attentionReceiveWindowBytes <=
+            bucketBytes(BucketSize::B64)) {
+            return false;
+        }
+        return attentionRequested || _transceiver.hasPendingTx() ||
+               _hasQueuedWrites() || _hasPendingWrites();
+    }
+
     ReturnCode _processOneWrite() {
-        if (_transceiver.hasPendingTx() || !_hasQueuedWrites() ||
-            _findFreePendingWrite() == nullptr) {
+        if (!_hasQueuedWrites() || _findFreePendingWrite() == nullptr) {
             return OK();
         }
         TxQueueItem item{};
@@ -375,6 +430,7 @@ class Master : public HasLifecycle<Master, MasterConfig>,
             .handle = item.handle,
             .request = item.request,
             .length = item.request.data.size(),
+            .sentAtMs = ::platform::get_time(),
             .occupied = true,
         };
         return OK();
@@ -397,6 +453,24 @@ class Master : public HasLifecycle<Master, MasterConfig>,
         }
         return request.ack(handle, static_cast<uint16_t>(length),
                            receivedAtUs);
+    }
+
+    ReturnCode _expirePendingWrites(uint32_t nowMs) {
+        auto ret = OK();
+        for (auto &pending : _pendingWrites) {
+            if (!pending.occupied ||
+                static_cast<uint32_t>(nowMs - pending.sentAtMs) <
+                    pendingWriteTimeoutMs) {
+                continue;
+            }
+            _log_v("SPI master write seq=%u timed out after %u ms",
+                   pending.sequence,
+                   static_cast<unsigned>(nowMs - pending.sentAtMs));
+            ret.combine(pending.request.nack(pending.handle,
+                                             ERR(CoreError, Timeout)));
+            pending = {};
+        }
+        return ret;
     }
 
     ReturnCode _failPendingWrites(ReturnCode error) {
@@ -433,7 +507,32 @@ class Master : public HasLifecycle<Master, MasterConfig>,
         _transceiver.registerAckCallback(this, _onAckFrame);
         ret.combine(_transceiver.queueHello());
         _lastHandshakeAttemptMs = ::platform::get_time();
+        _nextHeartbeatAtMs = 0;
+        _missedHeartbeatResponses = 0;
         return ret;
+    }
+
+    [[nodiscard]] bool _heartbeatDue(uint32_t nowMs) const {
+        return this->config().heartbeatEnabled && _transceiver.ready() &&
+               static_cast<int32_t>(nowMs - _nextHeartbeatAtMs) >= 0;
+    }
+
+    void _recordPeerProgress(uint32_t nowMs) {
+        _missedHeartbeatResponses = 0;
+        _nextHeartbeatAtMs = nowMs + heartbeatIntervalMs;
+    }
+
+    ReturnCode _recordMissedHeartbeat() {
+        _missedHeartbeatResponses++;
+        _log_v("SPI master heartbeat missed count=%u",
+               static_cast<unsigned>(_missedHeartbeatResponses));
+        if (_missedHeartbeatResponses < heartbeatMissLimit) {
+            return OK();
+        }
+
+        _log_w("Resetting SPI master link after %u missed heartbeats",
+               static_cast<unsigned>(_missedHeartbeatResponses));
+        return _resetLink(ERR(CoreError, Timeout));
     }
 
     PendingWrite *_findFreePendingWrite() {
@@ -455,6 +554,9 @@ class Master : public HasLifecycle<Master, MasterConfig>,
     }
 
     static constexpr uint32_t handshakeRetryMs = 500;
+    static constexpr uint32_t heartbeatIntervalMs = 1000;
+    static constexpr uint32_t pendingWriteTimeoutMs = 250;
+    static constexpr uint8_t heartbeatMissLimit = 3;
     static constexpr size_t txQueueDepth = 8;
     static constexpr size_t pendingWriteDepth = 8;
 
@@ -469,7 +571,9 @@ class Master : public HasLifecycle<Master, MasterConfig>,
     Totem::TaskController::RunnerKey _task = 0;
     std::atomic<bool> _attentionRequested{false};
     uint32_t _lastHandshakeAttemptMs = 0;
+    uint32_t _nextHeartbeatAtMs = 0;
     uint32_t _turnCount = 0;
+    uint8_t _missedHeartbeatResponses = 0;
     Totem::Wire::WriteRequestHandle _nextWriteHandle = 1;
 };
 

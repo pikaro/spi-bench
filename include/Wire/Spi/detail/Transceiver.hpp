@@ -123,6 +123,10 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
         return _appendControl(FrameType::Heartbeat, SlotFlags::Heartbeat);
     }
 
+    ReturnCode ensureTxWindow(size_t bytes) {
+        return _tx.ensureBucketFor(bytes);
+    }
+
     ReturnCode queueData(PayloadType payloadType,
                          std::span<const std::byte> payload,
                          FrameFlags flags = FrameFlags::None) {
@@ -137,8 +141,9 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
     queueDataWithSequence(PayloadType payloadType,
                           std::span<const std::byte> payload,
                           FrameFlags flags = FrameFlags::None) {
-        _prepareEmptySlotFor(SlotHeader::size + FrameHeader::size +
-                             payload.size());
+        FAIL_IF_ERR_FWD_UNEXPECTED(
+            _ensureCapacityForNextFrame(payload.size()),
+            "Failed to grow SPI data slot");
         const auto sequence = _frameSequence.next();
         auto ret = _tx.appendFrame(FrameType::Data, payloadType, payload,
                                    sequence, 0, flags);
@@ -152,8 +157,8 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
     ReturnCode queueRequest(PayloadType payloadType,
                             std::span<const std::byte> payload,
                             FrameFlags flags = FrameFlags::None) {
-        _prepareEmptySlotFor(SlotHeader::size + FrameHeader::size +
-                             payload.size());
+        FAIL_IF_ERR_FWD(_ensureCapacityForNextFrame(payload.size()),
+                        "Failed to grow SPI request slot");
         FAIL_IF_ERR_FWD(_tx.appendFrame(FrameType::Request, payloadType,
                                         payload, _frameSequence.next(), 0,
                                         flags),
@@ -166,8 +171,8 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
                              std::span<const std::byte> payload,
                              uint16_t responseTo,
                              FrameFlags flags = FrameFlags::None) {
-        _prepareEmptySlotFor(SlotHeader::size + FrameHeader::size +
-                             payload.size());
+        FAIL_IF_ERR_FWD(_ensureCapacityForNextFrame(payload.size()),
+                        "Failed to grow SPI response slot");
         FAIL_IF_ERR_FWD(_tx.appendFrame(FrameType::Response, payloadType,
                                         payload, _frameSequence.next(),
                                         responseTo, flags),
@@ -202,7 +207,7 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
                 metrics().addCrcError();
             }
             metrics().addBadSlot();
-            _log_w("Invalid SPI slot header: first=%02x second=%02x len=%u "
+            _log_v("Invalid SPI slot header: first=%02x second=%02x len=%u "
                    "error=" ERR_FMT,
                    _byteAt(bytes, 0), _byteAt(bytes, 1),
                    static_cast<unsigned>(bytes.size()),
@@ -356,18 +361,15 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
         return distance != 0 && distance < 0x8000;
     }
 
-    void _prepareEmptySlotFor(size_t bytes) {
-        if (_tx.frameCount() != 0 ||
-            bytes <= static_cast<size_t>(_tx.header().bucketLength)) {
-            return;
-        }
-
-        const auto header = _tx.header();
-        _tx.reset(header.peerId, header.connectionId, header.sequence,
-                  bucketFor(bytes), SlotFlags::None, _lastReceivedSequence);
+    ReturnCode _ensureCapacityForNextFrame(size_t payloadBytes) {
+        const auto required = SlotHeader::size + _tx.header().payloadBytes +
+                              FrameHeader::size + payloadBytes;
+        return _tx.ensureBucketFor(required);
     }
 
     ReturnCode _appendControl(FrameType type, SlotFlags flag) {
+        FAIL_IF_ERR_FWD(_ensureCapacityForNextFrame(0),
+                        "Failed to grow SPI control slot");
         _tx.addFlags(flag);
         FAIL_IF_ERR_FWD(_tx.appendFrame(type, PayloadType::Raw,
                                         std::span<const std::byte>{},
@@ -378,6 +380,8 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
     }
 
     ReturnCode _appendAck(FrameType type, uint16_t responseTo) {
+        FAIL_IF_ERR_FWD(_ensureCapacityForNextFrame(0),
+                        "Failed to grow SPI ack slot");
         const auto flag =
             type == FrameType::Ack ? SlotFlags::Ack : SlotFlags::Nack;
         _tx.addFlags(flag);
@@ -500,6 +504,9 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
                                 response, ::platform::get_time_us()),
                             "Failed to prepare SPI response payload");
         }
+        _log_v("SPI request payload=%u seq=%u queued response bytes=%u",
+               static_cast<unsigned>(frame.header.payloadType),
+               frame.header.sequence, static_cast<unsigned>(response.size()));
         return queueResponse(frame.header.payloadType, response,
                              frame.header.sequence);
     }

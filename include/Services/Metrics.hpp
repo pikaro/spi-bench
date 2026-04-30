@@ -3,10 +3,13 @@
 #include "Macros/Facade.hpp"
 #include "MetricsBackend/Interfaces/IFrameSink.hpp"
 #include "MetricsBackend/Interfaces/Types.hpp"
+#include "StaticConfig/Metrics.hpp"
 #include "Types/Error.hpp"
 #include <cstdint>
 #include <expected>
 #include <functional>
+#include <optional>
+#include <utility>
 
 namespace Totem::MetricsBackend::detail {
 
@@ -15,17 +18,17 @@ struct IRegistrar {
 
     virtual std::expected<GroupHandle, ReturnCode>
     addGroup(std::reference_wrapper<const MetricGroupDesc> groupDesc,
-             LogLevel minimumLogLevel) = 0;
+             bool enabled) = 0;
 
     virtual std::expected<CounterHandle, ReturnCode>
     addCounter(MetricGroupKey groupKey,
                std::reference_wrapper<const MetricDesc> metricDesc,
-               LogLevel groupLogLevel, LogLevel minimumLogLevel) = 0;
+               bool enabled) = 0;
 
     virtual std::expected<GaugeHandle, ReturnCode>
     addGauge(MetricGroupKey groupKey,
              std::reference_wrapper<const MetricDesc> metricDesc,
-             LogLevel groupLogLevel, LogLevel minimumLogLevel) = 0;
+             bool enabled) = 0;
 };
 
 struct IRecorder {
@@ -43,6 +46,43 @@ struct IMetrics {
 };
 
 } // namespace Totem::MetricsBackend::detail
+
+constexpr std::optional<Totem::MetricsBackend::MetricLevel>
+level_for_metric_component_opt(
+    Totem::MetricsBackend::MetricComponent metricComponent) {
+    using MetricComponent = Totem::MetricsBackend::MetricComponent;
+    switch (metricComponent) {
+    case MetricComponent::PubSub:
+        return MetricCollection::pubSub;
+    case MetricComponent::Rs485:
+        return MetricCollection::rs485;
+    case MetricComponent::Spi:
+        return MetricCollection::spi;
+    case MetricComponent::TaskController:
+        return MetricCollection::taskController;
+    case MetricComponent::TaskControllerRegistry:
+        return MetricCollection::taskControllerRegistry;
+    case MetricComponent::Logging:
+        return MetricCollection::logging;
+    case MetricComponent::Mutex:
+        return MetricCollection::mutex;
+    default:
+        std::unreachable();
+    }
+}
+
+constexpr Totem::MetricsBackend::MetricLevel level_for_metric_component(
+    Totem::MetricsBackend::MetricComponent metricComponent) {
+    return level_for_metric_component_opt(metricComponent)
+        .value_or(MetricCollection::minimum);
+}
+
+constexpr bool
+metrics_enabled(Totem::MetricsBackend::MetricComponent metricComponent,
+                Totem::MetricsBackend::MetricGroupDesc groupDesc) {
+    return static_cast<uint8_t>(groupDesc.level) >=
+           static_cast<uint8_t>(level_for_metric_component(metricComponent));
+}
 
 class MetricsService {
     using IRegistrar = Totem::MetricsBackend::detail::IRegistrar;

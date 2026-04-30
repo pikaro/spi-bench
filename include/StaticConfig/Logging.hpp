@@ -5,7 +5,7 @@
 #include <optional>
 
 struct LoggingMinimumLevel {
-    static constexpr LogLevel defaultMinimum = LogLevel::Verbose;
+    static constexpr LogLevel defaultMinimum = LogLevel::Info;
     static constexpr LogLevel system = defaultMinimum;
     static constexpr LogLevel monitoring = defaultMinimum;
     static constexpr LogLevel metrics = defaultMinimum;

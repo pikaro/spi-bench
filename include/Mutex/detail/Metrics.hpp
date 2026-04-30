@@ -1,17 +1,15 @@
 #pragma once
 
-#include "LoggingBackend/Interfaces/Types.hpp"
 #include "Macros/Facade.hpp"
 #include "MetricsBackend/Interfaces/Types.hpp"
 #include "Services/Metrics.hpp" // IWYU pragma: keep
-#include "StaticConfig/Metrics.hpp"
 
 namespace Totem::Mutex::detail {
 
 struct Metrics {
     static constexpr MetricsBackend::MetricGroupDesc groupDef = {
         .name = "mutex",
-        .logLevel = LogLevel::Info,
+        .level = MetricsBackend::MetricLevel::Baseline,
     };
 
     static constexpr MetricsBackend::MetricDesc timeoutsCounterDef = {
@@ -38,16 +36,14 @@ struct Metrics {
         };
     }
 
-    void timeout() const { METRIC_INCR(timeoutsCounter, 1); }
-    void failure() const { METRIC_INCR(failureCounter, 1); }
+    void timeout() const { METRIC_INCR(group, timeoutsCounter, 1); }
+    void failure() const { METRIC_INCR(group, failureCounter, 1); }
 
     Totem::MetricsBackend::GroupHandle group;
     Totem::MetricsBackend::CounterHandle timeoutsCounter;
     Totem::MetricsBackend::CounterHandle failureCounter;
 
-    static constexpr LogLevel minimumLogLevel = MetricCollection::mutex;
-    static constexpr bool enabled =
-        metrics_enabled(groupDef.logLevel, minimumLogLevel);
+    static constexpr auto component = MetricsBackend::MetricComponent::Mutex;
 };
 
 inline Metrics &metrics() {

@@ -15,6 +15,23 @@ class Registrar;
 
 namespace Totem::MetricsBackend {
 
+enum class MetricComponent : uint8_t {
+    PubSub = 0,
+    TaskControllerRegistry,
+    TaskController,
+    Rs485,
+    Spi,
+    Mutex,
+    Logging,
+};
+
+enum class MetricLevel : uint8_t {
+    Profiling = 0,
+    Diagnostic,
+    Baseline,
+    Core,
+};
+
 enum class MetricType : uint8_t { Counter, Gauge };
 
 enum class MetricUnit : uint8_t {
@@ -58,7 +75,7 @@ constexpr std::string_view metric_unit_to_string(MetricUnit unit) {
 
 struct MetricGroupDesc {
     const char *name;
-    LogLevel logLevel = LogLevel::Info;
+    MetricLevel level = MetricLevel::Baseline;
 
     ReturnCode validate() const {
         if (name == nullptr || name[0] == '\0') {

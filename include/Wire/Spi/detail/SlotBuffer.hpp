@@ -89,6 +89,15 @@ template <size_t Capacity> class SlotBuffer {
     [[nodiscard]] const SlotHeader &header() const { return _header; }
     [[nodiscard]] uint8_t frameCount() const { return _header.frameCount; }
     void addFlags(SlotFlags flags) { _header.flags = _header.flags | flags; }
+    ReturnCode ensureBucketFor(size_t bytes) {
+        const auto bucketLength = bucketBytes(bucketFor(bytes));
+        FAIL_IF(bucketLength > _bytes.size(), ERR(CoreError, Overflow),
+                "SPI slot buffer cannot fit requested bucket");
+        if (bucketLength > _header.bucketLength) {
+            _header.bucketLength = bucketLength;
+        }
+        return OK();
+    }
     [[nodiscard]] std::span<std::byte> writableBucket(BucketSize bucket) {
         return std::span<std::byte>(_bytes.data(), bucketBytes(bucket));
     }

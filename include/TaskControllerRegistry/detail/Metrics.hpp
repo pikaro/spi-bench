@@ -1,10 +1,8 @@
 #pragma once
 
-#include "LoggingBackend/Interfaces/Types.hpp"
 #include "Macros/Facade.hpp"
 #include "MetricsBackend/Interfaces/Types.hpp"
 #include "Services/Metrics.hpp" // IWYU pragma: keep
-#include "StaticConfig/Metrics.hpp"
 #include <cstddef>
 
 namespace Totem::TaskControllerRegistry::detail {
@@ -12,7 +10,7 @@ namespace Totem::TaskControllerRegistry::detail {
 struct Metrics {
     static constexpr MetricsBackend::MetricGroupDesc groupDef = {
         .name = "taskRegi",
-        .logLevel = LogLevel::Info,
+        .level = MetricsBackend::MetricLevel::Baseline,
     };
 
     static constexpr MetricsBackend::MetricDesc controllerCountDef = {
@@ -40,18 +38,18 @@ struct Metrics {
         };
     }
 
-    void addTask() const { METRIC_INCR(controllerCount, 1); }
-    void removeTask() const { METRIC_DECR(controllerCount, 1); }
-    void addReaped(size_t count) const { METRIC_INCR(reapedCount, count); }
+    void addTask() const { METRIC_INCR(group, controllerCount, 1); }
+    void removeTask() const { METRIC_DECR(group, controllerCount, 1); }
+    void addReaped(size_t count) const {
+        METRIC_INCR(group, reapedCount, count);
+    }
 
     Totem::MetricsBackend::GroupHandle group;
     Totem::MetricsBackend::CounterHandle controllerCount;
     Totem::MetricsBackend::CounterHandle reapedCount;
 
-    static constexpr LogLevel minimumLogLevel =
-        MetricCollection::taskControllerRegistry;
-    static constexpr bool enabled =
-        metrics_enabled(groupDef.logLevel, minimumLogLevel);
+    static constexpr auto component =
+        MetricsBackend::MetricComponent::TaskControllerRegistry;
 };
 
 } // namespace Totem::TaskControllerRegistry::detail

@@ -69,5 +69,20 @@ inline Totem::Wire::Spi::MasterConfig spiMasterBusLowSpeedConfig{
             .queueSize = 1,
             .inputDelayNs = 0,
         },
+    .task =
+        {
+            .name = "SpiMasterTask",
+            .priority = 2,
+            .stackSize = 8192,
+            .intervalMs = 10,
+            .noCatchup = true,
+            .useNotify = true,
+            .notifyExpectTimeout = false,
+            .notifyTimeoutMs = 10,
+        },
+    .serviceBudgetMs = 5,
+    .maxTurnsPerStep = 2,
+    .interTurnDelayMs = 1,
+    .attentionReceiveWindowBytes = 256,
     .attentionPin = Pin::GPIO39,
 };

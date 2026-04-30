@@ -1,14 +1,17 @@
 #pragma once
 
-#include "LoggingBackend/Interfaces/Types.hpp"
 #include "Macros/Facade.hpp"
 #include "MetricsBackend/Interfaces/Types.hpp"
 #include "Services/Metrics.hpp" // IWYU pragma: keep
-#include "StaticConfig/Metrics.hpp"
 
 namespace Totem::TaskController::detail {
 
 struct TaskMetrics {
+    static constexpr MetricsBackend::MetricGroupDesc baseDef = {
+        .name = "undefined",
+        .level = Totem::MetricsBackend::MetricLevel::Baseline,
+    };
+
     static constexpr MetricsBackend::MetricDesc startedCountDef = {
         .name = "started",
         .type = MetricsBackend::MetricType::Counter,
@@ -33,17 +36,15 @@ struct TaskMetrics {
         };
     }
 
-    void started() const { METRIC_INCR(startedCount, 1); }
-    void stopped() const { METRIC_INCR(stoppedCount, 1); }
+    void started() const { METRIC_INCR(base, startedCount, 1); }
+    void stopped() const { METRIC_INCR(base, stoppedCount, 1); }
 
     Totem::MetricsBackend::GroupHandle group;
     Totem::MetricsBackend::CounterHandle startedCount;
     Totem::MetricsBackend::CounterHandle stoppedCount;
 
-    static constexpr LogLevel minimumLogLevel =
-        MetricCollection::taskController;
-    static constexpr bool enabled =
-        metrics_enabled(LogLevel::Info, minimumLogLevel);
+    static constexpr auto component =
+        MetricsBackend::MetricComponent::TaskController;
 };
 
 } // namespace Totem::TaskController::detail

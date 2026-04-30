@@ -701,9 +701,9 @@ Implementation status:
   slave response or ack is therefore expected in a later queued slot.
 - RX bytes that do begin with the SPI protocol preamble/version but fail header
   length, metadata CRC, or frame parsing are treated as real corrupted protocol
-  observations. They remain warning-level faults after readiness; during hello
-  bring-up the master/slave wrappers tolerate them by requeueing handshake work
-  with verbose diagnostics. Parser bounds failures return `Wire::Corrupted`
+  observations. They are counted through SPI metrics and logged at verbose
+  level because peer resets and stale DMA buffers can produce short bursts
+  during normal recovery. Parser bounds failures return `Wire::Corrupted`
   rather than `Core::Underflow` so malformed wire data is recovered by the link
   instead of escaping as a task-runner failure.
 - A valid SPI slot with no frames, no payload bytes, and no flags is scheduler
@@ -771,8 +771,53 @@ Implementation status:
 - The master clocks DMA turns when attention is asserted, when outbound data is
   pending, or while the handshake is incomplete. Without an attention pin,
   startup still progresses through the periodic task cadence.
+- `MasterConfig` now has an optional per-step service budget for bring-up
+  pressure testing. The active low-speed master keeps a 10 ms SPI runner period
+  but may perform up to two turns within a 5 ms budget, with a short inter-turn
+  delay so the ESP32 slave task can queue its next DMA buffer. This models the
+  target bus-cycle shape without turning the task into a high-rate empty poller.
+- Master transfers can widen the current TX bucket during active ready-state
+  turns so the clocked transaction is large enough for likely slave-originated
+  data even if the master's own slot is ACK-only. The active low-speed bring-up
+  config uses a 256-byte active receive window to cover PubSub test frames that
+  do not fit in the 64-byte control bucket.
+- The master heartbeat path is now config-gated and disabled by default for
+  Phase 5 pressure testing. Normal PubSub traffic and attention already prove
+  peer progress; an idle heartbeat reset during active traffic is more harmful
+  than useful until heartbeat/status semantics are made per-peer and scheduler
+  aware.
+- A malformed ready-state slot is dropped instead of resetting the link. The
+  transmitted slot is advanced and any pending write ages out through the normal
+  ack timeout. This keeps a single corrupted or truncated observation from
+  releasing every in-flight PubSub envelope and collapsing the link under load.
+- The transceiver can grow a slot that already contains control frames. Master
+  and slave PubSub writes may therefore piggyback behind ACKs instead of being
+  starved by continuous bidirectional traffic that requires an ACK every turn.
 - The slave queues the next DMA transfer immediately after parsing the previous
   one and only appends deferred application traffic while no transfer is queued.
+- Slave DMA transfers arm the full receive window instead of sizing the
+  transaction from the slave's current outbound slot. The SPI master chooses the
+  clocked transaction length, so a 64-byte empty slave TX slot must still be able
+  to receive the configured per-turn bus window.
+- `SlaveConfig::maxTransferSize` remains the ESP-IDF bus/DMA capability, while
+  `SlaveConfig::transferWindowBytes` is the queued per-turn window. Keeping
+  those separate lets the target scheduler choose a bounded slot size per bus
+  without conflating it with the driver's maximum supported transaction size.
+- Slave-originated exchange requests assert the attention line just like queued
+  writes. Clock sync depends on this because the request is initiated by the
+  slave and needs the master to clock a turn before the normal idle cadence.
+- Exchange attention remains asserted while the response is outstanding. The
+  master must not immediately self-clock a just-queued response in the same
+  burst that parsed the request, because ESP-IDF slave mode needs time to
+  complete the previous DMA transaction and queue the next receive buffer.
+- SPI slave exchange timestamps are captured when the DMA transfer carrying the
+  request completes rather than when the buffer is queued. This keeps Clock sync
+  from measuring queue-to-clock scheduling delay as wire latency under PubSub
+  pressure.
+- Slave exchanges have a bounded timeout. A Clock request can be lost during
+  startup hello resync or pressure traffic before the response is observed; the
+  timeout nacks that attempt so the Clock layer can reset and issue a fresh
+  sync request instead of remaining in `syncing()` forever.
 - The first practical wire test can now validate SPI driver initialization,
   two-way hello readiness, attention wakeups when configured, and a single
   deferred request/response exchange such as Clock sync.
@@ -785,7 +830,6 @@ Implementation status:
 
 Remaining before shared-bus PubSub routing:
 
-- Add heartbeat/status recovery to the running link, not only hello/readiness.
 - Replace the one-exchange shortcut with the bounded per-peer exchange tables
   planned for multi-peer Clock traffic.
 
@@ -812,6 +856,12 @@ Implementation status:
   Receivers append an `Ack` or `Nack` frame after dispatch, and the sender
   completes the original `WriteRequest` from a bounded pending-write table only
   after the peer acknowledgement is received.
+- Pending SPI writes have a bounded ack timeout. If the peer stops returning
+  acks while Phase 5 traffic is flowing, the write is nacked and the owning
+  PubSub envelope is released instead of filling the test message pool
+  indefinitely. These timeouts are treated as pressure/recovery telemetry:
+  counters are updated and verbose logs are available, but normal warning logs
+  are reserved for non-timeout write failures.
 - `Transceiver` now picks the smallest bucket that fits a single data, request,
   or response frame when the current TX slot is empty. This keeps PubSub-sized
   frames out of the 64-byte hello/status bucket.
@@ -820,8 +870,21 @@ Implementation status:
   bounded in-flight buffer, enqueue the bytes on the SPI link, receive
   `PayloadType::PubSub` data through a wire handler, and wake the PubSub node
   after ingress.
+- SPI PubSub transport pressure counters are recorded through the PubSub metric
+  group for queued TX, wire ack, wire failure, ingress RX, and ingress/drop
+  events. The active bring-up config compiles PubSub metrics at
+  `LogLevel::Verbose` so these counters are visible during Phase 5 pressure
+  runs.
 - `Setups/PubSubSpiTest.hpp` provides an RS485-test-style harness for one
-  SPI master/slave pair with aggregated throughput and latency reporting.
+  SPI master/slave pair with aggregated throughput and latency reporting. The
+  SPI harness now publishes test messages in both directions by default at a
+  10 ms interval on each side. Latency reporting is suppressed to zero while
+  the local clock is unsynced so clock bring-up failures do not produce bogus
+  negative latency values.
+- Harness message-pool exhaustion is reported through the periodic
+  `txOverflow` counter rather than logged as an unexpected error. During
+  pressure testing, overflow is a signal that transport acknowledgements or
+  release paths are lagging, not a crash-worthy condition by itself.
 - The initial hardware wiring instantiates that harness on the master/media
   low-speed SPI link. The high-speed GPU bus is still link-only until the
   shared-bus router and multi-peer scheduler phases are implemented.

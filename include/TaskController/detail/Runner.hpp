@@ -30,9 +30,7 @@ class Runner {
 
     [[nodiscard]] const Config &config() const { return _config; }
 
-    ReturnCode start(Config cfg) {
-        return _start(cfg);
-    }
+    ReturnCode start(Config cfg) { return _start(cfg); }
 
     ReturnCode restart(Config cfg, TaskHooks hooks) {
         _hooks = hooks;
@@ -324,7 +322,8 @@ class Runner {
 
     Config _config;
     MetricsBackend::MetricGroupDesc _metricsGroupDesc{
-        .name = nullptr,
+        .name = TaskMetrics::baseDef.name,
+        .level = TaskMetrics::baseDef.level,
     };
     std::optional<TaskMetrics> _metrics = std::nullopt;
 

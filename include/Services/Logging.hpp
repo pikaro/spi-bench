@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstring>
 #include <optional>
+#include <utility>
 
 namespace Totem::LoggingBackend::detail {
 
@@ -74,7 +75,7 @@ static constexpr LogLevel logging_minimum_for(LogComponent component) {
         return LoggingMinimumLevel::clock;
     case LogComponent::Unknown:
     default:
-        return LoggingMinimumLevel::defaultMinimum;
+        std::unreachable();
     }
 }
 

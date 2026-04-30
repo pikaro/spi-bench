@@ -1,10 +1,8 @@
 #pragma once
 
-#include "LoggingBackend/Interfaces/Types.hpp"
 #include "Macros/Facade.hpp"
 #include "MetricsBackend/Interfaces/Types.hpp"
 #include "Services/Metrics.hpp" // IWYU pragma: keep
-#include "StaticConfig/Metrics.hpp"
 #include <cstdint>
 
 namespace Totem::Wire::Spi::detail {
@@ -20,7 +18,7 @@ struct Metrics {
 
     static constexpr MetricGroupDesc groupDef = {
         .name = "spi",
-        .logLevel = LogLevel::Verbose,
+        .level = Totem::MetricsBackend::MetricLevel::Profiling,
     };
     static constexpr MetricDesc turnsDef = {
         .name = "turns",
@@ -165,31 +163,37 @@ struct Metrics {
         };
     }
 
-    void addTurn() const { METRIC_INCR(turns, 1); }
-    void addTaskStep() const { METRIC_INCR(taskSteps, 1); }
-    void addAttentionWake() const { METRIC_INCR(attentionWakes, 1); }
-    void addAttentionAssert() const { METRIC_INCR(attentionAssert, 1); }
-    void addAttentionRelease() const { METRIC_INCR(attentionRelease, 1); }
-    void addTxBytes(uint32_t bytes) const { METRIC_INCR(txBytes, bytes); }
-    void addRxBytes(uint32_t bytes) const { METRIC_INCR(rxBytes, bytes); }
-    void addSlotRx() const { METRIC_INCR(slotsRx, 1); }
-    void addFrameRx() const { METRIC_INCR(framesRx, 1); }
-    void addFrameTx() const { METRIC_INCR(framesTx, 1); }
-    void addCrcError() const { METRIC_INCR(crcErrors, 1); }
-    void addNoSlot() const { METRIC_INCR(noSlots, 1); }
-    void addEmptySlot() const { METRIC_INCR(emptySlots, 1); }
-    void addBadSlot() const { METRIC_INCR(badSlots, 1); }
-    void addMissedSequence() const { METRIC_INCR(missedSequences, 1); }
-    void addStaleSequence() const { METRIC_INCR(staleSequences, 1); }
-    void addHelloResync() const { METRIC_INCR(helloResyncs, 1); }
-    void addReset() const { METRIC_INCR(resets, 1); }
+    void addTurn() const { METRIC_INCR(group, turns, 1); }
+    void addTaskStep() const { METRIC_INCR(group, taskSteps, 1); }
+    void addAttentionWake() const { METRIC_INCR(group, attentionWakes, 1); }
+    void addAttentionAssert() const { METRIC_INCR(group, attentionAssert, 1); }
+    void addAttentionRelease() const {
+        METRIC_INCR(group, attentionRelease, 1);
+    }
+    void addTxBytes(uint32_t bytes) const {
+        METRIC_INCR(group, txBytes, bytes);
+    }
+    void addRxBytes(uint32_t bytes) const {
+        METRIC_INCR(group, rxBytes, bytes);
+    }
+    void addSlotRx() const { METRIC_INCR(group, slotsRx, 1); }
+    void addFrameRx() const { METRIC_INCR(group, framesRx, 1); }
+    void addFrameTx() const { METRIC_INCR(group, framesTx, 1); }
+    void addCrcError() const { METRIC_INCR(group, crcErrors, 1); }
+    void addNoSlot() const { METRIC_INCR(group, noSlots, 1); }
+    void addEmptySlot() const { METRIC_INCR(group, emptySlots, 1); }
+    void addBadSlot() const { METRIC_INCR(group, badSlots, 1); }
+    void addMissedSequence() const { METRIC_INCR(group, missedSequences, 1); }
+    void addStaleSequence() const { METRIC_INCR(group, staleSequences, 1); }
+    void addHelloResync() const { METRIC_INCR(group, helloResyncs, 1); }
+    void addReset() const { METRIC_INCR(group, resets, 1); }
 
     void recordTurnDuration(uint32_t durationUs) {
         if (durationUs <= maxTurnUsValue) {
             return;
         }
         maxTurnUsValue = durationUs;
-        METRIC_SET(maxTurnUs, durationUs);
+        METRIC_SET(group, maxTurnUs, durationUs);
     }
 
     GroupHandle group;
@@ -214,9 +218,7 @@ struct Metrics {
     GaugeHandle maxTurnUs;
     uint32_t maxTurnUsValue = 0;
 
-    static constexpr LogLevel minimumLogLevel = MetricCollection::spi;
-    static constexpr bool enabled =
-        metrics_enabled(groupDef.logLevel, minimumLogLevel);
+    static constexpr auto component = MetricsBackend::MetricComponent::Spi;
 };
 
 inline Metrics &metrics() {

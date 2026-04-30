@@ -1,10 +1,8 @@
 #pragma once
 
-#include "LoggingBackend/Interfaces/Types.hpp"
 #include "Macros/Facade.hpp"
 #include "MetricsBackend/Interfaces/Types.hpp"
 #include "Services/Metrics.hpp" // IWYU pragma: keep
-#include "StaticConfig/Metrics.hpp"
 #include <cstdint>
 
 namespace Totem::Wire::Rs485::detail {
@@ -20,7 +18,7 @@ struct Metrics {
 
     static constexpr MetricGroupDesc groupDef = {
         .name = "rs485",
-        .logLevel = LogLevel::Info,
+        .level = Totem::MetricsBackend::MetricLevel::Profiling,
     };
 
     static constexpr MetricDesc taskStepsDef = {
@@ -138,27 +136,29 @@ struct Metrics {
         };
     }
 
-    void addTaskStep() const { METRIC_INCR(taskSteps, 1); }
-    void addUartDataWake() const { METRIC_INCR(uartDataWakes, 1); }
-    void addAttentionWake() const { METRIC_INCR(attentionWakes, 1); }
-    void addPoll() const { METRIC_INCR(polls, 1); }
-    void addEmptyPoll() const { METRIC_INCR(emptyPolls, 1); }
-    void addReceivedFrame() const { METRIC_INCR(receivedFrames, 1); }
-    void addTxDataFrame() const { METRIC_INCR(txDataFrames, 1); }
-    void addTxExchange() const { METRIC_INCR(txExchanges, 1); }
-    void addTxGrant() const { METRIC_INCR(txGrants, 1); }
-    void addTxNop() const { METRIC_INCR(txNops, 1); }
-    void addSyncHeaderRead() const { METRIC_INCR(syncHeaderReads, 1); }
-    void addSyncHeaderTimeout() const { METRIC_INCR(syncHeaderTimeouts, 1); }
-    void addSyncPayloadRead() const { METRIC_INCR(syncPayloadReads, 1); }
-    void addReset() const { METRIC_INCR(resets, 1); }
+    void addTaskStep() const { METRIC_INCR(group, taskSteps, 1); }
+    void addUartDataWake() const { METRIC_INCR(group, uartDataWakes, 1); }
+    void addAttentionWake() const { METRIC_INCR(group, attentionWakes, 1); }
+    void addPoll() const { METRIC_INCR(group, polls, 1); }
+    void addEmptyPoll() const { METRIC_INCR(group, emptyPolls, 1); }
+    void addReceivedFrame() const { METRIC_INCR(group, receivedFrames, 1); }
+    void addTxDataFrame() const { METRIC_INCR(group, txDataFrames, 1); }
+    void addTxExchange() const { METRIC_INCR(group, txExchanges, 1); }
+    void addTxGrant() const { METRIC_INCR(group, txGrants, 1); }
+    void addTxNop() const { METRIC_INCR(group, txNops, 1); }
+    void addSyncHeaderRead() const { METRIC_INCR(group, syncHeaderReads, 1); }
+    void addSyncHeaderTimeout() const {
+        METRIC_INCR(group, syncHeaderTimeouts, 1);
+    }
+    void addSyncPayloadRead() const { METRIC_INCR(group, syncPayloadReads, 1); }
+    void addReset() const { METRIC_INCR(group, resets, 1); }
 
     void recordStepDuration(uint32_t durationUs) {
         if (durationUs <= maxStepUsValue) {
             return;
         }
         maxStepUsValue = durationUs;
-        METRIC_SET(maxStepUs, durationUs);
+        METRIC_SET(group, maxStepUs, durationUs);
     }
 
     GroupHandle group;
@@ -179,9 +179,7 @@ struct Metrics {
     GaugeHandle maxStepUs;
     uint32_t maxStepUsValue = 0;
 
-    static constexpr LogLevel minimumLogLevel = MetricCollection::rs485;
-    static constexpr bool enabled =
-        metrics_enabled(groupDef.logLevel, minimumLogLevel);
+    static constexpr auto component = MetricsBackend::MetricComponent::Rs485;
 };
 
 inline Metrics &metrics() {

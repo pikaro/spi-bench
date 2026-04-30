@@ -13,6 +13,7 @@ struct SlaveConfig {
     BusPins pins{};
     std::optional<Pin> csPin = std::nullopt;
     uint32_t maxTransferSize = 4096;
+    uint32_t transferWindowBytes = 256;
     Mode mode = Mode::Mode0;
     BitOrder bitOrder = BitOrder::MsbFirst;
     uint8_t queueSize = 1;
@@ -30,7 +31,9 @@ struct SlaveConfig {
 
     [[nodiscard]] bool validate() const {
         return pins.validate() && csPin.has_value() && maxTransferSize > 0 &&
-               queueSize > 0 && task.validate();
+               transferWindowBytes > 0 &&
+               transferWindowBytes <= maxTransferSize && queueSize > 0 &&
+               task.validate();
     }
 };
 

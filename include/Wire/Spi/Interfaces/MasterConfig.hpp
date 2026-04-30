@@ -44,10 +44,17 @@ struct MasterConfig {
         .notifyExpectTimeout = false,
         .notifyTimeoutMs = 10,
     };
+    uint32_t serviceBudgetMs = 0;
+    uint8_t maxTurnsPerStep = 1;
+    uint32_t interTurnDelayMs = 0;
+    uint32_t attentionReceiveWindowBytes = 64;
+    bool heartbeatEnabled = false;
     std::optional<Pin> attentionPin = std::nullopt;
 
     [[nodiscard]] bool validate() const {
-        return bus.validate() && device.validate() && task.validate();
+        return bus.validate() && device.validate() && task.validate() &&
+               maxTurnsPerStep > 0 && attentionReceiveWindowBytes > 0 &&
+               attentionReceiveWindowBytes <= bus.maxTransferSize;
     }
 };
 

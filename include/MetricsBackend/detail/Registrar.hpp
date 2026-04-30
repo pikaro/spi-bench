@@ -4,7 +4,6 @@
 #include "MetricsBackend/Interfaces/Types.hpp"
 #include "MetricsBackend/detail/Types.hpp" // IWYU pragma: keep
 #include "Services/Metrics.hpp"
-#include "StaticConfig/Metrics.hpp"
 #include "Store.hpp"
 #include "Types/Error.hpp"
 #include <expected>
@@ -19,9 +18,9 @@ class Registrar : public IRegistrar {
     std::expected<GroupHandle, ReturnCode>
     // Take a reference wrapper to reject temporaries
     addGroup(std::reference_wrapper<const MetricGroupDesc> desc,
-             LogLevel minimumLogLevel) override {
+             bool enabled) override {
         const auto &descRef = desc.get();
-        if (!metrics_enabled(descRef.logLevel, minimumLogLevel)) {
+        if (!enabled) {
             return GroupHandle::null();
         }
         FAIL_IF_ERR_FWD_UNEXPECTED(
@@ -37,8 +36,8 @@ class Registrar : public IRegistrar {
     std::expected<CounterHandle, ReturnCode>
     addCounter(MetricGroupKey groupKey,
                std::reference_wrapper<const MetricDesc> desc,
-               LogLevel groupLogLevel, LogLevel minimumLogLevel) override {
-        if (!metrics_enabled(groupLogLevel, minimumLogLevel)) {
+               bool enabled) override {
+        if (!enabled) {
             return CounterHandle::null();
         }
         const auto &descRef = desc.get();
@@ -57,8 +56,8 @@ class Registrar : public IRegistrar {
     std::expected<GaugeHandle, ReturnCode>
     addGauge(MetricGroupKey groupKey,
              std::reference_wrapper<const MetricDesc> desc,
-             LogLevel groupLogLevel, LogLevel minimumLogLevel) override {
-        if (!metrics_enabled(groupLogLevel, minimumLogLevel)) {
+             bool enabled) override {
+        if (!enabled) {
             return GaugeHandle::null();
         }
         const auto &descRef = desc.get();

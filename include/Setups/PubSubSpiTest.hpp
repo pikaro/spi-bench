@@ -40,7 +40,7 @@ template <class Link> struct PubSubSpiTestSetup {
         uint32_t masterPublishIntervalMs = 10;
         uint32_t slavePublishIntervalMs = 10;
         uint32_t reportIntervalMs = 1000;
-        bool masterPublishes = false;
+        bool masterPublishes = true;
         bool slavePublishes = true;
     };
 
@@ -81,9 +81,10 @@ template <class Link> struct PubSubSpiTestSetup {
             FAIL_IF_UNEXPECTED_FWD(message,
                                    envelope.getPayloadAs<PubSubTest::Message>(),
                                    "Failed to decode SPI PubSub message");
-            const auto nowUs = ClockService::get().nowUs();
+            const auto &clock = ClockService::get();
+            const auto nowUs = clock.nowUs();
             const auto latencyUs =
-                envelope.header.timestampUs == 0
+                !clock.synced() || envelope.header.timestampUs == 0
                     ? 0
                     : nowUs - static_cast<int64_t>(envelope.header.timestampUs);
             if (stats != nullptr) {
@@ -183,8 +184,11 @@ template <class Link> struct PubSubSpiTestSetup {
         std::strncpy(message.strVal.data(), label, message.strVal.size() - 1);
         message.strVal[message.strVal.size() - 1] = '\0';
 
-        FAIL_IF_UNEXPECTED_FWD(messageId, messagePool.store(message),
-                               "Failed to allocate SPI PubSub message");
+        auto messageIdResult = messagePool.store(message);
+        if (!messageIdResult) {
+            return messageIdResult.error();
+        }
+        const auto messageId = *messageIdResult;
         auto envelopeDef = Totem::PubSubBackend::EnvelopeDef{
             .owner = static_cast<void *>(&messagePool),
             .topic = publishedTopic(),

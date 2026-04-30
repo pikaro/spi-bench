@@ -192,8 +192,10 @@ struct SlotHeader {
         header.frameCount = std::to_integer<uint8_t>(bytes[15]);
         header.payloadBytes = readLe16(bytes, 16);
         header.crc = std::to_integer<uint8_t>(bytes[checkedSize]);
-        FAIL_IF_ERR_FWD_UNEXPECTED(header.validate(),
-                                   "Invalid SPI slot header");
+        auto validateRet = header.validate();
+        if (!validateRet.ok()) {
+            return std::unexpected(validateRet);
+        }
         return header;
     }
 };

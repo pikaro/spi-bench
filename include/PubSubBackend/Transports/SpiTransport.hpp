@@ -5,6 +5,7 @@
 #include "PubSubBackend/Interfaces/Envelope.hpp"
 #include "PubSubBackend/Interfaces/Wire.hpp"
 #include "PubSubBackend/Transports/BaseTransport.hpp"
+#include "PubSubBackend/detail/Metrics.hpp"
 #include "PubSubBackend/detail/SerDe.hpp"
 #include "PubSubBackend/detail/Trace.hpp"
 #include "PubSubBackend/detail/Types.hpp"
@@ -104,6 +105,7 @@ template <class Link> class SpiTransport : public BaseTransport {
         while (count < maxCount) {
             auto *slot = _findFreeInFlight();
             if (slot == nullptr) {
+                detail::metrics().addSpiDrop();
                 return OK();
             }
 
@@ -122,6 +124,7 @@ template <class Link> class SpiTransport : public BaseTransport {
 
             auto frameSizeResult = _prepareFrameForSend(item, slot->data);
             if (!frameSizeResult) {
+                detail::metrics().addSpiDrop();
                 _log_w(SV_FMT
                        ": dropping unserializable PubSub message %u: " ERR_FMT,
                        SV_ARG(_instanceName), item->envelope.header.messageId,
@@ -157,10 +160,12 @@ template <class Link> class SpiTransport : public BaseTransport {
             auto sendRet = _link.send(request);
             if (!sendRet.ok()) {
                 slot->occupied = false;
+                detail::metrics().addSpiFail();
                 FAIL(sendRet,
                      "Failed to enqueue PubSub frame on SPI link: " ERR_FMT,
                      ERR_ARG(sendRet));
             }
+            detail::metrics().addSpiTx();
             detail::log_trace_packet("spi.tx.queued", item->envelope.header,
                                      _instanceName.data());
             ++count;
@@ -229,8 +234,11 @@ template <class Link> class SpiTransport : public BaseTransport {
     }
 
     ReturnCode _receiveWireData(std::span<const std::byte> payload) {
-        FAIL_IF(payload.size() > Base::bufferSize, ERR(CoreError, Overflow),
-                "SPI PubSub frame exceeds transport buffer size");
+        if (payload.size() > Base::bufferSize) {
+            detail::metrics().addSpiDrop();
+            FAIL(ERR(CoreError, Overflow),
+                 "SPI PubSub frame exceeds transport buffer size");
+        }
         FAIL_IF_ERR_FWD(_ensureRxFrameQueue(),
                         "Failed to ensure SPI RX queue for ingress");
 
@@ -240,9 +248,13 @@ template <class Link> class SpiTransport : public BaseTransport {
         detail::log_trace_frame("spi.wire.ingress", payload,
                                 detail::SerDe::peekHeader,
                                 _instanceName.data());
-        FAIL_IF_ERR_FWD(Totem::Queue::Platform::send(_rxFrameQueue, &rxFrame,
-                                                     queueSendTimeoutTicks),
-                        "Failed to enqueue SPI PubSub ingress frame");
+        auto sendRet = Totem::Queue::Platform::send(_rxFrameQueue, &rxFrame,
+                                                    queueSendTimeoutTicks);
+        if (!sendRet.ok()) {
+            detail::metrics().addSpiDrop();
+            FAIL(sendRet, "Failed to enqueue SPI PubSub ingress frame");
+        }
+        detail::metrics().addSpiRx();
         FAIL_IF_ERR_FWD(_wake(), "Failed to wake PubSub after SPI ingress");
         return OK();
     }
@@ -267,10 +279,21 @@ template <class Link> class SpiTransport : public BaseTransport {
         slot = {};
 
         if (!result.result.ok()) {
-            _log_w(SV_FMT
-                   ": SPI write failed for PubSub message %u: " ERR_FMT,
-                   SV_ARG(_instanceName), envelope.header.messageId,
-                   ERR_ARG(result.result));
+            detail::metrics().addSpiFail();
+            if (result.result == ERR(CoreError, Timeout)) {
+                _log_v(SV_FMT
+                       ": SPI write timed out for PubSub message %u: "
+                       ERR_FMT,
+                       SV_ARG(_instanceName), envelope.header.messageId,
+                       ERR_ARG(result.result));
+            } else {
+                _log_w(SV_FMT
+                       ": SPI write failed for PubSub message %u: " ERR_FMT,
+                       SV_ARG(_instanceName), envelope.header.messageId,
+                       ERR_ARG(result.result));
+            }
+        } else {
+            detail::metrics().addSpiAck();
         }
         return _ack(envelope);
     }

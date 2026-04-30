@@ -52,17 +52,6 @@ static constexpr bool static_logging_for(LogLevel level,
            static_cast<uint8_t>(logging_minimum_for(component));
 }
 
-struct Tracing {
-    static constexpr LogLevel rs485 = LoggingMinimum::rs485;
-    static constexpr LogLevel spi = LoggingMinimum::spi;
-    static constexpr LogLevel pubSub = LoggingMinimum::pubSub;
-};
-
-static constexpr bool tracing_for(LogLevel componentMinimum) {
-    return static_cast<uint8_t>(LogLevel::Verbose) >=
-           static_cast<uint8_t>(componentMinimum);
-}
-
 struct LoggingConfig {
     static constexpr std::size_t maxSinks = 3;
     static constexpr bool useColor = true;

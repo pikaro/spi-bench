@@ -2,18 +2,12 @@
 
 #include "Macros/Facade.hpp"
 #include "Platform/PlatformSelect.hpp"
-#include "StaticConfig/Logging.hpp"
-#include "Support/Basic.hpp"
 #include "Wire/Spi/detail/Pdu.hpp"
 
 namespace Totem::Wire::Spi::detail {
 
 inline void log_trace_slot(const char *stage, const SlotHeader &header,
                            const char *owner = "") {
-    if constexpr (!tracing_for(Tracing::spi)) {
-        ignore_unused(stage, header, owner);
-        return;
-    }
     _log_v("SPI trace slot %-18s owner=%s peer=%u conn=%u seq=%u ack=%u "
            "frames=%u payload=%u slot=%u bucket=%u flags=0x%04X now=%llu us",
            stage, owner, header.peerId, header.connectionId, header.sequence,
@@ -25,10 +19,6 @@ inline void log_trace_slot(const char *stage, const SlotHeader &header,
 
 inline void log_trace_frame(const char *stage, const FrameHeader &header,
                             const char *owner = "") {
-    if constexpr (!tracing_for(Tracing::spi)) {
-        ignore_unused(stage, header, owner);
-        return;
-    }
     _log_v("SPI trace frame %-17s owner=%s type=" SV_FMT " payload=" SV_FMT
            " seq=%u responseTo=%u len=%u flags=0x%02X now=%llu us",
            stage, owner, MAGIC_SV_ARG(FrameType, header.type),

@@ -15,6 +15,7 @@
 #include "hal/spi_types.h"
 #include "soc/soc_caps.h"
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <expected>
 
@@ -231,6 +232,7 @@ class SpiSlaveDevice {
         slaveConfig.flags = 0;
         slaveConfig.queue_size = config.queueSize;
         slaveConfig.mode = static_cast<uint8_t>(config.mode);
+        slaveConfig.post_setup_cb = _onTransactionSetup;
         slaveConfig.post_trans_cb = _onTransactionComplete;
         if (config.bitOrder == BitOrder::LsbFirst) {
             slaveConfig.flags |= SPI_SLAVE_BIT_LSBFIRST;
@@ -253,6 +255,8 @@ class SpiSlaveDevice {
         FAIL_IF(!transfer.validate(), ERR(CoreError, InvalidArgument),
                 "Invalid SPI transfer");
 
+        _startedAtUs.store(0, std::memory_order_release);
+        _completedAtUs.store(0, std::memory_order_release);
         _transaction = {};
         _transaction.length = transfer.clockedSize() * 8;
         _transaction.user = this;
@@ -286,6 +290,8 @@ class SpiSlaveDevice {
         return TransferResult{
             .bytesTransferred =
                 transaction == nullptr ? 0 : transaction->trans_len / 8,
+            .startedAtUs = _startedAtUs.load(std::memory_order_acquire),
+            .completedAtUs = _completedAtUs.load(std::memory_order_acquire),
         };
     }
 
@@ -311,11 +317,22 @@ class SpiSlaveDevice {
     }
 
   private:
+    static void _onTransactionSetup(spi_slave_transaction_t *transaction) {
+        if (transaction == nullptr || transaction->user == nullptr) {
+            return;
+        }
+        auto *self = static_cast<SpiSlaveDevice *>(transaction->user);
+        self->_startedAtUs.store(::platform::get_time_us(),
+                                 std::memory_order_release);
+    }
+
     static void _onTransactionComplete(spi_slave_transaction_t *transaction) {
         if (transaction == nullptr || transaction->user == nullptr) {
             return;
         }
         auto *self = static_cast<SpiSlaveDevice *>(transaction->user);
+        self->_completedAtUs.store(::platform::get_time_us(),
+                                   std::memory_order_release);
         if (self->_completionCallback == nullptr) {
             return;
         }
@@ -326,6 +343,8 @@ class SpiSlaveDevice {
     bool _initialized = false;
     bool _queued = false;
     spi_slave_transaction_t _transaction{};
+    std::atomic<int64_t> _startedAtUs{0};
+    std::atomic<int64_t> _completedAtUs{0};
     void *_completionOwner = nullptr;
     SpiSlaveCompletionCallback _completionCallback = nullptr;
 };

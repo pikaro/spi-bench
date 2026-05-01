@@ -47,13 +47,16 @@ struct MasterConfig {
     uint32_t serviceBudgetMs = 0;
     uint8_t maxTurnsPerStep = 1;
     uint32_t interTurnDelayMs = 0;
-    uint32_t attentionReceiveWindowBytes = 64;
+    uint32_t maxOutboundSlotBytes = 512;
+    uint32_t attentionReceiveWindowBytes = 512;
     bool heartbeatEnabled = false;
     std::optional<Pin> attentionPin = std::nullopt;
 
     [[nodiscard]] bool validate() const {
         return bus.validate() && device.validate() && task.validate() &&
-               maxTurnsPerStep > 0 && attentionReceiveWindowBytes > 0 &&
+               maxTurnsPerStep > 0 && maxOutboundSlotBytes > 0 &&
+               maxOutboundSlotBytes <= bus.maxTransferSize &&
+               attentionReceiveWindowBytes > 0 &&
                attentionReceiveWindowBytes <= bus.maxTransferSize;
     }
 };

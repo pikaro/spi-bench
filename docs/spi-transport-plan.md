@@ -1,1010 +1,247 @@
-# SPI Wire Transport Implementation Plan
-
-This document is a working plan for a DMA-backed SPI transport that can carry
-PubSub and Clock traffic between one bus master and multiple slaves. It is not a
-final protocol specification, but it should be concrete enough to guide the
-first implementation without rediscovering the same design constraints.
-
-## Goals
-
-- Support one SPI master owning one physical bus with the current four-node
-  topology, while keeping the peer-selection design open for future larger
-  buses.
-- Allow multiple independent SPI buses, for example one slower bus to an ESP32
-  classic Bluetooth node and one faster bus to ESP32-S3/C3 GPU/media nodes.
-- Use DMA-backed, bounded, preallocated buffers for predictable CPU and memory
-  behavior.
-- Batch multiple logical protocol frames into one SPI turn.
-- Support PubSub as a shared-bus transport:
-  - master side as `SharedBusRouter`
-  - slave side as `SharedBusEdge`
-  - no reflection of frames back to the peer that originated them
-- Support low-overhead Clock synchronization as an L7 protocol on the same wire
-  layer.
-- Support optional per-slave attention GPIOs so the master can skip idle slaves
-  without high-rate polling.
-- Include metrics and switchable hot-path tracing from the first implementation.
-
-## Non-Goals For The First Version
-
-- Full LED frame streaming over SPI. PubSub should remain event-driven.
-- Runtime allocation in hot paths.
-- Cross-platform SPI implementation beyond the existing ESP32 target.
-- A generalized bus abstraction shared with RS485. Start with `Wire/Spi/` and
-  extract common pieces only after stable duplication is obvious.
-- Complex reliability semantics such as retransmit windows. Use bounded sequence
-  checks, metadata CRC8, explicit ack/nack, and reconnect/rehandshake first.
-
-## Proposed File Layout
-
-- `include/Wire/Spi/Interfaces/`
-  - `MasterConfig.hpp`
-  - `SlaveConfig.hpp`
-  - `Types.hpp`
-- `include/Wire/Spi/detail/`
-  - `Pdu.hpp`
-  - `Trace.hpp`
-  - `Metrics.hpp`
-  - `SlotBuffer.hpp`
-  - `Transceiver.hpp`
-  - `Master.hpp`
-  - `Slave.hpp`
-  - `Scheduler.hpp`
-  - `PlatformSelect.hpp`
-  - `Types.hpp`
-  - `platform/PlatformESP32.hpp`
-- `include/Wire/Spi/Facade.hpp`
-  - public `Totem::Wire::Spi::Master` and `Slave`
-- `include/PubSubBackend/Transports/SpiTransport.hpp`
-  - shared-bus router/edge PubSub transport
-- `include/Setups/PubSubSpiTest.hpp`
-  - first hardware test harness
-
-SPI uses `Wire/Spi/Interfaces/` for config and small public types because the
-environment config files instantiate them directly. Reuse `Wire/Interfaces/`
-for cross-wire request/result and payload concepts.
-
-## Component-Owned Platform Abstraction
-
-SPI should not start as a top-level `Platform/` abstraction. UART sits there
-because multiple components use it. SPI is expected to be owned by the SPI wire
-transport, so hardware-specific code should live under
-`Wire/Spi/detail/platform/` until another component genuinely needs it.
-
-Phase one enables the ESP-IDF `esp_driver_spi` component through
-`ENABLE_SPI=ON`. Without that build flag, the component-owned abstraction can
-compile headers but cannot link or instantiate the ESP-IDF master/slave driver.
-
-### `Wire/Spi/detail/Types.hpp`
-
-Define compact platform-agnostic data types:
-
-- `SpiBusId`
-  - logical bus selector, not raw ESP-IDF host id
-- `SpiMode`
-  - mode 0 initially, leave room for mode 1/2/3
-- `SpiBitOrder`
-  - probably MSB first only for now
-- `SpiDeviceConfig`
-  - clock rate
-  - mode
-  - MOSI/MISO/SCLK/CS pins
-  - DMA max transfer bytes
-  - optional attention pin
-- `SpiTransfer`
-  - `std::span<const std::byte> tx`
-  - `std::span<std::byte> rx`
-  - timeout
-- `SpiEvent`
-  - transfer complete
-  - error
-  - overflow / missed transaction for slave mode if exposed by ESP-IDF
-
-Keep `Wire/Spi/detail/Types.hpp` independent from ESP-IDF. It may use
-`Pin` like other hardware-facing component configs, but it should
-not include ESP-IDF headers.
-
-### `detail::platform::SpiMasterBus`
-
-Responsibilities:
-
-- Own one ESP-IDF SPI bus host.
-- Initialize MOSI/MISO/SCLK once.
-- Add/remove slave devices by CS pin and per-device clock rate.
-- Submit DMA transfers for one slave at a time.
-- Provide either a blocking `transfer()` for the first implementation or a
-  queued async API if ESP-IDF callback behavior is needed immediately.
-- Invoke a platform-agnostic callback or wake the owning task when an async
-  transfer completes.
-
-Recommended first shape:
-
-```cpp
-class SpiMasterBus {
-  ReturnCode init(SpiMasterBusConfig config);
-  std::expected<SpiDeviceHandle, ReturnCode> addDevice(SpiDeviceConfig config);
-  ReturnCode transfer(SpiDeviceHandle device, SpiTransfer transfer);
-  ReturnCode deinit();
-};
-```
-
-Blocking transfer is acceptable initially because the master scheduler task is
-the bus owner. Move to async only if profiling shows transfer blocking harms
-latency elsewhere.
-
-ESP-IDF host selection must stay behind the platform layer. `BusId::Bus2` maps
-to `SPI2_HOST`; `BusId::Bus3` is only valid on chips where
-`SOC_SPI_PERIPH_NUM > 2`. ESP32-C3 exposes only `SPI2_HOST`, so selecting bus 3
-must fail validation / initialization instead of referencing `SPI3_HOST` at
-compile time.
-
-### `detail::platform::SpiSlaveDevice`
-
-Responsibilities:
-
-- Own one ESP-IDF SPI slave peripheral.
-- Queue one or more DMA RX/TX buffers before the master clocks them.
-- Wake the SPI slave node when a transaction completes.
-- Detect queue starvation or truncated transactions if the platform exposes
-  this cleanly.
-
-Recommended first shape:
-
-```cpp
-class SpiSlaveDevice {
-  ReturnCode init(SpiSlaveConfig config);
-  ReturnCode queueTransfer(SpiTransfer transfer);
-  std::expected<SpiTransferResult, ReturnCode> waitTransfer(uint32_t timeoutMs);
-  ReturnCode deinit();
-};
-```
-
-The slave should keep its next TX slot ready before asserting attention. If no
-application data is pending, the TX slot still carries a valid empty/status
-frame.
-
-The first ESP32 slave wrapper intentionally supports one queued in-flight DMA
-transaction. That is enough to validate initialization and the platform shape;
-the protocol layer can expand this to multiple prequeued slots once
-`SlotBuffer` ownership exists.
-
-### DMA Buffer Rules
-
-- Buffers must be statically owned or allocated once at begin time.
-- Buffer addresses and sizes must satisfy ESP-IDF DMA alignment requirements.
-- Do not place large buffers on task stacks.
-- Prefer one `SlotBuffer` owner per peer so buffer lifetime is visible.
-- Start with max 4096-byte slots per direction per slave.
-- Use bucketed transfer lengths: `64`, `256`, `1024`, `4096` bytes.
-- The scheduler chooses the smallest bucket that fits the packed payload, with a
-  small status bucket for empty but necessary turns.
-
-Memory estimate:
-
-- 4 slaves on one bus, double-buffered RX/TX at 4 KB max:
-  `4 * 2 * 4096 = 32 KB`
-- 5 slaves:
-  `5 * 2 * 4096 = 40 KB`
-
-This is acceptable with the current RAM headroom, but should remain a deliberate
-budget and not become an excuse for extra queues or copies.
-
-## Wire Protocol
-
-SPI is physically full-duplex, but the logical protocol should be treated as a
-batch exchange per selected slave.
-
-Each master turn:
-
-1. Master selects one slave.
-2. Master packs outbound frames for that slave into the TX slot.
-3. Slave has already prepared its TX slot from prior queued outbound data.
-4. One DMA transfer exchanges both slots.
-5. Master parses the received slave slot after transfer completion.
-6. Slave parses the received master slot after transfer completion.
-7. Both sides publish received payloads and prepare future slots.
-
-### Slot Header
-
-Every DMA slot starts with a fixed header:
-
-- preamble/version
-- slot length
-- bucket length
-- peer id / slave id
-- epoch or connection id
-- sequence number
-- response/ack sequence if needed
-- flags
-  - hello
-  - heartbeat/status
-  - ack/nack present
-  - truncated/dropped frames
-  - clock sync marker if needed
-- frame count
-- payload bytes used
-- metadata CRC8
-
-The header should be small enough to fit in the 64-byte status bucket with at
-least one tiny control frame.
-
-Only SPI slot and frame metadata should be protected by the SPI wire CRC, and
-CRC8 is enough for that purpose. Higher-level payloads remain responsible for
-their own integrity checks. This preserves PubSub's ability to peek and route a
-wire header without forcing the router to compute a full payload CRC for traffic
-that only an interested destination node needs to validate.
-
-### Logical Frames Inside A Slot
-
-After the slot header, pack a sequence of logical frames:
-
-- frame type
-  - `Data`
-  - `Request`
-  - `Response`
-  - `Ack`
-  - `Nack`
-  - `Hello`
-  - `Heartbeat`
-  - `Status`
-- payload type
-  - reuse `Totem::Wire::PayloadType`, including `PubSub` and `Clock`
-- logical sequence
-- response-to sequence if applicable
-- payload length
-- payload bytes
-
-This mirrors the RS485 conceptual split but batches frames instead of sending
-one frame per wire transaction.
-
-### Ack Semantics
-
-For PubSub, a transport-level ack means:
-
-- the frame was accepted into the peer's SPI slot parser and handed to the
-  receiving transport ingress queue, or
-- for router forwarding, accepted into the next durable routing buffer.
-
-The PubSub drainer should not release an egress frame merely because it was
-packed into a local SPI TX slot. It should release after the peer acknowledges
-receipt in a later slot.
-
-For Clock, prefer `Request` / `Response` without an intermediate transport ack.
-The response may be carried in the opposite direction of the same or next slot,
-depending on timing. Timestamping must record:
-
-- local slot TX start
-- local slot RX complete
-- remote request receive/parse time
-- remote response slot TX start
-
-Do not reuse RS485 timestamp assumptions blindly. SPI timestamps should be
-defined around DMA transaction boundaries.
-
-### Handshake And Readiness
-
-Each peer needs a two-way handshake:
-
-1. Master sends `Hello` in that slave's slot.
-2. Slave returns `Hello` with supported version, max slot size, bucket support,
-   and feature flags.
-3. Master marks peer ready and publishes transport availability.
-4. Peer sequence and connection id reset on reconnect.
-
-`Hello` is an epoch boundary while the link is handshaking. Once the link is
-ready, forward/in-order `Hello` slots are consumed as stale queued handshake
-output without moving the receive cursor; they must not reset the link, dispatch
-frame payloads, fail pending operations, or trigger another automatic `Hello`
-response. A ready-state `Hello` whose slot sequence moves backwards is treated
-as a peer restart and re-enters the handshake. A future connection-id change
-should become the explicit "new peer epoch" signal, but with the current fixed
-connection id this sequence-direction rule keeps stale queued output and fresh
-reconnect attempts distinct.
-
-The attention GPIO can serve as the initial slave-to-master readiness signal.
-Before protocol handshake, the line has no other useful semantic meaning: it
-only tells the master that the slave wants to be clocked. Protocol readiness
-still comes from `Hello`, so a noisy or stale attention assertion cannot by
-itself mark the peer ready. Master readiness is implicit because the master owns
-the clock and slave-select lines.
-
-### Error Recovery
-
-On any of these:
-
-- invalid preamble/version
-- metadata CRC failure
-- impossible length
-- sequence mismatch
-- repeated missed heartbeat/status
-
-the affected peer state resets to handshake mode. Only that slave should reset;
-other slaves on the same bus remain ready unless the platform bus itself fails.
-
-Recovery should:
-
-- discard pending per-peer SPI protocol state
-- nack or drop in-flight PubSub egress for that peer
-- preserve registered L3 handlers and callbacks across link reset
-- preserve unrelated peer queues
-- increment metrics
-- publish transport availability change to PubSub
-
-## Master Scheduler
-
-The master owns arbitration. Slaves never transmit unless the master clocks a
-turn.
-
-### Scheduler Inputs
-
-- per-slave pending master-to-slave bytes
-- per-slave attention GPIO level
-- per-slave subscription interest / topic masks from PubSub
-- per-slave readiness and error state
-- periodic heartbeat/status deadlines
-- clock sync deadlines
-- bus cycle budget
-
-### Scheduler Policy
-
-Start simple:
-
-- cycle period: 10 ms
-- per bus: configurable max turns per cycle
-- per turn: one slave, one bucketed DMA transaction
-- ready slaves with asserted attention outrank idle slaves
-- slaves with pending master egress outrank idle slaves
-- heartbeat/status turns happen at low frequency
-- unused budget rolls to ready peers in round-robin order
-- quiet slaves can be skipped until heartbeat/status deadline
-
-Example:
-
-1. Refill cycle budget every 10 ms.
-2. While budget remains:
-   - choose next peer with urgent attention or egress
-   - else choose next peer needing heartbeat/status
-   - else stop; do not poll empty peers
-3. Pick smallest bucket that fits current outbound batch and minimum inbound
-   status requirement.
-4. Perform DMA transfer.
-5. Parse inbound slot.
-6. Update metrics, ack state, and PubSub availability.
-
-Avoid high-rate empty polling. Attention GPIO exists to prevent that.
-
-### Multi-Bus Support
-
-Represent each physical bus as one instance of the same `Spi::MasterBus` class,
-with its own configuration, TaskController runner, and peer table. A slower
-classic ESP32 bus and a faster S3/C3 bus should not become separate classes.
-
-Possible topology:
-
-- `SpiBusClassic`
-  - lower clock, one ESP32 classic node
-- `SpiBusFast`
-  - higher clock, media/GPU nodes
-
-PubSub sees these as transports:
-
-- one shared-bus router per physical bus, or
-- one router transport owning multiple bus instances if that proves simpler
-
-Prefer one router transport per physical bus initially. It keeps metrics,
-configuration, and failures isolated.
-
-The current hardware bring-up should assume the available native ESP32
-slave-select lines and four total nodes. The public peer-selection boundary
-should still remain narrow enough that a future GPIO-driven CS, mux, or shift
-register implementation can replace native SS selection without rewriting the
-wire protocol or PubSub transport.
-
-## Slave Node
-
-The SPI slave node owns:
-
-- platform `SpiSlaveDevice`
-- one RX slot buffer
-- one TX slot buffer
-- outbound logical frame queue
-- registered L3 handlers by `PayloadType`
-- attention output
-- metrics
-
-Slave flow:
-
-1. Prepare TX slot from queued outbound frames or status.
-2. If outbound data exists, assert attention.
-3. Queue DMA transfer and wait for master clock.
-4. On transfer completion, release attention if no more outbound data remains.
-5. Parse master slot.
-6. Invoke L3 handlers and PubSub ingress.
-7. Queue ack/response frames for a future TX slot.
-8. Re-arm DMA transfer.
-
-Critical point: the slave must have a valid TX buffer queued before asserting
-attention, otherwise the master may clock an empty or stale slot.
-
-## PubSub Transport
-
-Add `PubSubBackend/Transports/SpiTransport.hpp`.
-
-### Master-Side Router
-
-The master transport should behave like a `SharedBusRouter`:
-
-- maintain peer id for each SPI slave
-- maintain per-peer topic interest
-- accept outbound PubSub frames from the node drainer
-- route frames to one or more peer egress queues
-- avoid reflecting frames to their source peer
-- release PubSub egress after peer ack, not after local packing
-- publish transport availability per peer when handshake changes
-
-For forwarding:
-
-- use raw serialized PubSub frames where possible
-- avoid decode/re-encode for pass-through traffic
-- direct relay into per-peer SPI egress queues if the target is obvious and
-  queue capacity exists
-- fall back to existing buffered ingress path when routing is complex
-
-### Slave-Side Edge
-
-The slave transport should behave like a `SharedBusEdge`:
-
-- one remote routing domain: the SPI master/router
-- local publishes enqueue frames into the slave SPI node
-- received PubSub frames are published via `BaseTransport::pollInto()` flow
-- egress is released after master ack
-
-### Queues And Backpressure
-
-Use bounded per-peer queues:
-
-- one queue for logical outbound frames waiting to be packed
-- one small in-flight table for frames awaiting peer ack
-- one RX ingress queue from SPI node to PubSub transport
-
-Do not retain more copies than necessary:
-
-- PubSub serialized wire image should be copied once into the SPI durable egress
-  queue or referenced through an existing arena only if lifetime is guaranteed.
-- Packing a frame into a DMA slot is not durable ownership.
-- After a slot is acknowledged by the peer, release the corresponding PubSub
-  drainer ack.
-
-Backpressure behavior:
-
-- critical PubSub control frames should be preserved where possible.
-- noncritical traffic may drop under pressure.
-- overflow counters must distinguish local PubSub allocation failure, SPI
-  egress queue full, in-flight table full, and DMA slot truncation.
-
-## Clock Sync Integration
-
-Clock should use `PayloadType::Clock` over SPI.
-
-Recommended first protocol:
-
-- slave sends Clock `Request` in its next outbound slot.
-- master parses request and queues Clock `Response` for the next slot to that
-  slave.
-- slave computes offset after receiving the response.
-
-For time precision, add timestamp hooks around slot transfer:
-
-- `slotTxStartUs`
-- `slotRxCompleteUs`
-- `requestParsedUs`
-- `responseSlotTxStartUs`
-
-For DMA transfers, `slotTxStartUs` should be captured immediately before
-submitting or starting the transaction, not when the logical frame is queued.
-`slotRxCompleteUs` should be captured as close as possible to transfer
-completion notification.
-
-Clock sync traffic should bypass normal low-priority batching when a sync is
-pending, but it should still use the same slot protocol so scheduler behavior is
-observable.
-
-## Attention Lines
-
-Use one active-low open-drain attention line per slave when latency matters.
-
-Master side:
-
-- input with pull-up
-- GPIO interrupt wakes the SPI master scheduler runner
-- scheduler samples line level and services asserted peers first
-- before handshake, an asserted line means "clock me for protocol startup"
-
-Slave side:
-
-- open-drain output
-- assert only after the next TX slot is prepared and DMA is queued
-- keep asserted while outbound queue remains nonempty
-- release after transfer completion if the queue is empty
-- before handshake, assert after the initial `Hello` response/status slot is
-  prepared
-
-This mirrors the RS485 attention pattern, but per slave rather than one
-point-to-point line.
-
-## Metrics
-
-Add `Wire/Spi/detail/Metrics.hpp` early.
-
-Per bus metrics:
-
-- turns per second
-- bytes TX/RX per second
-- bus utilization estimate
-- scheduler idle cycles
-- scheduler budget exhausted cycles
-- average/max scheduler loop time
-
-Per peer metrics:
-
-- ready/not-ready state changes
-- handshakes
-- reconnects
-- attention assertions serviced
-- attention-to-transfer latency
-- transfer count by bucket size
-- payload bytes packed by bucket size
-- dropped frames by reason
-- ack latency
-- PubSub frame latency min/avg/max
-- Clock sync latency and offset samples
-- metadata CRC failures
-- sequence errors
-- DMA/platform errors
-
-Metrics should be cheap counters updated in hot paths and reported by the
-existing metrics/logging infrastructure at low frequency. The current SPI metric
-group is `LogLevel::Verbose` because most counters are per-turn hot-path
-instrumentation. To inspect them during bring-up, set both
-`MetricCollection::minimum` and `MetricCollection::spi` low enough for verbose
-metrics in `include/StaticConfig/Metrics.hpp`; leave them compiled out for
-normal throughput runs.
-
-## Trace Logging
-
-Add `Wire/Spi/detail/Trace.hpp` similar to RS485:
-
-- gated by the static `LoggingMinimum::spi` level
-- inline `log_trace_slot(...)`
-- inline `log_trace_frame(...)`
-- compiled to no-op when disabled
-
-Trace points:
-
-- scheduler selected peer
-- bucket selected
-- slot packed
-- DMA start
-- DMA complete
-- slot parsed
-- frame acked/nacked
-- peer reset
-- PubSub ingress/egress handoff
-- Clock request/response timestamp points
-
-Do not scatter `#ifdef`s through protocol code. Keep flags inside trace helper
-functions, following the same constexpr `Tracing` pattern as current RS485 /
-PubSub tracing so the compiler can discard disabled trace paths.
-
-## Step-By-Step Implementation Plan
-
-### Phase 1: Platform SPI Foundation
-
-1. Add `Wire/Spi/detail/Types.hpp`.
-2. Add `Wire/Spi/detail/PlatformSelect.hpp`.
-3. Implement `detail::platform::SpiMasterBus` for ESP32:
-   - bus init/deinit
-   - add device
-   - blocking DMA transfer
-   - timeout/error mapping
-4. Implement `detail::platform::SpiSlaveDevice` for ESP32:
-   - slave init/deinit
-   - queue/wait transfer
-   - completion event mapping
-5. Add a minimal compile-only setup using one master and one slave config.
-6. Build `master` and `slave`.
-
-Critical checks:
-
-- DMA buffer alignment compiles and runs on ESP32-S3 and ESP32-C3.
-- SPI bus ids do not leak ESP-IDF host ids outside platform code.
-- No platform-specific headers are included by `Wire/Spi`.
-
-### Phase 2: Slot Format And Local Packing
-
-1. Add `Wire/Spi/detail/Pdu.hpp`.
-2. Define slot header, frame header, metadata CRC8 helpers, bucket enum.
-3. Add `SlotBuffer`:
-   - fixed max capacity
-   - reset
-   - append frame
-   - finalize metadata CRC
-   - parse iterator
-4. Add host-side or compile-time tests if practical; otherwise add a small
-   on-device self-check path behind a setup flag.
-5. Add SPI trace helpers using the static `LoggingMinimum::spi` level.
-
-Critical checks:
-
-- Parser rejects impossible lengths before touching payload spans.
-- metadata CRC failures reset only the affected peer.
-- Empty/status slots are valid frames, not special cases.
-
-Implementation status:
-
-- `Pdu.hpp`, `SlotBuffer.hpp`, `Trace.hpp`, and `Metrics.hpp` exist.
-- The slot header is 19 bytes: 18 CRC-covered metadata bytes plus CRC8.
-- The frame header is 10 bytes: 9 CRC-covered metadata bytes plus CRC8.
-- CRC is intentionally metadata-only; payload integrity remains the L7
-  protocol's responsibility.
-- Slot parsing validates preamble, version, declared slot length, bucket length,
-  payload bytes, and frame bounds before exposing payload spans.
-
-### Phase 3: One Master And One Slave Wire Link
-
-1. Add `Wire::Spi::Master` with one peer.
-2. Add `Wire::Spi::Slave`.
-3. Implement handshake.
-4. Implement heartbeat/status.
-5. Implement `Data`, `Request`, `Response`, `Ack`, `Nack` frame handling.
-6. Add handler registration by `PayloadType`.
-7. Add basic metrics.
-8. Validate Clock sync over SPI with one master and one slave.
-
-Critical checks:
-
-- No PubSub integration yet; keep wire layer behavior isolated.
-- Reset on malformed slot must recover without reboot.
-- Slave always has a valid TX slot queued before attention.
-
-Implementation status:
-
-- A first `Transceiver<Capacity>` exists and is embedded by `Spi::Master` and
-  `Spi::Slave`.
-- The transceiver can prepare hello, heartbeat, data, request, and response
-  frames, parse slots, dispatch registered `PayloadType` handlers, and queue
-  request responses for the next slot.
-- Handshake state uses the shared event-capable `Generic::StateMachine`.
-  `SendHello`, `RetryHello`, and `ReceiveHello` events make hello retries and
-  passive hello receipt explicit while reconnects remain explicit resets.
-- Forward/in-order `Hello` frames after readiness are consumed as stale
-  handshake output without moving the receive cursor. Backward ready-state
-  `Hello` frames are treated as peer restarts and re-enter the handshake. A
-  later connection-id handshake can make this explicit without relying on
-  sequence direction.
-- Slot and frame transmit counters use the shared `Wire/detail/Sequence`
-  helper. The helper is now width-parameterized with an unchanged `uint8_t`
-  default for RS485 and `uint16_t` use in SPI.
-- The master preserves its TX slot sequence across link resets and rehandshakes.
-  Master MOSI slot sequence is the bus-authoritative stream that slaves resync
-  to; rewinding it during reconnect breaks multi-peer scheduling and causes
-  slaves to reject the first post-handshake data slot.
-- Resizing an empty TX slot to fit a larger frame reuses the already allocated
-  slot sequence. Only advancing to the next physical TX slot consumes a new slot
-  sequence, otherwise peers observe gaps when a default empty slot is replaced
-  by queued PubSub or Clock data before it is clocked.
-- RX bytes that do not begin with the SPI protocol preamble/version are treated
-  as no-slot observations and do not reset the link. This covers all-zero MISO
-  while the peer is absent, being reflashed, or has not queued a response yet.
-  Hardware tests showed the master can receive such a no-slot bucket while the
-  same full-duplex turn still clocks a valid MOSI data frame into the slave; the
-  slave response or ack is therefore expected in a later queued slot.
-- RX bytes that do begin with the SPI protocol preamble/version but fail header
-  length, metadata CRC, or frame parsing are treated as real corrupted protocol
-  observations. They are counted through SPI metrics and logged at verbose
-  level because peer resets and stale DMA buffers can produce short bursts
-  during normal recovery. Parser bounds failures return `Wire::Corrupted`
-  rather than `Core::Underflow` so malformed wire data is recovered by the link
-  instead of escaping as a task-runner failure.
-- A valid SPI slot with no frames, no payload bytes, and no flags is scheduler
-  filler. In ready state it updates the receive cursor, but it is not treated as
-  application/control traffic and sequence gaps around filler do not imply
-  payload loss. During handshake it is ignored so stale ready-state filler does
-  not prevent accepting a later `Hello`.
-- Slot sequence mismatches are treated as stream resynchronization, not an
-  automatic link reset. A forward gap is counted/logged at verbose level and
-  the current CRC-valid slot is processed after moving the receive cursor to it;
-  a backward non-`Hello` slot is counted/logged as stale and ignored. Critical
-  delivery is handled by frame-level acknowledgement and higher protocols
-  rather than by resetting the whole link on scheduler-slot gaps.
-- Normal-level SPI logging is reserved for lifecycle changes and actionable
-  faults. Tolerated scheduler observations (`noSlot`, empty filler slots,
-  forward gaps, stale slots, stale hellos, and hello resyncs) are available as
-  verbose logs and SPI metrics only.
-- The current public master config is still a one-device convenience wrapper
-  around a platform bus that can store multiple ESP-IDF device handles. The
-  multi-node target shape should keep master TX slot sequence bus-authoritative
-  per physical bus, with per-peer receive cursor, readiness, attention,
-  pending-write, and acknowledgement state added above the current single-peer
-  transceiver/link objects rather than by making slaves dictate the master
-  sequence.
-- `Spi::Master` and `Spi::Slave` now drive one-peer SPI DMA turns from
-  TaskController runners.
-- The master retries `Hello` until the slave answers; the slave auto-queues a
-  `Hello` response after parsing the first master hello.
-- The public link exposes `ready()` and logs handshake completion on both sides.
-- `Spi::Slave::exchange()` defers one in-flight exchange request until the
-  currently queued DMA transfer completes, so application code does not mutate a
-  buffer already handed to the SPI slave driver.
-- Response frames are routed to the pending exchange callback. This is enough
-  for first Clock protocol validation, with the caveat that the current slave
-  timestamp is captured when the slot is queued because ESP-IDF slave mode only
-  wakes this wrapper after master clock completion.
-
-### Phase 4: Attention And Event-Driven Scheduling
-
-1. Add per-peer attention config.
-2. Reuse `platform::Gpio` and ISR-safe TaskController signal path.
-3. Master scheduler wakes on attention and services asserted peers.
-4. Slave asserts attention when queued outbound data exists.
-5. Add attention metrics.
-6. Confirm latency improvement versus periodic polling.
-
-Critical checks:
-
-- No ad-hoc platform tasks for GPIO.
-- ISR path only records state and wakes the existing runner.
-- Sustained low attention causes repeated service until the peer drains.
-
-Implementation status:
-
-- The active-low open-drain attention-line implementation now lives in
-  `Wire/detail/AttentionLine.hpp` and is shared by RS485 and SPI.
-- SPI master and slave configs include TaskController runner config and an
-  optional attention pin.
-- `Spi::Master` now owns a TaskController runner and registers the attention
-  line as an ISR-backed input. The ISR records an attention request and wakes
-  the SPI runner with `Signal::SpiAttention`.
-- `Spi::Slave` now owns a TaskController runner and can drive the attention
-  line as an output based on whether the current TX slot contains frames.
-- SPI metrics include task-step and attention wake/assert/release counters.
-- The master clocks DMA turns when attention is asserted, when outbound data is
-  pending, or while the handshake is incomplete. Without an attention pin,
-  startup still progresses through the periodic task cadence.
-- `MasterConfig` now has an optional per-step service budget for bring-up
-  pressure testing. The active low-speed master keeps a 10 ms SPI runner period
-  but may perform up to two turns within a 5 ms budget, with a short inter-turn
-  delay so the ESP32 slave task can queue its next DMA buffer. This models the
-  target bus-cycle shape without turning the task into a high-rate empty poller.
-- Master transfers can widen the current TX bucket during active ready-state
-  turns so the clocked transaction is large enough for likely slave-originated
-  data even if the master's own slot is ACK-only. The active low-speed bring-up
-  config uses a 256-byte active receive window to cover PubSub test frames that
-  do not fit in the 64-byte control bucket.
-- The master heartbeat path is now config-gated and disabled by default for
-  Phase 5 pressure testing. Normal PubSub traffic and attention already prove
-  peer progress; an idle heartbeat reset during active traffic is more harmful
-  than useful until heartbeat/status semantics are made per-peer and scheduler
-  aware.
-- A malformed ready-state slot is dropped instead of resetting the link. The
-  transmitted slot is advanced and any pending write ages out through the normal
-  ack timeout. This keeps a single corrupted or truncated observation from
-  releasing every in-flight PubSub envelope and collapsing the link under load.
-- The transceiver can grow a slot that already contains control frames. Master
-  and slave PubSub writes may therefore piggyback behind ACKs instead of being
-  starved by continuous bidirectional traffic that requires an ACK every turn.
-- The slave queues the next DMA transfer immediately after parsing the previous
-  one and only appends deferred application traffic while no transfer is queued.
-- Slave DMA transfers arm the full receive window instead of sizing the
-  transaction from the slave's current outbound slot. The SPI master chooses the
-  clocked transaction length, so a 64-byte empty slave TX slot must still be able
-  to receive the configured per-turn bus window.
-- `SlaveConfig::maxTransferSize` remains the ESP-IDF bus/DMA capability, while
-  `SlaveConfig::transferWindowBytes` is the queued per-turn window. Keeping
-  those separate lets the target scheduler choose a bounded slot size per bus
-  without conflating it with the driver's maximum supported transaction size.
-- Slave-originated exchange requests assert the attention line just like queued
-  writes. Clock sync depends on this because the request is initiated by the
-  slave and needs the master to clock a turn before the normal idle cadence.
-- Exchange attention remains asserted while the response is outstanding. The
-  master must not immediately self-clock a just-queued response in the same
-  burst that parsed the request, because ESP-IDF slave mode needs time to
-  complete the previous DMA transaction and queue the next receive buffer.
-- SPI slave exchange timestamps are captured when the DMA transfer carrying the
-  request completes rather than when the buffer is queued. This keeps Clock sync
-  from measuring queue-to-clock scheduling delay as wire latency under PubSub
-  pressure.
-- Slave exchanges have a bounded timeout. A Clock request can be lost during
-  startup hello resync or pressure traffic before the response is observed; the
-  timeout nacks that attempt so the Clock layer can reset and issue a fresh
-  sync request instead of remaining in `syncing()` forever.
-- The first practical wire test can now validate SPI driver initialization,
-  two-way hello readiness, attention wakeups when configured, and a single
-  deferred request/response exchange such as Clock sync.
-- Hardware bring-up has validated both currently wired SPI buses. On the
-  ESP32-S3 master, slower clock rates produced a stable one-bit-late MISO
-  sample pattern even though the protocol bytes were otherwise coherent; raising
-  the bus to the empirically working clock fixed the issue. Do not add software
-  bit-slip repair unless this reappears in a way that cannot be fixed by bus
-  timing.
-
-Remaining before shared-bus PubSub routing:
-
-- Replace the one-exchange shortcut with the bounded per-peer exchange tables
-  planned for multi-peer Clock traffic.
-
-### Phase 5: PubSub Edge Transport
-
-1. Implement slave-side `SpiTransport` as `SharedBusEdge`.
-2. Serialize PubSub frames into SPI egress queue.
-3. Release egress on master ack.
-4. Publish received frames through existing `BaseTransport` receive path.
-5. Add counters for enqueue, ack, drop, overflow, and latency.
-6. Validate one-way and bidirectional PubSub traffic with one slave.
-
-Critical checks:
-
-- Control-plane PubSub traffic must survive normal pressure.
-- Noncritical drops must be visible in stats.
-- PubSub task must wake on SPI ingress.
-
-Implementation status:
-
-- `Spi::Master` and `Spi::Slave` now expose a queued `send(WriteRequest)` path
-  for `Data` frames, matching the generic wire API used by PubSub transports.
-- SPI `Data` frames sent through that path set `FrameFlags::RequiresAck`.
-  Receivers append an `Ack` or `Nack` frame after dispatch, and the sender
-  completes the original `WriteRequest` from a bounded pending-write table only
-  after the peer acknowledgement is received.
-- Pending SPI writes have a bounded ack timeout. If the peer stops returning
-  acks while Phase 5 traffic is flowing, the write is nacked and the owning
-  PubSub envelope is released instead of filling the test message pool
-  indefinitely. These timeouts are treated as pressure/recovery telemetry:
-  counters are updated and verbose logs are available, but normal warning logs
-  are reserved for non-timeout write failures.
-- `Transceiver` now picks the smallest bucket that fits a single data, request,
-  or response frame when the current TX slot is empty. This keeps PubSub-sized
-  frames out of the 64-byte hello/status bucket.
-- `PubSubBackend/Transports/SpiTransport.hpp` provides the first point-to-point
-  SPI PubSub transport. It mirrors the RS485 transport shape: serialize into a
-  bounded in-flight buffer, enqueue the bytes on the SPI link, receive
-  `PayloadType::PubSub` data through a wire handler, and wake the PubSub node
-  after ingress.
-- SPI PubSub transport pressure counters are recorded through the PubSub metric
-  group for queued TX, wire ack, wire failure, ingress RX, and ingress/drop
-  events. The active bring-up config compiles PubSub metrics at
-  `LogLevel::Verbose` so these counters are visible during Phase 5 pressure
-  runs.
-- `Setups/PubSubSpiTest.hpp` provides an RS485-test-style harness for one
-  SPI master/slave pair with aggregated throughput and latency reporting. The
-  SPI harness now publishes test messages in both directions by default at a
-  10 ms interval on each side. Latency reporting is suppressed to zero while
-  the local clock is unsynced so clock bring-up failures do not produce bogus
-  negative latency values.
-- Harness message-pool exhaustion is reported through the periodic
-  `txOverflow` counter rather than logged as an unexpected error. During
-  pressure testing, overflow is a signal that transport acknowledgements or
-  release paths are lagging, not a crash-worthy condition by itself.
-- The initial hardware wiring instantiates that harness on the master/media
-  low-speed SPI link. The high-speed GPU bus is still link-only until the
-  shared-bus router and multi-peer scheduler phases are implemented.
-
-Remaining caveat:
-
-- The acknowledgement is still point-to-point and confirms receiver transport
-  ingress only. Router forwarding will need per-target acknowledgements before
-  a master-side shared-bus router can release a multi-peer PubSub egress frame.
-
-### Phase 6: PubSub Router Transport
-
-1. Implement master-side `SpiTransport` as `SharedBusRouter`.
-2. Track per-peer subscription interest.
-3. Route local master frames to interested SPI peers.
-4. Route frames received from one SPI peer to other interested peers.
-5. Avoid reflection to the source peer.
-6. Preserve raw serialized frames for forwarding where possible.
-7. Add direct relay path only after the buffered path is correct.
-
-Critical checks:
-
-- Subscription replay on peer ready.
-- Availability changes are per peer.
-- One peer reset must not reset the whole bus transport.
-
-### Phase 7: Multi-Slave Scheduler
-
-1. Generalize master from one peer to a static peer table.
-2. Add round-robin selection with priority for:
-   - asserted attention
-   - pending master egress
-   - clock sync
-   - heartbeat/status
-3. Add per-cycle budget.
-4. Add bucket selection based on packed bytes.
-5. Add multiple bus instances if needed.
-6. Validate four fast slaves plus one slow bus/slave topology.
-
-Critical checks:
-
-- Budget exhaustion is measured, not guessed.
-- Slow classic ESP32 bus cannot starve fast GPU bus.
-- Idle slaves do not consume high-rate empty turns.
-
-### Phase 8: Tuning And Hardening
-
-1. Run saturation tests:
-   - FFT at 10 ms
-   - beat/button burst traffic
-   - PubSub control replay
-   - Clock sync under load
-2. Measure CPU per bus and per node.
-3. Tune bucket sizes and cycle budgets.
-4. Tune queue depths and in-flight table size.
-5. Add recovery tests:
-   - slave reboot
-   - malformed slot
-   - missed heartbeat
-   - attention stuck low
-   - queue overflow
-6. Document final protocol decisions in `docs/spi-wire.md` or update this
-   document once it becomes the spec.
-
-## Open Design Questions
-
-- Exact bucket sizes: start with `64/256/1024/4096`, adjust from metrics.
-- Whether master transfers should be blocking in the scheduler task or async.
-- Whether Clock sync needs a dedicated priority lane inside the slot packer.
-- Whether PubSub critical frames need a separate tiny reserved region in every
-  slot.
-- Whether the classic ESP32 node should use a separate physical bus from the
-  start or only after first throughput measurements.
-- Whether native slave-select lines remain sufficient in future projects, or
-  whether GPIO-driven CS, a mux, or a shift register becomes useful. The first
-  implementation should use native SS lines but avoid exposing that detail above
-  the platform/bus configuration boundary.
-
-## Expected Data Flow
-
-Master-originated PubSub event:
-
-1. Application publishes PubSub envelope.
-2. PubSub node routes to SPI router transport.
-3. SPI transport queues serialized frame for each interested peer.
-4. Scheduler selects peer and packs next slot.
-5. DMA transfer delivers slot.
-6. Slave SPI node parses PubSub frame and enqueues transport ingress.
-7. Slave PubSub node wakes and delivers to local subscribers.
-8. Slave queues ack in a later slot.
-9. Master receives ack and releases PubSub egress.
-
-Slave-originated PubSub event:
-
-1. Slave application publishes envelope.
-2. Slave SPI edge transport queues serialized frame.
-3. Slave prepares TX slot and asserts attention.
-4. Master ISR wakes scheduler.
-5. Master clocks a turn for that slave.
-6. Master SPI router receives frame and publishes/forwards it.
-7. Router queues ack to the source slave.
-8. Slave receives ack and releases egress.
-
-Clock sync:
-
-1. Clock client queues `PayloadType::Clock` request.
-2. SPI node records request slot TX start.
-3. Peer parses request and records parse/receive time.
-4. Peer queues response and records response slot TX start.
-5. Client receives response and records slot RX complete.
-6. Clock computes offset from the four timestamps.
-
-## Design Principles To Preserve
-
-- Keep hardware-specific SPI code in `Wire/Spi/detail/platform` wrappers unless
-  a second non-SPI component needs the same abstraction.
-- Keep wire protocol independent from PubSub.
-- Keep PubSub transport independent from ESP-IDF.
-- Use static storage and explicit ownership.
-- Prefer batched slot work over per-message SPI transactions.
-- Prefer attention-driven scheduling over high-rate empty polling.
-- Treat metrics as part of the feature, not a debugging afterthought.
-- Keep the first implementation simple enough to reason about under logs.
+# SPI Wire Transport
+
+This file describes the current SPI wire implementation and the protocol shape
+it should preserve. It is not a backlog dump. Remove bring-up workarounds from
+this document once they stop describing the active protocol.
+
+## Current Status
+
+The current implementation is a point-to-point SPI link:
+
+- public facade: `include/Wire/Spi/Facade.hpp`
+- configuration: `include/Wire/Spi/Interfaces/MasterConfig.hpp` and
+  `include/Wire/Spi/Interfaces/SlaveConfig.hpp`
+- protocol packing/parsing: `include/Wire/Spi/detail/Pdu.hpp`,
+  `SlotBuffer.hpp`, and `Transceiver.hpp`
+- link runners: `include/Wire/Spi/detail/Master.hpp` and `Slave.hpp`
+- ESP-IDF binding: `include/Wire/Spi/detail/platform/PlatformESP32.hpp`
+- PubSub bridge: `include/PubSubBackend/Transports/SpiTransport.hpp`
+- hardware test harness: `include/Setups/PubSubSpiTest.hpp`
+
+The active hardware loop is `env:master` to `env:media`. The master owns the
+SPI clock; the slave keeps a DMA transfer queued and asserts an attention GPIO
+when the master should clock a turn.
+
+The shared-bus router, multi-slave scheduler, and per-peer PubSub routing are
+not implemented yet. Do not describe the current point-to-point transport as a
+shared-bus design.
+
+## Target Shape
+
+SPI is intended to be the short-distance, high-throughput alternative to the
+RS485 transport. The design bias is therefore:
+
+- bounded static storage, DMA-compatible buffers, and no hot-path allocation
+- full-duplex turns that carry useful data in both directions when possible
+- multiple logical frames per SPI turn
+- minimal protocol chatter, especially no steady-state positive ACK frames
+- attention-driven scheduling so idle slaves are not polled at high rate
+- small metadata checks in SPI, with payload integrity owned by the L7 protocol
+
+At the current PubSub test rate, a 60-byte PubSub payload serializes to about an
+88-byte PubSub frame. A single SPI `Data` frame adds a 19-byte slot header and a
+10-byte frame header, so one test message is roughly 117 protocol bytes before
+bucket padding. A 10 MHz SPI bus should not be close to saturated by 6 kB/s of
+payload traffic; if it is, the cause is scheduling, acknowledgement, copy,
+logging, or clocking overhead rather than raw bus bandwidth.
+
+## Slot Protocol
+
+Each SPI turn clocks one bucketed slot. Supported bucket sizes are:
+
+- 64 bytes
+- 256 bytes
+- 512 bytes
+- 1024 bytes
+- 4096 bytes
+
+`SlotHeader` contains:
+
+- protocol preamble, version, and header size
+- slot length and bucket length
+- peer id and connection id
+- slot sequence
+- cumulative frame acknowledgement sequence
+- slot flags
+- frame count and payload byte count
+- CRC8 over the metadata header
+
+`FrameHeader` contains:
+
+- frame type: `Data`, `Request`, `Response`, `Nack`, `Hello`, `Heartbeat`,
+  `Status`, or `Nop`
+- payload type, currently `Raw`, `PubSub`, or `Clock`
+- frame sequence and optional `responseTo`
+- payload length and frame flags
+- CRC8 over the metadata header
+
+The SPI layer validates slot and frame metadata. PubSub frames carry their own
+CRC32. Clock payloads are small structured request/response values. Raw payload
+types do not get payload integrity unless the owning L7 protocol adds it.
+
+## Acknowledgement Semantics
+
+Successful `Data` acknowledgement is cumulative and carried in the slot header:
+
+- `SlotFlags::Ack` means `ackSequence` is valid.
+- `ackSequence` acknowledges all pending ack-required data frames up to that
+  frame sequence, using modular 16-bit ordering.
+- A successful data dispatch does not append a positive `Ack` frame.
+- Dispatch failure appends an explicit `Nack` frame for that failed frame.
+- Receivers process explicit `Nack` frames before the cumulative header ACK, so
+  a failed frame is not accidentally released by a later cumulative ACK in the
+  same slot.
+
+This avoids the old steady-state pattern where every PubSub `Data` frame caused
+another positive ACK frame and often another turn. It also removes repeated
+stale `ackSequence` fields from the protocol: an ACK is live only when the ACK
+flag is set.
+
+`WriteRequest` completion means the peer's wire handler accepted the data into
+its ingress path. It does not mean a PubSub subscriber consumed the message, and
+it is not sufficient for future shared-bus router delivery semantics.
+
+A no-slot observation means the peer was not armed with a protocol TX/RX slot.
+The sender must retain the current TX slot and must not mark header ACK state as
+delivered, because the peer may not have received MOSI for that transaction.
+This is especially important with the current single-queued ESP32 slave DMA
+wrapper.
+
+## Scheduling And Flow Control
+
+Master behavior:
+
+- runs a turn when the slave attention line is asserted, local TX exists,
+  queued writes exist, an ACK/header response needs transmission, or heartbeat
+  is due
+- with attention configured, does not poll merely because master-originated
+  writes are awaiting ACK; the slave asserts attention when ACK/data is queued
+- batches queued writes into the current slot up to `maxOutboundSlotBytes`;
+  writes that would exceed the current slot are deferred, and writes that cannot
+  fit an empty configured window are nacked with overflow
+- uses one turn per task step for the current master/media loop; multi-turn
+  bursts can over-clock stale attention while the single-queued slave is still
+  completing and requeueing DMA
+- tracks up to eight pending ack-required writes
+- widens the receive window for attention or newly queued outbound traffic
+
+Slave behavior:
+
+- keeps one DMA transaction queued
+- asserts attention while not ready, while local TX exists, while an exchange is
+  pending/in flight, while queued writes exist, or while sent writes are waiting
+  for ACK release
+- processes queued PubSub writes even while a Clock exchange is in flight
+- reports transfer start/completion timestamps from ESP-IDF slave callbacks
+
+The active master/media config uses 512-byte active windows in both directions.
+This still fits several current PubSub test frames per turn while avoiding
+1024-byte DMA windows for 60-byte payloads and ACK-heavy turns. The master's
+receive window must be at least as large as the
+slave's largest outbound slot, and the slave's transfer window must be at least
+as large as the master's largest outbound slot. Otherwise the master can clock a
+short transaction while the peer has a larger slot prepared.
+
+## Clock Sync
+
+Clock sync is an L7 request/response over SPI:
+
+- the slave sends `SyncRequest{markerTimeUs}` using `ExchangeRequest`
+- the transport calls `ExchangeRequest::onBeforeRequest` immediately before
+  queueing/writing the request so Clock can patch `markerTimeUs`
+- for SPI sync, the slave releases an already-asserted attention line if needed,
+  then immediately patches `markerTimeUs`, queues the request, and reasserts
+  attention after the DMA slot is armed; the frame is marked with
+  `FrameFlags::AttentionSync`, so the next attention assertion is specific to
+  that Clock request
+- the master uses the captured attention-edge ISR timestamp only if it has a
+  fresh bounded-age edge for the `AttentionSync` request; otherwise it returns
+  an invalid sync response instead of falling back to a scheduler timestamp
+- the master returns `SyncResponse{driftUs, flags}`, where a valid response has
+  `driftUs = masterMarkerTimeUs - slaveMarkerTimeUs`
+- the slave applies `driftUs` only when the response has the valid flag;
+  response send time and response receive time are not part of the Clock
+  calculation
+
+The Clock wire payload is the same over SPI and RS485. SPI can provide a
+hardware-correlated marker via the attention edge; RS485 currently provides the
+request send-start marker. The attention marker avoids measuring scheduler
+delay between "slave needs a turn" and "master eventually clocks SPI". It is
+still not a laboratory-grade hardware capture: the slave timestamp is taken when
+preparing the request and the master timestamp is taken in the GPIO ISR, so
+request preparation and GPIO/interrupt latency remain in the sample. That error
+should be microseconds-scale rather than the millisecond-scale slot scheduling
+noise seen when using SPI transaction boundaries alone.
+
+## Performance-Critical Rules
+
+Keep these properties intact unless measurement proves a better replacement:
+
+- SPI profiling metrics are opt-in via `include/StaticConfig/Metrics.hpp`.
+  Enabling profiling counters in the hot path can materially affect CPU use.
+  Metric recording is expected to stay on the backend's atomic fast path;
+  avoid reintroducing per-sample `Directory` mutex lookups for SPI counters.
+- Do not zero the full 4096-byte slot buffer on every slot reset.
+- Do not parse a slot twice to discover whether it contains `Hello`; use the
+  slot flag.
+- Do not scan a full transfer window to identify no-slot observations; checking
+  the preamble is enough.
+- Do not block slave PubSub writes behind an unrelated Clock exchange.
+- Do not clear large PubSub in-flight buffers on write completion; marking the
+  slot free is sufficient.
+- Keep verbose SPI and PubSub tracing compiled out during throughput tests.
+
+The PubSub SPI harness reports application and SPI-transport stages separately.
+`app: pub=` means the test publisher attempted local PubSub publication. A
+successful app publish can still be released locally without touching SPI when
+the peer subscription advertisement has not arrived. `spi: txQ=` means a
+serialized PubSub frame was actually queued on the SPI link, `spi: txAck=`
+means the peer acknowledged the SPI write, and `spi: rxQ=` means a raw PubSub
+frame reached the receiving transport queue. `spi: inFlightFull=` is a
+backpressure observation while the transport's small SPI write table is full.
+If `pub=` is nonzero while `txQ=` is zero, the problem is PubSub
+routing/subscription state rather than raw SPI throughput.
+
+The SPI harness enables a low-rate periodic PubSub subscription replay. This is
+control-plane soft state, not benchmark traffic. It prevents one missed
+subscription advertisement during link bring-up from permanently black-holing
+application data until reboot.
+
+## Known Limitations
+
+- The implementation is still point-to-point. A real shared-bus SPI design
+  still needs a master peer table, per-peer attention inputs, scheduling
+  fairness, per-peer availability, and per-target PubSub ACK accounting.
+- The slave queues one DMA transaction at a time. This keeps ownership simple
+  but limits maximum transaction cadence and makes queue starvation visible as
+  no-slot observations if the master clocks too early. Higher throughput should
+  move to double-buffered or ring-buffered slave slots before increasing task
+  rates aggressively.
+- There is no retransmit window. A corrupted or missed slot causes sequence
+  telemetry and eventually a pending write timeout/nack. For SPI this is
+  acceptable only if the physical link is clean; persistent CRC or sequence
+  errors should be fixed electrically or with an explicit retransmit design.
+- ACKs are cumulative per point-to-point peer. They are not delivery receipts
+  for a future multi-peer PubSub router.
+- The master still uses a blocking SPI transfer call. That is acceptable for
+  the current bus-owner task, but high-rate multi-slave scheduling may need an
+  async master path.
+- Attention-edge Clock sync still uses software GPIO timestamps. It avoids
+  millisecond-scale SPI scheduling noise, but true sub-microsecond sync would
+  need hardware capture of the marker edge on both peers.
+
+## Next Measurements
+
+After protocol changes, measure on hardware before adding more workarounds:
+
+- PubSub app publish failures, pool-full counts, and SPI `txQ`/`txAck`/`rxQ`
+  rates during bidirectional 100 Hz traffic
+- SPI task CPU, PubSub task CPU, and total turn rate
+- Clock resync delta distribution and timeout rate
+- SPI bad slot, CRC, missed sequence, stale sequence, and no-slot counters with
+  SPI metrics enabled only for the profiling run
+
+If CPU remains high after the ACK and slot cleanup, the next likely costs are
+the PubSub transport's queue-by-value RX path and the single queued slave DMA
+transaction cadence. Those should be addressed with measured changes, not by
+adding more protocol sideband frames.

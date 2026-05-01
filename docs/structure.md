@@ -24,12 +24,13 @@ areas.
 
 ## Source Roots
 
-- `src/master/`: current primary execution target
-- `src/slave/`: shared source root for slave-oriented environments
-- `src/listener/`: listener-oriented execution target
+- `src/master/`: current master execution target
+- `src/media/`: current point-to-point SPI slave/media execution target
+- `src/gpu/`: shared source root for `gpu0` and `gpu1`
+- `src/io/`: input/output side-node execution target
 
-The source root used in a build is selected through `SRC_ROOT`, which is driven
-by the current PlatformIO environment.
+The source root used in a build is selected by `src/CMakeLists.txt` from the
+current PlatformIO environment.
 
 ## Generated Code
 
@@ -68,6 +69,10 @@ config/types live in `Wire/Spi/Interfaces/`, and the ESP32 SPI driver wrapper is
 owned by `Wire/Spi/detail/platform/`. Do not move SPI into top-level
 `Platform/` unless a second component starts using the same abstraction
 directly.
+
+`include/Audio/` follows the same boundary for media-node audio. Public config
+and callback payloads live in `Audio/Interfaces/`, while the arduino-audio-tools
+I2S/FFT integration is hidden behind `Audio/detail/platform/PlatformSelect.hpp`.
 
 Wire-level helpers that are reused across physical transports belong in
 `include/Wire/detail/`. `Wire/detail/AttentionLine.hpp` is one such helper: it

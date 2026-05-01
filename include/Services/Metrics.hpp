@@ -100,12 +100,12 @@ class MetricsService {
     }
 
     static IRegistrar &registrar() {
-        ABORT_IF_NULL(_backend, "Metrics backend not bound");
+        ABORT_IF_NULL(_registrar, "Metrics registrar not bound");
         return *_registrar;
     }
 
     static IRecorder &recorder() {
-        ABORT_IF_NULL(_backend, "Metrics backend not bound");
+        ABORT_IF_NULL(_recorder, "Metrics recorder not bound");
         return *_recorder;
     }
 

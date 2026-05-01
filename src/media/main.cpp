@@ -1,14 +1,16 @@
 #include "Clock/Facade.hpp"
 #include "Macros/Facade.hpp"
 #include "Platform/PlatformSelect.hpp"
-#include "Setups/PubSubSpiTest.hpp"
 #include "Setups/Core.hpp"
+#include "Setups/PubSubSpiTest.hpp"
 #include "Wire/Spi/Facade.hpp"
 #include "config.hpp"
 #include <cstdint>
 
 CoreSetup core{};
 Totem::Clock::Clock clockSlave{Totem::Clock::Clock::Role::Slave};
+// Totem::Audio::I2SSource i2sSource{};
+// Totem::Audio::FftAnalyzer fftAnalyzer{core.taskRegistry, i2sSource};
 Totem::Wire::Spi::Slave spiSlave{core.taskRegistry};
 PubSubSpiTestSetup<Totem::Wire::Spi::Slave> pubSubSpi{
     core.taskRegistry, spiSlave,
@@ -20,6 +22,8 @@ void setup() {
     core.setup();
     _log_i("Core setup complete");
 
+    // ABORT_IF_ERR_BEGIN(i2sSource.begin(i2sSourceConfig));
+    // ABORT_IF_ERR_BEGIN(fftAnalyzer.begin(fftAnalyzerConfig));
     ABORT_IF_ERR_BEGIN(spiSlave.begin(spiSlaveConfig));
 
     pubSubSpi.setup();
@@ -40,8 +44,7 @@ void app_main() {
         (void)core.work(nowMs);
         (void)pubSubSpi.work(nowMs);
 
-        if (spiSlave.ready() &&
-            (!clockSlave.synced() || epoch % 10000 == 0) &&
+        if (spiSlave.ready() && (!clockSlave.synced() || epoch % 10000 == 0) &&
             !clockSlave.syncing()) {
             const auto syncResult = clockSlave.sync(spiSlave);
             if (!syncResult.ok()) {

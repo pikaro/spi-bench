@@ -4,6 +4,7 @@
 
 #include "Macros/Facade.hpp"
 #include "Platform/Hardware.hpp"
+#include "Platform/platform/PlatformESP32/Base.hpp"
 #include "Types/Error.hpp"
 #include "Types/Gpio.hpp"
 #include "driver/gpio.h"
@@ -122,12 +123,14 @@ class Gpio {
             !self->_pin.has_value()) {
             return;
         }
+        const auto timestampUs = ::platform::get_time_us();
         const bool level = gpio_get_level(self->_gpio()) != 0;
         self->_isrCallback(self->_owner,
                            GpioEvent{.pin = *self->_pin,
                                      .type = level ? GpioEventType::Rising
                                                    : GpioEventType::Falling,
-                                     .level = level});
+                                     .level = level,
+                                     .timestampUs = timestampUs});
     }
 
     [[nodiscard]] static uint64_t _pinMask(Pin pin) {

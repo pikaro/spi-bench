@@ -74,5 +74,11 @@ read requests.
 Clock synchronization in `include/Clock/detail/` is the first L7 protocol on top
 of this exchange path. The Clock slave sends a `Clock` `Request`, the Clock
 master acts as the time server and returns a `Clock` `Response`, and the slave
-computes drift from its local send/receive times plus the master's receive/send
-times.
+applies the drift returned by the master. The request payload carries the
+slave's local request marker timestamp; RS485 patches that marker immediately
+before writing the request frame, and the master computes
+`drift = masterReceiveTime - slaveMarkerTime`. This is the same Clock payload
+protocol used by SPI: the response carries the drift plus a validity flag, and
+the slave applies only valid samples. Unlike the old four-timestamp exchange,
+response send time and response receive time are not part of the Clock
+calculation.

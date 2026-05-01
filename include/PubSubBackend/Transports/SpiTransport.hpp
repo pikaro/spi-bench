@@ -13,6 +13,7 @@
 #include "Types/Error.hpp"
 #include "Wire/Interfaces/Request.hpp"
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -67,6 +68,16 @@ template <class Link> class SpiTransport : public BaseTransport {
     };
 
   public:
+    struct Stats {
+        uint32_t txQueued = 0;
+        uint32_t txAcked = 0;
+        uint32_t txFailed = 0;
+        uint32_t txInFlightFull = 0;
+        uint32_t txSerializeDropped = 0;
+        uint32_t rxQueued = 0;
+        uint32_t rxDropped = 0;
+    };
+
     explicit SpiTransport(SpiTransportDependencies<Link> deps)
         : Base(_makeBaseDeps(this, deps)), _link(deps.link) {
         ABORT_IF_NOT(deps.valid(), "Invalid SpiTransport dependencies");
@@ -91,6 +102,23 @@ template <class Link> class SpiTransport : public BaseTransport {
         return _findInFlight(header) == nullptr;
     }
 
+    // Test-harness counters split PubSub publication from actual SPI handoff.
+    // They are reset on read so periodic reports can show per-window rates.
+    [[nodiscard]] Stats takeStats() {
+        auto take = [](std::atomic<uint32_t> &value) {
+            return value.exchange(0, std::memory_order_relaxed);
+        };
+        return Stats{
+            .txQueued = take(_statsTxQueued),
+            .txAcked = take(_statsTxAcked),
+            .txFailed = take(_statsTxFailed),
+            .txInFlightFull = take(_statsTxInFlightFull),
+            .txSerializeDropped = take(_statsTxSerializeDropped),
+            .rxQueued = take(_statsRxQueued),
+            .rxDropped = take(_statsRxDropped),
+        };
+    }
+
     ReturnCode
     send(size_t maxCount = std::numeric_limits<size_t>::max()) override {
         FAIL_IF_INACTIVE_ERR("Cannot work inactive transport %s",
@@ -106,6 +134,8 @@ template <class Link> class SpiTransport : public BaseTransport {
             auto *slot = _findFreeInFlight();
             if (slot == nullptr) {
                 detail::metrics().addSpiDrop();
+                _statsTxInFlightFull.fetch_add(1,
+                                               std::memory_order_relaxed);
                 return OK();
             }
 
@@ -125,6 +155,8 @@ template <class Link> class SpiTransport : public BaseTransport {
             auto frameSizeResult = _prepareFrameForSend(item, slot->data);
             if (!frameSizeResult) {
                 detail::metrics().addSpiDrop();
+                _statsTxSerializeDropped.fetch_add(
+                    1, std::memory_order_relaxed);
                 _log_w(SV_FMT
                        ": dropping unserializable PubSub message %u: " ERR_FMT,
                        SV_ARG(_instanceName), item->envelope.header.messageId,
@@ -160,12 +192,15 @@ template <class Link> class SpiTransport : public BaseTransport {
             auto sendRet = _link.send(request);
             if (!sendRet.ok()) {
                 slot->occupied = false;
+                slot->transport = nullptr;
                 detail::metrics().addSpiFail();
+                _statsTxFailed.fetch_add(1, std::memory_order_relaxed);
                 FAIL(sendRet,
                      "Failed to enqueue PubSub frame on SPI link: " ERR_FMT,
                      ERR_ARG(sendRet));
             }
             detail::metrics().addSpiTx();
+            _statsTxQueued.fetch_add(1, std::memory_order_relaxed);
             detail::log_trace_packet("spi.tx.queued", item->envelope.header,
                                      _instanceName.data());
             ++count;
@@ -236,6 +271,7 @@ template <class Link> class SpiTransport : public BaseTransport {
     ReturnCode _receiveWireData(std::span<const std::byte> payload) {
         if (payload.size() > Base::bufferSize) {
             detail::metrics().addSpiDrop();
+            _statsRxDropped.fetch_add(1, std::memory_order_relaxed);
             FAIL(ERR(CoreError, Overflow),
                  "SPI PubSub frame exceeds transport buffer size");
         }
@@ -252,9 +288,11 @@ template <class Link> class SpiTransport : public BaseTransport {
                                                     queueSendTimeoutTicks);
         if (!sendRet.ok()) {
             detail::metrics().addSpiDrop();
+            _statsRxDropped.fetch_add(1, std::memory_order_relaxed);
             FAIL(sendRet, "Failed to enqueue SPI PubSub ingress frame");
         }
         detail::metrics().addSpiRx();
+        _statsRxQueued.fetch_add(1, std::memory_order_relaxed);
         FAIL_IF_ERR_FWD(_wake(), "Failed to wake PubSub after SPI ingress");
         return OK();
     }
@@ -276,10 +314,12 @@ template <class Link> class SpiTransport : public BaseTransport {
         auto envelope = slot.envelope;
         detail::log_trace_packet("spi.tx.complete", envelope.header,
                                  _instanceName.data());
-        slot = {};
+        slot.occupied = false;
+        slot.transport = nullptr;
 
         if (!result.result.ok()) {
             detail::metrics().addSpiFail();
+            _statsTxFailed.fetch_add(1, std::memory_order_relaxed);
             if (result.result == ERR(CoreError, Timeout)) {
                 _log_v(SV_FMT
                        ": SPI write timed out for PubSub message %u: "
@@ -294,6 +334,7 @@ template <class Link> class SpiTransport : public BaseTransport {
             }
         } else {
             detail::metrics().addSpiAck();
+            _statsTxAcked.fetch_add(1, std::memory_order_relaxed);
         }
         return _ack(envelope);
     }
@@ -334,6 +375,14 @@ template <class Link> class SpiTransport : public BaseTransport {
         _rxFrameQueueStorage{};
 
     std::array<InFlightFrame, inFlightDepth> _inFlight{};
+
+    std::atomic<uint32_t> _statsTxQueued{0};
+    std::atomic<uint32_t> _statsTxAcked{0};
+    std::atomic<uint32_t> _statsTxFailed{0};
+    std::atomic<uint32_t> _statsTxInFlightFull{0};
+    std::atomic<uint32_t> _statsTxSerializeDropped{0};
+    std::atomic<uint32_t> _statsRxQueued{0};
+    std::atomic<uint32_t> _statsRxDropped{0};
 
     static constexpr ::platform::Tick queueSendTimeoutTicks = 1;
 };

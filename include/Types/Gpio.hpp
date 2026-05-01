@@ -32,6 +32,7 @@ struct GpioEvent {
     Pin pin;
     GpioEventType type = GpioEventType::Changed;
     bool level = false;
+    int64_t timestampUs = 0;
 };
 
 using GpioEventCallback = ReturnCode (*)(void *owner, GpioEvent event);

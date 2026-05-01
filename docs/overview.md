@@ -16,13 +16,15 @@ events and render their own LED segment locally.
 
 ## Current Scope
 
-- `env:master`, `env:media`, `env:gpu0`, and `env:gpu1` are active targets for
-    current SPI wire bring-up and PubSub-over-SPI work.
-- `env:master` and `env:slave` remain active targets for RS485 and
-    PubSub-over-RS485 work.
-- `env:orig` builds the master source root for the classic ESP32 board variant.
+- `env:master` and `env:media` are active targets for the current point-to-point
+    SPI Clock and PubSub hardware loop.
+- `env:gpu0`, `env:gpu1`, and `env:io` exist for the current source roots but
+    are not part of the active master/media SPI PubSub loop.
+- There is no `env:slave` in this checkout. Historical RS485 slave
+    documentation may refer to that environment, but `platformio.ini` no
+    longer defines it.
 - When a task touches shared wire, PubSub, Clock, or platform abstractions,
-    build both `master` and `slave` unless the task is explicitly scoped to one
+    build both `master` and `media` unless the task is explicitly scoped to one
     environment.
 
 ## Design Intent
@@ -47,14 +49,17 @@ organized as follows:
 - `include/StaticConfig/`: compile-time configuration surfaces
 - `include/Platform/` and `include/*/detail/platform/`: platform selection and
     platform-specific implementations
+- `include/Audio/`: media-node I2S input, FFT analysis, magnitude scaling, and
+    beat detection; see [audio.md](audio.md)
 - `include/Generated/Wire/`: generated wire-format support code
 - `include/Wire/Rs485/`: point-to-point RS485 wire layer; see
     [wire-rs485.md](wire-rs485.md)
 - `include/Wire/Spi/`: in-progress DMA-oriented SPI wire layer with a
     component-owned ESP32 platform abstraction; see
     [spi-transport-plan.md](spi-transport-plan.md)
-- `src/master/`, `src/slave/`, `src/listener/`: environment-specific execution
-    roots selected by build configuration
+- `src/master/`, `src/media/`, `src/gpu/`, and `src/io/`:
+    environment-specific execution roots selected by build configuration.
+    Both GPU PlatformIO environments currently map to `src/gpu/`.
 - `bin/`: project helper scripts used during build and code generation
 
 Component header boundaries are described in [structure.md](structure.md):
@@ -71,10 +76,8 @@ lightweight public types that external code needs to name directly, and
     environment.
 - Top-level `CMakeLists.txt` requires `SRC_ROOT` and maps it to the selected
     source subtree
-- `src/CMakeLists.txt` maps PlatformIO environments to source roots:
-    - `master` -> `src/master`
-    - `orig` -> `src/master`
-    - `slave` -> `src/slave`
+- `src/CMakeLists.txt` maps PlatformIO environments to source roots through
+    each environment's `SRC_ROOT` CMake argument.
 
 ### SDKConfig
 

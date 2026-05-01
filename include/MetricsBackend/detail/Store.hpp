@@ -7,6 +7,8 @@
 #include "MetricsBackend/detail/MetricGroupDirectory.hpp"
 #include "MetricsBackend/detail/Types.hpp" // IWYU pragma: keep
 #include "Types/Error.hpp"
+#include <array>
+#include <cinttypes>
 #include <cstring>
 #include <expected>
 
@@ -46,13 +48,57 @@ class Store {
         FAIL_IF_NULL(metricName, std::unexpected(ERR(InvalidArgument)),
                      "Cannot register metric with null name");
         _log_i("Registering metric %s", metricName);
-        return _metricDirectory.add(_nextMetricKey++, groupKey, metricDesc);
+        FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
+            metricKey,
+            _metricDirectory.add(_nextMetricKey++, groupKey, metricDesc),
+            "Failed to add metric %s", metricName);
+
+        FAIL_IF(metricKey >= _metricSlotsByKey.size(),
+                std::unexpected(ERR(Overflow)),
+                "Metric key %" PRIuPTR " exceeds fast slot table size %zu",
+                metricKey, _metricSlotsByKey.size());
+
+        MetricSlot *slot = nullptr;
+        FAIL_IF_ERR_FWD_UNEXPECTED(
+            _metricDirectory.withEntry(
+                metricKey, [&slot](MetricSlot &metric) -> ReturnCode {
+                    slot = &metric;
+                    return OK();
+                }),
+            "Failed to cache metric slot for key %" PRIuPTR, metricKey);
+
+        _metricSlotsByKey[static_cast<size_t>(metricKey)] = slot;
+        return metricKey;
     }
 
     template <typename Fun>
         requires(std::is_invocable_r_v<ReturnCode, Fun, MetricSlot &>)
     ReturnCode withMetric(MetricKey metricKey, Fun fun) {
         return _metricDirectory.withEntry(metricKey, fun);
+    }
+
+    ReturnCode incrementMetric(MetricKey metricKey, uint32_t value) {
+        auto *metric = _metricSlot(metricKey);
+        FAIL_IF_NULL(metric, ERR(NotFound),
+                     "Metric key %" PRIuPTR " not found", metricKey);
+        metric->increment(value);
+        return OK();
+    }
+
+    ReturnCode decrementMetric(MetricKey metricKey, uint32_t value) {
+        auto *metric = _metricSlot(metricKey);
+        FAIL_IF_NULL(metric, ERR(NotFound),
+                     "Metric key %" PRIuPTR " not found", metricKey);
+        metric->decrement(value);
+        return OK();
+    }
+
+    ReturnCode setMetric(MetricKey metricKey, uint32_t value) {
+        auto *metric = _metricSlot(metricKey);
+        FAIL_IF_NULL(metric, ERR(NotFound),
+                     "Metric key %" PRIuPTR " not found", metricKey);
+        metric->set(value);
+        return OK();
     }
 
     [[nodiscard]] std::expected<GroupMetricSnapshot, ReturnCode>
@@ -63,7 +109,7 @@ class Store {
                 FAIL_IF(out.count >= out.metrics.size(), ERR(Overflow),
                         "Metric group snapshot buffer is full");
                 out.metrics[out.count++] = {.desc = metric.desc,
-                                            .value = metric.value};
+                                            .value = metric.loadValue()};
                 return OK();
             },
             [groupKey](const MetricKey &, const MetricSlot &metricSlot) {
@@ -111,11 +157,19 @@ class Store {
     getMetric(MetricKey metricKey) const {
         FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
             metricSlot, _metricDirectory.getCopy(metricKey),
-            "Failed to get metric for metric key %u", metricKey);
-        return Metric{.desc = metricSlot.desc, .value = metricSlot.value};
+            "Failed to get metric for metric key %" PRIuPTR, metricKey);
+        return Metric{.desc = metricSlot.desc,
+                      .value = metricSlot.loadValue()};
     }
 
   private:
+    [[nodiscard]] MetricSlot *_metricSlot(MetricKey metricKey) {
+        if (metricKey == 0 || metricKey >= _metricSlotsByKey.size()) {
+            return nullptr;
+        }
+        return _metricSlotsByKey[static_cast<size_t>(metricKey)];
+    }
+
     void _disableRegistration() {
         _metricDirectory.disableRegistration();
         _metricGroupDirectory.disableRegistration();
@@ -127,6 +181,9 @@ class Store {
 
     MetricGroupDirectory _metricGroupDirectory;
     MetricDirectory _metricDirectory;
+    // Metric registration is append-only; cache stable directory slots so
+    // recorder hot paths do not take the generic directory mutex.
+    std::array<MetricSlot *, MetricConfig::maxMetrics + 1> _metricSlotsByKey{};
     MetricGroupKey _nextMetricGroupKey = 1;
     MetricKey _nextMetricKey = 1;
 };

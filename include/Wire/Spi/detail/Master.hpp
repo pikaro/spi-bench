@@ -17,6 +17,7 @@
 #include <array>
 #include <atomic>
 #include <cstddef>
+#include <optional>
 
 namespace Totem::Wire::Spi::detail {
 
@@ -177,12 +178,15 @@ class Master : public HasLifecycle<Master, MasterConfig>,
 
     static void
     _onAttentionLine(void *owner,
-                     Totem::Wire::detail::AttentionLineEvent event) {
+                     Totem::Wire::detail::AttentionLineEvent event,
+                     int64_t timestampUs) {
         auto *self = static_cast<Master *>(owner);
         if (self == nullptr ||
             event != Totem::Wire::detail::AttentionLineEvent::Asserted) {
             return;
         }
+        self->_transceiver.recordAttentionAsserted(
+            timestampUs == 0 ? ::platform::get_time_us() : timestampUs);
         self->_attentionRequested.store(true, std::memory_order_release);
         self->_wakeFromIsr(Signal::SpiAttention);
     }
@@ -220,6 +224,11 @@ class Master : public HasLifecycle<Master, MasterConfig>,
         }
 
         const auto nowMs = ::platform::get_time();
+        if (_transceiver.ready()) {
+            FAIL_IF_ERR_FWD(_expirePendingWrites(nowMs),
+                            "Failed to expire SPI master pending writes");
+        }
+
         bool heartbeatQueued = false;
         if (_heartbeatDue(nowMs) && !_transceiver.hasPendingTx() &&
             !_hasQueuedWrites() && !_hasPendingWrites()) {
@@ -229,9 +238,11 @@ class Master : public HasLifecycle<Master, MasterConfig>,
             _nextHeartbeatAtMs = nowMs + heartbeatIntervalMs;
         }
 
+        const bool pollPendingWrites = !_attention.configured() &&
+                                       _hasPendingWrites();
         if (!attentionRequested && _transceiver.ready() &&
             !_transceiver.hasPendingTx() && !_hasQueuedWrites() &&
-            !_hasPendingWrites() && !heartbeatQueued) {
+            !pollPendingWrites && !heartbeatQueued) {
             return OK();
         }
 
@@ -249,9 +260,7 @@ class Master : public HasLifecycle<Master, MasterConfig>,
         }
 
         if (_transceiver.ready()) {
-            FAIL_IF_ERR_FWD(_expirePendingWrites(::platform::get_time()),
-                            "Failed to expire SPI master pending writes");
-            FAIL_IF_ERR_FWD(_processOneWrite(),
+            FAIL_IF_ERR_FWD(_processQueuedWrites(),
                             "Failed to process SPI master write queue");
             if (_shouldWidenReceiveWindow(attentionRequested)) {
                 FAIL_IF_ERR_FWD(_transceiver.ensureTxWindow(
@@ -261,11 +270,11 @@ class Master : public HasLifecycle<Master, MasterConfig>,
             }
         }
 
+        const auto startedAtUs = ::platform::get_time_us();
         const auto tx = _transceiver.finalizeTx();
         FAIL_IF(tx.size() > _rxBuffer.size(), ERR(CoreError, Overflow),
                 "SPI master RX buffer too small");
         auto rx = std::span<std::byte>(_rxBuffer.data(), tx.size());
-        const auto startedAtUs = ::platform::get_time_us();
         _turnCount++;
         if (!_transceiver.ready() && _turnCount <= 5) {
             _log_v("SPI master debug hello turn=%lu txLen=%u txPtr=%p rxPtr=%p",
@@ -292,7 +301,11 @@ class Master : public HasLifecycle<Master, MasterConfig>,
             static_cast<uint32_t>(receivedAtUs - startedAtUs));
         const bool wasReady = _transceiver.ready();
         const auto previousRxSequence = _transceiver.lastReceivedSequence();
+        const bool peerHadSlot = _transceiver.hasProtocolPreamble(rx);
         auto parseRet = _transceiver.parseRx(rx, receivedAtUs);
+        if (peerHadSlot) {
+            _transceiver.markTxConsumed();
+        }
         const bool helloResynced = _transceiver.consumeHelloResynced();
         if (!parseRet.ok()) {
             if (!_transceiver.ready() &&
@@ -344,6 +357,9 @@ class Master : public HasLifecycle<Master, MasterConfig>,
             }
             return parseRet;
         }
+        if (!peerHadSlot) {
+            return OK();
+        }
         if (wasReady &&
             _transceiver.lastReceivedSequence() != previousRxSequence) {
             _recordPeerProgress(nowMs);
@@ -387,7 +403,9 @@ class Master : public HasLifecycle<Master, MasterConfig>,
     }
 
     [[nodiscard]] bool _hasQueuedWrites() const {
-        return _txQueue != nullptr && Totem::Queue::Platform::size(_txQueue) > 0;
+        return _deferredWrite.has_value() ||
+               (_txQueue != nullptr &&
+                Totem::Queue::Platform::size(_txQueue) > 0);
     }
 
     [[nodiscard]] bool _hasPendingWrites() const {
@@ -405,17 +423,50 @@ class Master : public HasLifecycle<Master, MasterConfig>,
             bucketBytes(BucketSize::B64)) {
             return false;
         }
-        return attentionRequested || _transceiver.hasPendingTx() ||
-               _hasQueuedWrites() || _hasPendingWrites();
+        if (attentionRequested) {
+            return true;
+        }
+        if (!_attention.configured()) {
+            return _transceiver.hasQueuedFrames() || _hasQueuedWrites() ||
+                   _hasPendingWrites();
+        }
+        return _transceiver.hasQueuedFrames() || _hasQueuedWrites();
     }
 
-    ReturnCode _processOneWrite() {
-        if (!_hasQueuedWrites() || _findFreePendingWrite() == nullptr) {
+    ReturnCode _processQueuedWrites() {
+        auto ret = OK();
+        bool deferred = false;
+        while (_hasQueuedWrites() && _findFreePendingWrite() != nullptr &&
+               _transceiver.queuedTxBytes() <
+                   this->config().maxOutboundSlotBytes) {
+            ret.combine(_processOneWrite(deferred));
+            if (!ret.ok() || deferred) {
+                return ret;
+            }
+        }
+        return ret;
+    }
+
+    ReturnCode _processOneWrite(bool &deferred) {
+        deferred = false;
+        TxQueueItem item{};
+        if (_deferredWrite.has_value()) {
+            item = *_deferredWrite;
+            _deferredWrite.reset();
+        } else {
+            FAIL_IF_ERR_FWD(Totem::Queue::Platform::receive(_txQueue, &item, 0),
+                            "Failed to receive SPI master write request");
+        }
+        if (!_transceiver.canFitNextFrame(item.request.data.size(),
+                                          this->config().maxOutboundSlotBytes)) {
+            if (!_transceiver.hasQueuedFrames()) {
+                return item.request.nack(item.handle,
+                                         ERR(CoreError, Overflow));
+            }
+            _deferredWrite = item;
+            deferred = true;
             return OK();
         }
-        TxQueueItem item{};
-        FAIL_IF_ERR_FWD(Totem::Queue::Platform::receive(_txQueue, &item, 0),
-                        "Failed to receive SPI master write request");
         auto sequenceResult = _transceiver.queueDataWithSequence(
             item.request.payloadType, item.request.data,
             FrameFlags::RequiresAck);
@@ -438,6 +489,9 @@ class Master : public HasLifecycle<Master, MasterConfig>,
 
     ReturnCode _completePendingWrite(uint16_t sequence, ReturnCode result,
                                      int64_t receivedAtUs) {
+        if (result.ok()) {
+            return _completePendingWritesThrough(sequence, receivedAtUs);
+        }
         auto *pending = _findPendingWrite(sequence);
         if (pending == nullptr) {
             return OK();
@@ -445,14 +499,27 @@ class Master : public HasLifecycle<Master, MasterConfig>,
 
         auto request = pending->request;
         const auto handle = pending->handle;
-        const auto length = pending->length;
         *pending = {};
 
-        if (!result.ok()) {
-            return request.nack(handle, result);
+        return request.nack(handle, result);
+    }
+
+    ReturnCode _completePendingWritesThrough(uint16_t ackSequence,
+                                             int64_t receivedAtUs) {
+        auto ret = OK();
+        for (auto &pending : _pendingWrites) {
+            if (!pending.occupied ||
+                !_sequenceAtOrBefore(pending.sequence, ackSequence)) {
+                continue;
+            }
+            auto request = pending.request;
+            const auto handle = pending.handle;
+            const auto length = pending.length;
+            pending = {};
+            ret.combine(request.ack(handle, static_cast<uint16_t>(length),
+                                    receivedAtUs));
         }
-        return request.ack(handle, static_cast<uint16_t>(length),
-                           receivedAtUs);
+        return ret;
     }
 
     ReturnCode _expirePendingWrites(uint32_t nowMs) {
@@ -487,6 +554,11 @@ class Master : public HasLifecycle<Master, MasterConfig>,
 
     ReturnCode _failQueuedWrites(ReturnCode error) {
         auto ret = OK();
+        if (_deferredWrite.has_value()) {
+            ret.combine(
+                _deferredWrite->request.nack(_deferredWrite->handle, error));
+            _deferredWrite.reset();
+        }
         if (_txQueue == nullptr) {
             return ret;
         }
@@ -553,6 +625,10 @@ class Master : public HasLifecycle<Master, MasterConfig>,
         return nullptr;
     }
 
+    static bool _sequenceAtOrBefore(uint16_t sequence, uint16_t ackSequence) {
+        return static_cast<uint16_t>(ackSequence - sequence) < 0x8000;
+    }
+
     static constexpr uint32_t handshakeRetryMs = 500;
     static constexpr uint32_t heartbeatIntervalMs = 1000;
     static constexpr uint32_t pendingWriteTimeoutMs = 250;
@@ -566,6 +642,7 @@ class Master : public HasLifecycle<Master, MasterConfig>,
     alignas(4) std::array<std::byte, 4096> _rxBuffer{};
     Totem::Queue::Handle _txQueue{};
     Totem::Queue::Platform::Storage<TxQueueItem, txQueueDepth> _txQueueStorage{};
+    std::optional<TxQueueItem> _deferredWrite = std::nullopt;
     std::array<PendingWrite, pendingWriteDepth> _pendingWrites{};
     Totem::Wire::detail::AttentionLine _attention{};
     Totem::TaskController::RunnerKey _task = 0;

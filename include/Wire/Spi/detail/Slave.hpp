@@ -162,10 +162,15 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
         FAIL_IF_ERR_FWD(_expirePendingWrites(::platform::get_time()),
                         "Failed to expire SPI slave pending writes");
         if (!_transferQueued) {
-            FAIL_IF_ERR_FWD(_preparePendingExchange(),
+            FAIL_IF_ERR_FWD(_prepareClockSyncMarker(),
+                            "Failed to prepare SPI clock sync marker");
+            bool clockSyncMarkerPrepared = false;
+            FAIL_IF_ERR_FWD(_preparePendingExchange(clockSyncMarkerPrepared),
                             "Failed to prepare pending SPI exchange");
-            FAIL_IF_ERR_FWD(_processOneWrite(),
-                            "Failed to prepare pending SPI write");
+            if (!clockSyncMarkerPrepared) {
+                FAIL_IF_ERR_FWD(_processQueuedWrites(),
+                                "Failed to prepare pending SPI write");
+            }
             FAIL_IF_ERR_FWD(_queueTransfer(),
                             "Failed to queue SPI slave transfer");
             FAIL_IF_ERR_FWD(_updateAttentionLine(),
@@ -174,13 +179,44 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
         return OK();
     }
 
-    ReturnCode _preparePendingExchange() {
+    ReturnCode _prepareClockSyncMarker() {
+        if (!_pendingExchange.has_value() ||
+            _pendingExchange->payloadType != Totem::Wire::PayloadType::Clock ||
+            !_attention.configured() || !_attentionAsserted) {
+            return OK();
+        }
+
+        FAIL_IF_ERR_FWD(_attention.setAsserted(false),
+                        "Failed to release SPI clock sync marker");
+        _attentionAsserted = false;
+        metrics().addAttentionRelease();
+        return OK();
+    }
+
+    ReturnCode _preparePendingExchange(bool &clockSyncMarkerPrepared) {
+        clockSyncMarkerPrepared = false;
         if (!_pendingExchange.has_value()) {
             return OK();
         }
         auto request = *_pendingExchange;
+        const bool useAttentionMarker =
+            request.payloadType == Totem::Wire::PayloadType::Clock &&
+            _attention.configured() && !_attentionAsserted;
+        const auto markerAtUs = ::platform::get_time_us();
+        if (request.onBeforeRequest != nullptr) {
+            auto beforeRet = request.onBeforeRequest(
+                request.owner, request.payloadType, markerAtUs);
+            if (!beforeRet.ok()) {
+                auto callbackRet = request.nack(exchangeHandle, beforeRet);
+                _pendingExchange.reset();
+                return callbackRet;
+            }
+        }
+        const auto flags = useAttentionMarker ? FrameFlags::AttentionSync
+                                              : FrameFlags::None;
+        clockSyncMarkerPrepared = useAttentionMarker;
         auto ret = _transceiver.queueRequest(request.payloadType,
-                                             request.request);
+                                             request.request, flags);
         if (!ret.ok()) {
             auto callbackRet = request.nack(exchangeHandle, ret);
             _pendingExchange.reset();
@@ -189,7 +225,7 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
         _activeExchange = request;
         _pendingExchange.reset();
         _exchangeInFlight = true;
-        _exchangeSentAtUs = 0;
+        _exchangeSentAtUs = markerAtUs;
         _exchangeStartedAtMs = ::platform::get_time();
         _log_v("SPI slave exchange request prepared payload=%u bytes=%u",
                static_cast<unsigned>(request.payloadType),
@@ -204,6 +240,7 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
                               _transceiver.hasPendingTx() ||
                               _pendingExchange.has_value() ||
                               _exchangeInFlight ||
+                              _hasPendingWrites() ||
                               _hasQueuedWrites();
         if (asserted != _attentionAsserted) {
             if (asserted) {
@@ -213,7 +250,9 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
             }
             _attentionAsserted = asserted;
         }
-        return _attention.setAsserted(asserted);
+        FAIL_IF_ERR_FWD(_attention.setAsserted(asserted),
+                        "Failed to update SPI slave attention line");
+        return OK();
     }
 
     ReturnCode _queueTransfer() {
@@ -242,6 +281,7 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
                         }),
                         "Failed to queue SPI slave DMA transfer");
         _queuedRxSize = rx.size();
+        _queuedTxSize = tx.size();
         _transferQueued = true;
         _queueCount++;
         return OK();
@@ -285,17 +325,54 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
     }
 
     [[nodiscard]] bool _hasQueuedWrites() const {
-        return _txQueue != nullptr && Totem::Queue::Platform::size(_txQueue) > 0;
+        return _deferredWrite.has_value() ||
+               (_txQueue != nullptr &&
+                Totem::Queue::Platform::size(_txQueue) > 0);
     }
 
-    ReturnCode _processOneWrite() {
-        if (!_hasQueuedWrites() || _exchangeInFlight ||
-            _findFreePendingWrite() == nullptr) {
+    [[nodiscard]] bool _hasPendingWrites() const {
+        for (const auto &pending : _pendingWrites) {
+            if (pending.occupied) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    ReturnCode _processQueuedWrites() {
+        auto ret = OK();
+        bool deferred = false;
+        while (_hasQueuedWrites() && _findFreePendingWrite() != nullptr &&
+               _transceiver.queuedTxBytes() <
+                   this->config().maxOutboundSlotBytes) {
+            ret.combine(_processOneWrite(deferred));
+            if (!ret.ok() || deferred) {
+                return ret;
+            }
+        }
+        return ret;
+    }
+
+    ReturnCode _processOneWrite(bool &deferred) {
+        deferred = false;
+        TxQueueItem item{};
+        if (_deferredWrite.has_value()) {
+            item = *_deferredWrite;
+            _deferredWrite.reset();
+        } else {
+            FAIL_IF_ERR_FWD(Totem::Queue::Platform::receive(_txQueue, &item, 0),
+                            "Failed to receive SPI slave write request");
+        }
+        if (!_transceiver.canFitNextFrame(item.request.data.size(),
+                                          this->config().maxOutboundSlotBytes)) {
+            if (!_transceiver.hasQueuedFrames()) {
+                return item.request.nack(item.handle,
+                                         ERR(CoreError, Overflow));
+            }
+            _deferredWrite = item;
+            deferred = true;
             return OK();
         }
-        TxQueueItem item{};
-        FAIL_IF_ERR_FWD(Totem::Queue::Platform::receive(_txQueue, &item, 0),
-                        "Failed to receive SPI slave write request");
         auto sequenceResult = _transceiver.queueDataWithSequence(
             item.request.payloadType, item.request.data,
             FrameFlags::RequiresAck);
@@ -318,6 +395,11 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
 
     ReturnCode _failQueuedWrites(ReturnCode error) {
         auto ret = OK();
+        if (_deferredWrite.has_value()) {
+            ret.combine(
+                _deferredWrite->request.nack(_deferredWrite->handle, error));
+            _deferredWrite.reset();
+        }
         if (_txQueue == nullptr) {
             return ret;
         }
@@ -338,6 +420,9 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
 
     ReturnCode _completePendingWrite(uint16_t sequence, ReturnCode result,
                                      int64_t receivedAtUs) {
+        if (result.ok()) {
+            return _completePendingWritesThrough(sequence, receivedAtUs);
+        }
         auto *pending = _findPendingWrite(sequence);
         if (pending == nullptr) {
             return OK();
@@ -345,14 +430,27 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
 
         auto request = pending->request;
         const auto handle = pending->handle;
-        const auto length = pending->length;
         *pending = {};
 
-        if (!result.ok()) {
-            return request.nack(handle, result);
+        return request.nack(handle, result);
+    }
+
+    ReturnCode _completePendingWritesThrough(uint16_t ackSequence,
+                                             int64_t receivedAtUs) {
+        auto ret = OK();
+        for (auto &pending : _pendingWrites) {
+            if (!pending.occupied ||
+                !_sequenceAtOrBefore(pending.sequence, ackSequence)) {
+                continue;
+            }
+            auto request = pending.request;
+            const auto handle = pending.handle;
+            const auto length = pending.length;
+            pending = {};
+            ret.combine(request.ack(handle, static_cast<uint16_t>(length),
+                                    receivedAtUs));
         }
-        return request.ack(handle, static_cast<uint16_t>(length),
-                           receivedAtUs);
+        return ret;
     }
 
     ReturnCode _expirePendingWrites(uint32_t nowMs) {
@@ -401,6 +499,10 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
             }
         }
         return nullptr;
+    }
+
+    static bool _sequenceAtOrBefore(uint16_t sequence, uint16_t ackSequence) {
+        return static_cast<uint16_t>(ackSequence - sequence) < 0x8000;
     }
 
     void _clearActiveExchange() {
@@ -479,12 +581,19 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
         _transferQueued = false;
         metrics().addTurn();
         _completedTransfers++;
+        const auto completedAtUs = result->completedAtUs == 0
+                                       ? ::platform::get_time_us()
+                                       : result->completedAtUs;
         if (_exchangeInFlight && _exchangeSentAtUs == 0) {
-            _exchangeSentAtUs = ::platform::get_time_us();
+            _exchangeSentAtUs =
+                result->startedAtUs == 0 ? completedAtUs : result->startedAtUs;
         }
         const auto bytes = result->bytesTransferred > 0
                                ? result->bytesTransferred
                                : _queuedRxSize;
+        if (bytes >= _queuedTxSize) {
+            _transceiver.markTxConsumed();
+        }
         if (!_transceiver.ready()) {
             _log_v("SPI slave transfer complete count=%lu bytes=%u first=%02x "
                    "second=%02x isrCompletions=%lu",
@@ -507,7 +616,7 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
         }
         auto rx = std::span<const std::byte>(_rxBuffer.data(), bytes);
         const bool wasReady = _transceiver.ready();
-        auto ret = _transceiver.parseRx(rx, ::platform::get_time_us());
+        auto ret = _transceiver.parseRx(rx, completedAtUs);
         const bool helloResynced = _transceiver.consumeHelloResynced();
         if (!ret.ok()) {
             if (ret == ERR(WireError, Corrupted) ||
@@ -574,10 +683,12 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
     alignas(4) std::array<std::byte, 4096> _rxBuffer{};
     Totem::Queue::Handle _txQueue{};
     Totem::Queue::Platform::Storage<TxQueueItem, txQueueDepth> _txQueueStorage{};
+    std::optional<TxQueueItem> _deferredWrite = std::nullopt;
     std::array<PendingWrite, pendingWriteDepth> _pendingWrites{};
     Totem::Wire::detail::AttentionLine _attention{};
     Totem::TaskController::RunnerKey _task = 0;
     size_t _queuedRxSize = 0;
+    size_t _queuedTxSize = 0;
     bool _transferQueued = false;
     bool _attentionAsserted = false;
     uint32_t _waitTimeouts = 0;

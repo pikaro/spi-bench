@@ -29,9 +29,10 @@ template <typename Tag> struct Result {
     ReturnCode result;
     uint16_t length;
     int64_t completedAtUs = 0;
-    // For ExchangeResult: time captured just before the request frame was
-    // transmitted, used by time-sensitive protocols (e.g. clock sync NTP T1).
-    // Populated by the transport; zero if not supported.
+    // For ExchangeResult: transport-provided request marker timestamp used by
+    // time-sensitive protocols. SPI may report an attention-edge marker when a
+    // fresh edge was correlated with the request; otherwise it reports the
+    // request transfer timestamp. Zero means unsupported.
     int64_t sentAtUs = 0;
 };
 
@@ -104,6 +105,10 @@ struct ExchangeRequest {
     PayloadType payloadType = PayloadType::Raw;
     std::span<const std::byte> request;
     std::span<std::byte> response;
+    // Optional marker hook for protocols that embed the transport's request
+    // send/attention timestamp in the request payload itself.
+    ReturnCode (*onBeforeRequest)(void *owner, PayloadType payloadType,
+                                  int64_t markerAtUs) = nullptr;
     ReturnCode (*onComplete)(Result<ExchangeTag> result);
 
     [[nodiscard]] constexpr bool validate() const {
@@ -145,9 +150,6 @@ struct FrameHandler {
         void *owner, PayloadType payloadType,
         std::span<const std::byte> request, std::span<std::byte> response,
         int64_t receivedAtUs) = nullptr;
-    ReturnCode (*onBeforeResponse)(void *owner, PayloadType payloadType,
-                                   std::span<std::byte> response,
-                                   int64_t sentAtUs) = nullptr;
 
     [[nodiscard]] constexpr bool validate() const {
         return owner != nullptr &&

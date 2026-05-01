@@ -18,31 +18,19 @@ class Recorder : public IRecorder {
     ReturnCode increment(CounterHandle handle, uint32_t value = 1) override {
         FAIL_IF(handle == CounterHandle::null(), ERR(InvalidArgument),
                 "Cannot increment null counter handle");
-        return _store.withMetric(handle.key(),
-                                 [value](MetricSlot &metric) -> ReturnCode {
-                                     metric.value += value;
-                                     return OK();
-                                 });
+        return _store.incrementMetric(handle.key(), value);
     }
 
     ReturnCode decrement(CounterHandle handle, uint32_t value = 1) override {
         FAIL_IF(handle == CounterHandle::null(), ERR(InvalidArgument),
                 "Cannot decrement null counter handle");
-        return _store.withMetric(handle.key(),
-                                 [value](MetricSlot &metric) -> ReturnCode {
-                                     metric.value -= value;
-                                     return OK();
-                                 });
+        return _store.decrementMetric(handle.key(), value);
     }
 
     ReturnCode set(GaugeHandle handle, uint32_t value) override {
         FAIL_IF(handle == GaugeHandle::null(), ERR(InvalidArgument),
                 "Cannot set null gauge handle");
-        return _store.withMetric(handle.key(),
-                                 [value](MetricSlot &metric) -> ReturnCode {
-                                     metric.value = value;
-                                     return OK();
-                                 });
+        return _store.setMetric(handle.key(), value);
     }
 
   private:

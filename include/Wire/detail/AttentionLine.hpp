@@ -16,7 +16,8 @@ enum class AttentionLineEvent : uint8_t {
     Released,
 };
 
-using AttentionLineCallback = void (*)(void *owner, AttentionLineEvent event);
+using AttentionLineCallback = void (*)(void *owner, AttentionLineEvent event,
+                                       int64_t timestampUs);
 
 class AttentionLine {
   public:
@@ -100,7 +101,8 @@ class AttentionLine {
         }
         self->_callback(self->_owner, event.level
                                           ? AttentionLineEvent::Released
-                                          : AttentionLineEvent::Asserted);
+                                          : AttentionLineEvent::Asserted,
+                        event.timestampUs);
     }
 
     ::platform::Gpio _gpio;

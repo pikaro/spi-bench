@@ -36,6 +36,8 @@ struct Transfer {
 
 struct TransferResult {
     size_t bytesTransferred = 0;
+    int64_t startedAtUs = 0;
+    int64_t completedAtUs = 0;
 };
 
 } // namespace Totem::Wire::Spi::detail

@@ -34,7 +34,6 @@ template <size_t Capacity> class SlotBuffer {
             .crc = 0,
         };
         _writeOffset = SlotHeader::size;
-        std::fill(_bytes.begin(), _bytes.end(), std::byte{0});
     }
 
     void clear(SlotFlags flags = SlotFlags::None) {
@@ -46,7 +45,8 @@ template <size_t Capacity> class SlotBuffer {
     ReturnCode appendFrame(FrameType type, PayloadType payloadType,
                            std::span<const std::byte> payload,
                            uint16_t sequence = 0, uint16_t responseTo = 0,
-                           FrameFlags flags = FrameFlags::None) {
+                           FrameFlags flags = FrameFlags::None,
+                           size_t *payloadOffset = nullptr) {
         FAIL_IF(payload.size() > std::numeric_limits<uint16_t>::max(),
                 ERR(CoreError, Overflow), "SPI frame payload too large");
         const auto required = FrameHeader::size + payload.size();
@@ -69,6 +69,9 @@ template <size_t Capacity> class SlotBuffer {
         std::copy(frameBytes.begin(), frameBytes.end(),
                   _bytes.begin() + _writeOffset);
         _writeOffset += frameBytes.size();
+        if (payloadOffset != nullptr) {
+            *payloadOffset = _writeOffset;
+        }
         std::copy(payload.begin(), payload.end(), _bytes.begin() + _writeOffset);
         _writeOffset += payload.size();
 
@@ -89,6 +92,9 @@ template <size_t Capacity> class SlotBuffer {
     [[nodiscard]] const SlotHeader &header() const { return _header; }
     [[nodiscard]] uint8_t frameCount() const { return _header.frameCount; }
     void addFlags(SlotFlags flags) { _header.flags = _header.flags | flags; }
+    void setAckSequence(uint16_t ackSequence) {
+        _header.ackSequence = ackSequence;
+    }
     ReturnCode ensureBucketFor(size_t bytes) {
         const auto bucketLength = bucketBytes(bucketFor(bytes));
         FAIL_IF(bucketLength > _bytes.size(), ERR(CoreError, Overflow),
@@ -100,6 +106,10 @@ template <size_t Capacity> class SlotBuffer {
     }
     [[nodiscard]] std::span<std::byte> writableBucket(BucketSize bucket) {
         return std::span<std::byte>(_bytes.data(), bucketBytes(bucket));
+    }
+    [[nodiscard]] std::span<std::byte> writableSpan(size_t offset,
+                                                    size_t length) {
+        return std::span<std::byte>(_bytes.data() + offset, length);
     }
     [[nodiscard]] std::span<const std::byte> bytes() const {
         return std::span<const std::byte>(_bytes.data(), _header.bucketLength);

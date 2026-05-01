@@ -47,7 +47,7 @@ template <class Link> struct PubSubSpiTestSetup {
     struct Stats {
         uint32_t publishAttempts = 0;
         uint32_t publishFailures = 0;
-        uint32_t publishOverflow = 0;
+        uint32_t publishPoolFull = 0;
         uint32_t received = 0;
         uint32_t receivedBytes = 0;
         int64_t minLatencyUs = INT64_MAX;
@@ -152,7 +152,7 @@ template <class Link> struct PubSubSpiTestSetup {
         if (!publishResult.ok()) {
             ++stats.publishFailures;
             if (publishResult == ERR(CoreError, Overflow)) {
-                ++stats.publishOverflow;
+                ++stats.publishPoolFull;
             }
         }
         return OK();
@@ -227,6 +227,7 @@ template <class Link> struct PubSubSpiTestSetup {
 
         const auto period = stats;
         stats = {};
+        const auto spiPeriod = transport.takeStats();
 
         const auto avgLatencyUs =
             period.received == 0
@@ -242,13 +243,24 @@ template <class Link> struct PubSubSpiTestSetup {
             elapsedMs == 0 ? 0 : (period.receivedBytes * 1000U) / elapsedMs;
         const auto txPerSecond =
             elapsedMs == 0 ? 0 : (period.publishAttempts * 1000U) / elapsedMs;
+        auto rate = [elapsedMs](uint32_t value) -> uint32_t {
+            return elapsedMs == 0 ? 0 : (value * 1000U) / elapsedMs;
+        };
 
-        _log_i("%s stats: tx=%" PRIu32 "/s txFail=%" PRIu32
-               " txOverflow=%" PRIu32 " rx=%" PRIu32 "/s rxBytes=%" PRIu32
+        _log_i("%s app: pub=%" PRIu32 "/s pubFail=%" PRIu32
+               " poolFull=%" PRIu32 " rx=%" PRIu32 "/s rxBytes=%" PRIu32
                "/s latencyUs[min/avg/max]=%" PRId64 "/%" PRId64 "/%" PRId64,
                consumer.name, txPerSecond, period.publishFailures,
-               period.publishOverflow, rxPerSecond, rxBytesPerSecond,
+               period.publishPoolFull, rxPerSecond, rxBytesPerSecond,
                minLatencyUs, avgLatencyUs, maxLatencyUs);
+        _log_i("%s spi: txQ=%" PRIu32 "/s txAck=%" PRIu32
+               "/s txFail=%" PRIu32 " inFlightFull=%" PRIu32
+               " txSerDrop=%" PRIu32 " rxQ=%" PRIu32
+               "/s rxDrop=%" PRIu32,
+               consumer.name, rate(spiPeriod.txQueued),
+               rate(spiPeriod.txAcked), spiPeriod.txFailed,
+               spiPeriod.txInFlightFull, spiPeriod.txSerializeDropped,
+               rate(spiPeriod.rxQueued), spiPeriod.rxDropped);
     }
 
     [[nodiscard]] static Totem::PubSubBackend::Config
@@ -265,6 +277,7 @@ template <class Link> struct PubSubSpiTestSetup {
                     .notifyTimeoutMs = 10,
                     .autoRestart = false,
                 },
+            .subscriptionReplayIntervalMs = 1000,
         };
     }
 

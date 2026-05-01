@@ -21,12 +21,24 @@ class Slave {
             .payloadType = Totem::Wire::PayloadType::Clock,
             .request = std::as_bytes(std::span(&_request, 1)),
             .response = std::as_writable_bytes(std::span(&_response, 1)),
+            .onBeforeRequest = _onBeforeSyncRequest,
             .onComplete = _onSyncComplete,
         };
         return link.exchange(wireRequest);
     }
 
   private:
+    static ReturnCode
+    _onBeforeSyncRequest(void *owner, Totem::Wire::PayloadType /*payloadType*/,
+                         int64_t markerAtUs) {
+        auto *self = static_cast<Slave *>(owner);
+        if (markerAtUs != 0) {
+            self->_request.markerTimeUs = markerAtUs;
+            self->_state.setMarkerTime(markerAtUs);
+        }
+        return OK();
+    }
+
     static ReturnCode _onSyncComplete(Totem::Wire::ExchangeResult result) {
         auto *self = static_cast<Slave *>(result.owner);
         if (!result.result.ok()) {
@@ -41,7 +53,11 @@ class Slave {
             self->_state.reset();
             return OK();
         }
-        self->_state.setSentTime(result.sentAtUs);
+        if (!hasFlag(self->_response.flags, SyncResponseFlags::Valid)) {
+            _log_w("Clock sync response did not contain a valid marker sample");
+            self->_state.reset();
+            return OK();
+        }
         if (auto ret = self->_state.receiveSyncResponse(self->_response);
             !ret.ok()) {
             _log_w("Failed to receive clock sync response: " ERR_FMT,

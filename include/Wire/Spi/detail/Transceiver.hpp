@@ -11,6 +11,8 @@
 #include "Wire/Spi/detail/Trace.hpp"
 #include "Wire/detail/Sequence.hpp"
 #include <array>
+#include <atomic>
+#include <cinttypes>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -61,9 +63,13 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
         _frameSequence.reset(1);
         _receivedSlotSequence.reset(1);
         _lastReceivedSequence = 0;
+        _lastAckRequiredFrameSequence = 0;
+        _lastTransmittedAckRequiredFrameSequence = 0;
+        _attentionAssertedAtUs.store(0, std::memory_order_release);
+        _attentionAssertedPending.store(false, std::memory_order_release);
         _helloResynced = false;
         _tx.reset(_peerId, _connectionId, _slotSequence.next(), BucketSize::B64,
-                  SlotFlags::None, _lastReceivedSequence);
+                  SlotFlags::None);
     }
 
     void setAutoHelloResponse(bool enabled) { _autoHelloResponse = enabled; }
@@ -96,8 +102,7 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
     }
 
     void beginSlot(BucketSize bucket, SlotFlags flags = SlotFlags::None) {
-        _tx.reset(_peerId, _connectionId, _slotSequence.next(), bucket, flags,
-                  _lastReceivedSequence);
+        _tx.reset(_peerId, _connectionId, _slotSequence.next(), bucket, flags);
     }
 
     void advanceTxSlot(BucketSize bucket = BucketSize::B64,
@@ -125,6 +130,20 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
 
     ReturnCode ensureTxWindow(size_t bytes) {
         return _tx.ensureBucketFor(bytes);
+    }
+
+    [[nodiscard]] size_t queuedTxBytes() const {
+        return _tx.header().slotLength;
+    }
+
+    [[nodiscard]] bool hasQueuedFrames() const {
+        return _tx.frameCount() > 0;
+    }
+
+    [[nodiscard]] bool canFitNextFrame(size_t payloadBytes,
+                                       size_t maxSlotBytes) const {
+        return bucketBytes(bucketFor(_requiredBytesForNextFrame(
+                   payloadBytes))) <= maxSlotBytes;
     }
 
     ReturnCode queueData(PayloadType payloadType,
@@ -182,6 +201,12 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
     }
 
     std::span<const std::byte> finalizeTx() {
+        if (_hasPendingHeaderAck()) {
+            _tx.setAckSequence(_lastAckRequiredFrameSequence);
+            _tx.addFlags(SlotFlags::Ack);
+        } else {
+            _tx.setAckSequence(0);
+        }
         auto bytes = _tx.finalize();
         log_trace_slot("tx", _tx.header());
         metrics().addTxBytes(static_cast<uint32_t>(bytes.size()));
@@ -189,6 +214,27 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
     }
 
     [[nodiscard]] const void *txData() const { return _tx.data(); }
+
+    [[nodiscard]] static bool hasProtocolPreamble(
+        std::span<const std::byte> bytes) {
+        return _hasProtocolPreamble(bytes);
+    }
+
+    void markTxConsumed() {
+        if (hasFlag(_tx.header().flags, SlotFlags::Ack)) {
+            _lastTransmittedAckRequiredFrameSequence =
+                _tx.header().ackSequence;
+        }
+    }
+
+    void recordAttentionAsserted(int64_t assertedAtUs) {
+        if (assertedAtUs == 0) {
+            return;
+        }
+        _attentionAssertedAtUs.store(assertedAtUs,
+                                     std::memory_order_release);
+        _attentionAssertedPending.store(true, std::memory_order_release);
+    }
 
     ReturnCode parseRx(std::span<const std::byte> bytes,
                        int64_t receivedAtUs = 0) {
@@ -200,7 +246,6 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
                        "second=%02x",
                        static_cast<unsigned>(bytes.size()), _byteAt(bytes, 0),
                        _byteAt(bytes, 1));
-                beginSlot(BucketSize::B64);
                 return OK();
             }
             if (readerResult.error() == ERR(WireError, CrcError)) {
@@ -218,7 +263,7 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
         auto header = reader.header();
         _helloResynced = false;
         log_trace_slot("rx", header);
-        const bool containsHello = _slotContainsHello(reader);
+        const bool containsHello = hasFlag(header.flags, SlotFlags::Hello);
         const auto expectedSequence = _receivedSlotSequence.current();
         if (_slotIsEmpty(header)) {
             metrics().addEmptySlot();
@@ -299,6 +344,11 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
             auto frameResult = reader.next();
             if (!frameResult) {
                 if (frameResult.error() == ERR(CoreError, NotFound)) {
+                    if (hasFlag(header.flags, SlotFlags::Ack)) {
+                        FAIL_IF_ERR_FWD(_handleAck(header.ackSequence, OK(),
+                                                   receivedAtUs),
+                                        "Failed to handle SPI header ack");
+                    }
                     return OK();
                 }
                 metrics().addBadSlot();
@@ -316,7 +366,12 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
 
     [[nodiscard]] LinkState state() const { return _state.current(); }
     [[nodiscard]] bool ready() const { return _state.is(LinkState::Ready); }
-    [[nodiscard]] bool hasPendingTx() const { return _tx.frameCount() > 0; }
+    [[nodiscard]] bool hasPendingTx() const {
+        return _tx.frameCount() > 0 || _hasPendingHeaderAck();
+    }
+    [[nodiscard]] bool hasPendingHeaderAck() const {
+        return _hasPendingHeaderAck();
+    }
     [[nodiscard]] bool consumeHelloResynced() {
         const auto value = _helloResynced;
         _helloResynced = false;
@@ -334,20 +389,11 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
 
     static bool _slotIsEmpty(const SlotHeader &header) {
         return header.frameCount == 0 && header.payloadBytes == 0 &&
-               header.flags == SlotFlags::None;
+               header.flags == SlotFlags::None && header.ackSequence == 0;
     }
 
     static bool _isNoSlotObservation(std::span<const std::byte> bytes) {
-        return _isEmptySlot(bytes) || !_hasProtocolPreamble(bytes);
-    }
-
-    static bool _isEmptySlot(std::span<const std::byte> bytes) {
-        for (const auto byte : bytes) {
-            if (byte != std::byte{0}) {
-                return false;
-            }
-        }
-        return true;
+        return !_hasProtocolPreamble(bytes);
     }
 
     static bool _hasProtocolPreamble(std::span<const std::byte> bytes) {
@@ -361,10 +407,18 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
         return distance != 0 && distance < 0x8000;
     }
 
+    [[nodiscard]] bool _hasPendingHeaderAck() const {
+        return _lastAckRequiredFrameSequence !=
+               _lastTransmittedAckRequiredFrameSequence;
+    }
+
     ReturnCode _ensureCapacityForNextFrame(size_t payloadBytes) {
-        const auto required = SlotHeader::size + _tx.header().payloadBytes +
-                              FrameHeader::size + payloadBytes;
-        return _tx.ensureBucketFor(required);
+        return _tx.ensureBucketFor(_requiredBytesForNextFrame(payloadBytes));
+    }
+
+    [[nodiscard]] size_t _requiredBytesForNextFrame(size_t payloadBytes) const {
+        return SlotHeader::size + _tx.header().payloadBytes +
+               FrameHeader::size + payloadBytes;
     }
 
     ReturnCode _appendControl(FrameType type, SlotFlags flag) {
@@ -382,27 +436,15 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
     ReturnCode _appendAck(FrameType type, uint16_t responseTo) {
         FAIL_IF_ERR_FWD(_ensureCapacityForNextFrame(0),
                         "Failed to grow SPI ack slot");
-        const auto flag =
-            type == FrameType::Ack ? SlotFlags::Ack : SlotFlags::Nack;
-        _tx.addFlags(flag);
+        if (type == FrameType::Nack) {
+            _tx.addFlags(SlotFlags::Nack);
+        }
         FAIL_IF_ERR_FWD(_tx.appendFrame(type, PayloadType::Raw,
                                         std::span<const std::byte>{},
                                         _frameSequence.next(), responseTo),
                         "Failed to append SPI ack frame");
         metrics().addFrameTx();
         return OK();
-    }
-
-    static bool _slotContainsHello(SlotReader reader) {
-        while (true) {
-            auto frameResult = reader.next();
-            if (!frameResult) {
-                return false;
-            }
-            if (frameResult->header.type == FrameType::Hello) {
-                return true;
-            }
-        }
     }
 
     ReturnCode _handleFrame(const FrameView &frame, int64_t receivedAtUs) {
@@ -416,9 +458,10 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
         case FrameType::Nop:
             return OK();
         case FrameType::Ack:
-            return _handleAck(frame, OK(), receivedAtUs);
+            return _handleAck(frame.header.responseTo, OK(), receivedAtUs);
         case FrameType::Nack:
-            return _handleAck(frame, ERR(CoreError, OperationFailed),
+            return _handleAck(frame.header.responseTo,
+                              ERR(CoreError, OperationFailed),
                               receivedAtUs);
         case FrameType::Data:
             return _handleData(frame, receivedAtUs);
@@ -448,13 +491,12 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
         return OK();
     }
 
-    ReturnCode _handleAck(const FrameView &frame, ReturnCode result,
+    ReturnCode _handleAck(uint16_t sequence, ReturnCode result,
                           int64_t receivedAtUs) {
         if (_ackCallback == nullptr) {
             return OK();
         }
-        return _ackCallback(_ackOwner, frame.header.responseTo, result,
-                            receivedAtUs);
+        return _ackCallback(_ackOwner, sequence, result, receivedAtUs);
     }
 
     ReturnCode _handleData(const FrameView &frame, int64_t receivedAtUs) {
@@ -464,7 +506,8 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
         }
 
         if (dispatchRet.ok()) {
-            return _appendAck(FrameType::Ack, frame.header.sequence);
+            _lastAckRequiredFrameSequence = frame.header.sequence;
+            return OK();
         }
 
         _log_w("SPI data frame seq=%u payload=%u failed, sending nack: "
@@ -491,25 +534,59 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
         if (handler == nullptr || handler->onRequest == nullptr) {
             return OK();
         }
+        const auto requestReceivedAtUs =
+            _receivedAtForRequest(frame, receivedAtUs);
         auto responseLength =
             handler->onRequest(handler->owner, frame.header.payloadType,
-                               frame.payload, handler->response, receivedAtUs);
+                               frame.payload, handler->response,
+                               requestReceivedAtUs);
         if (!responseLength) {
             return responseLength.error();
         }
         auto response = handler->response.first(*responseLength);
-        if (handler->onBeforeResponse != nullptr) {
-            FAIL_IF_ERR_FWD(handler->onBeforeResponse(
-                                handler->owner, frame.header.payloadType,
-                                response, ::platform::get_time_us()),
-                            "Failed to prepare SPI response payload");
-        }
         _log_v("SPI request payload=%u seq=%u queued response bytes=%u",
                static_cast<unsigned>(frame.header.payloadType),
                frame.header.sequence, static_cast<unsigned>(response.size()));
-        return queueResponse(frame.header.payloadType, response,
-                             frame.header.sequence);
+        FAIL_IF_ERR_FWD(_ensureCapacityForNextFrame(response.size()),
+                        "Failed to grow SPI response slot");
+        FAIL_IF_ERR_FWD(_tx.appendFrame(FrameType::Response,
+                                        frame.header.payloadType, response,
+                                        _frameSequence.next(),
+                                        frame.header.sequence,
+                                        FrameFlags::None),
+                        "Failed to append SPI response frame");
+        metrics().addFrameTx();
+        return OK();
     }
+
+    [[nodiscard]] int64_t _receivedAtForRequest(const FrameView &frame,
+                                                int64_t receivedAtUs) {
+        if (!hasFlag(frame.header.flags, FrameFlags::AttentionSync)) {
+            return receivedAtUs;
+        }
+        if (!_attentionAssertedPending.exchange(false,
+                                                std::memory_order_acq_rel)) {
+            _log_v("SPI attention-sync request had no pending attention edge");
+            return 0;
+        }
+        const auto assertedAtUs =
+            _attentionAssertedAtUs.exchange(0, std::memory_order_acq_rel);
+        if (assertedAtUs == 0) {
+            _log_v("SPI attention-sync request had zero attention timestamp");
+            return 0;
+        }
+        const auto ageUs = receivedAtUs - assertedAtUs;
+        if (receivedAtUs < assertedAtUs || ageUs > attentionSyncMaxAgeUs) {
+            _log_v("SPI attention-sync marker stale age=%" PRId64
+                   " us max=%" PRId64 " us",
+                   ageUs, attentionSyncMaxAgeUs);
+            return 0;
+        }
+
+        return assertedAtUs;
+    }
+
+    static constexpr int64_t attentionSyncMaxAgeUs = 2500;
 
     FrameHandler *_handlerFor(PayloadType payloadType) {
         for (size_t index = 0; index < _handlerCount; index++) {
@@ -536,7 +613,11 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
     Totem::Wire::detail::Sequence<uint16_t> _frameSequence{};
     Totem::Wire::detail::Sequence<uint16_t> _receivedSlotSequence{};
     uint16_t _lastReceivedSequence = 0;
+    uint16_t _lastAckRequiredFrameSequence = 0;
+    uint16_t _lastTransmittedAckRequiredFrameSequence = 0;
+    std::atomic<int64_t> _attentionAssertedAtUs{0};
     bool _helloResynced = false;
+    std::atomic<bool> _attentionAssertedPending{false};
     bool _preserveTxSlotSequenceOnReset = false;
 };
 

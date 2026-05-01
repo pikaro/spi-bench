@@ -4,7 +4,8 @@ These are the primary project commands currently used in practice.
 
 ## Build
 
-- Build the active target: `bin/build -e master`
+- Build the active master target: `bin/build -e master`
+- Build the active SPI slave/media target: `bin/build -e media`
 - Build and emit a compilation database: `pio run -e master -t compiledb`
 
 Build output notes:
@@ -52,9 +53,10 @@ Implementation notes:
 
 ## Environment Notes
 
-- `master` is the only actively maintained environment for routine work at
-    present
-- `slave` is available for the current RS485 slave node; other slave/listener
-    environments are not present in this checkout
+- `master` and `media` are the active environments for the current SPI Clock
+    and PubSub hardware loop
+- `gpu0`, `gpu1`, and `io` are present but should be built only when the task
+    involves those source roots
+- `slave` is not defined in the current `platformio.ini`
 
 Use other environments only when the task explicitly involves that work

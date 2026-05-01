@@ -46,10 +46,8 @@ class Node : public HasLifecycle<Derived, ConfT>,
         ExchangeRequest request;
     };
 
-    struct ResponseWriteContext {
-        FrameHandler *handler = nullptr;
-        PayloadType payloadType = PayloadType::Raw;
-        std::span<std::byte> response;
+    struct RequestWriteContext {
+        ExchangeRequest *request = nullptr;
     };
 
     static_assert(
@@ -432,7 +430,8 @@ class Node : public HasLifecycle<Derived, ConfT>,
         }
     }
 
-    static void _onAttentionLine(void *owner, AttentionLineEvent event) {
+    static void _onAttentionLine(void *owner, AttentionLineEvent event,
+                                 int64_t /*timestampUs*/) {
         auto *self = static_cast<Node *>(owner);
         if (self == nullptr || event != AttentionLineEvent::Asserted) {
             return;
@@ -691,10 +690,15 @@ class Node : public HasLifecycle<Derived, ConfT>,
                              ? FrameType::Poll
                              : FrameType::Request;
         int64_t sentAtUs = 0;
+        auto requestWriteContext = RequestWriteContext{
+            .request = &item.request,
+        };
         metrics().addTxExchange();
         auto ret = _transceiver.sendFrame(frameType, item.request.payloadType,
                                           item.request.request, 0, &sentHeader,
-                                          FrameTurn::Initiated, &sentAtUs);
+                                          FrameTurn::Initiated, &sentAtUs,
+                                          &requestWriteContext,
+                                          _beforeRequestWrite);
         log_trace_packet("exchange.sent", sentHeader, Derived::name);
         if (!ret.ok()) {
             return _failExchange(item, ret, "exchange send failed");
@@ -804,27 +808,21 @@ class Node : public HasLifecycle<Derived, ConfT>,
         }
         auto responseLength = *responseResult;
         auto responsePayload = handler->response.first(responseLength);
-        auto responseWriteContext = ResponseWriteContext{
-            .handler = handler,
-            .payloadType = header.payloadType,
-            .response = responsePayload,
-        };
 
         return _transceiver.sendFrame(FrameType::Response, header.payloadType,
                                       responsePayload, header.sequenceNumber,
-                                      nullptr, FrameTurn::Reaction, nullptr,
-                                      &responseWriteContext,
-                                      _beforeResponseWrite);
+                                      nullptr, FrameTurn::Reaction);
     }
 
-    static ReturnCode _beforeResponseWrite(void *owner, int64_t sentAtUs) {
-        auto *ctx = static_cast<ResponseWriteContext *>(owner);
-        if (ctx == nullptr || ctx->handler == nullptr ||
-            ctx->handler->onBeforeResponse == nullptr) {
+    static ReturnCode _beforeRequestWrite(void *owner, int64_t sentAtUs) {
+        auto *ctx = static_cast<RequestWriteContext *>(owner);
+        if (ctx == nullptr || ctx->request == nullptr ||
+            ctx->request->onBeforeRequest == nullptr) {
             return OK();
         }
-        return ctx->handler->onBeforeResponse(
-            ctx->handler->owner, ctx->payloadType, ctx->response, sentAtUs);
+        return ctx->request->onBeforeRequest(ctx->request->owner,
+                                             ctx->request->payloadType,
+                                             sentAtUs);
     }
 
     std::expected<uint16_t, ReturnCode>

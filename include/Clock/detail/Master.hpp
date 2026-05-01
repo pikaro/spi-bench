@@ -2,9 +2,9 @@
 
 #include "Clock/detail/Types.hpp" // IWYU pragma: keep
 #include "Macros/Facade.hpp"
-#include "Platform/PlatformSelect.hpp"
 #include "Types/Error.hpp"
 #include "Wire/Interfaces/Request.hpp"
+#include <cinttypes>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -22,7 +22,6 @@ class Master {
             .response = std::as_writable_bytes(std::span(&_response, 1)),
             .onData = nullptr,
             .onRequest = _onSyncRequest,
-            .onBeforeResponse = _onBeforeSyncResponse,
         };
     }
 
@@ -41,24 +40,27 @@ class Master {
 
         SyncRequest syncRequest{};
         std::memcpy(&syncRequest, request.data(), sizeof(syncRequest));
-        (void)syncRequest;
+        FAIL_IF(syncRequest.markerTimeUs == 0,
+                std::unexpected(ERR(CoreError, InvalidData)),
+                "Clock sync request marker timestamp is zero");
+        if (receivedAtUs == 0) {
+            self->_response = {
+                .driftUs = 0,
+                .flags = SyncResponseFlags::None,
+            };
+            return static_cast<uint16_t>(sizeof(SyncResponse));
+        }
+        FAIL_IF(will_overflow_sub(receivedAtUs, syncRequest.markerTimeUs),
+                std::unexpected(ERR(ClockError, DriftOverflow)),
+                "Clock sync drift calculation overflow: receivedAtUs (%" PRId64
+                ") - markerTimeUs (%" PRId64 ") would overflow",
+                receivedAtUs, syncRequest.markerTimeUs);
 
         self->_response = {
-            .requestReceivedTime = receivedAtUs,
-            .responseSentTime = 0,
+            .driftUs = receivedAtUs - syncRequest.markerTimeUs,
+            .flags = SyncResponseFlags::Valid,
         };
         return static_cast<uint16_t>(sizeof(SyncResponse));
-    }
-
-    static ReturnCode _onBeforeSyncResponse(
-        void *owner, Totem::Wire::PayloadType /*payloadType*/,
-        std::span<std::byte> response, int64_t sentAtUs) {
-        auto *self = static_cast<Master *>(owner);
-        FAIL_IF(response.size() != sizeof(SyncResponse),
-                ERR(CoreError, InvalidArgument),
-                "Invalid clock sync response length %zu", response.size());
-        self->_response.responseSentTime = sentAtUs;
-        return OK();
     }
 
     SyncResponse _response{};

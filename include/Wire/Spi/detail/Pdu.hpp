@@ -23,6 +23,7 @@ using Totem::Wire::PayloadType;
 enum class BucketSize : uint16_t {
     B64 = 64,
     B256 = 256,
+    B512 = 512,
     B1024 = 1024,
     B4096 = 4096,
 };
@@ -61,6 +62,7 @@ enum class FrameFlags : uint8_t {
     None = 0,
     RequiresAck = 1 << 0,
     Critical = 1 << 1,
+    AttentionSync = 1 << 2,
 };
 
 inline constexpr FrameFlags operator|(FrameFlags lhs, FrameFlags rhs) {
@@ -82,6 +84,9 @@ inline constexpr BucketSize bucketFor(size_t bytes) {
     }
     if (bytes <= bucketBytes(BucketSize::B256)) {
         return BucketSize::B256;
+    }
+    if (bytes <= bucketBytes(BucketSize::B512)) {
+        return BucketSize::B512;
     }
     if (bytes <= bucketBytes(BucketSize::B1024)) {
         return BucketSize::B1024;

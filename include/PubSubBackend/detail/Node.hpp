@@ -34,6 +34,7 @@
 #include <atomic>
 #include <climits>
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <optional>
 #include <span>
@@ -236,22 +237,41 @@ class Node : public HasLifecycle<Node, Config>,
         if (!available) {
             return OK();
         }
+        const auto nowMs = ::platform::get_time();
         _subscriptionReplayPending = true;
-        _subscriptionReplayDueMs =
-            ::platform::get_time() + subscriptionReplayDelayMs;
+        _subscriptionReplayDueMs = nowMs + config().subscriptionReplayDelayMs;
+        if (config().subscriptionReplayIntervalMs != 0 &&
+            _nextSubscriptionReplayMs == 0) {
+            _nextSubscriptionReplayMs =
+                nowMs + config().subscriptionReplayIntervalMs;
+        }
         return wake();
     }
 
     ReturnCode _replaySubscriptionsIfDue() {
-        if (!_subscriptionReplayPending) {
-            return OK();
-        }
         const auto nowMs = ::platform::get_time();
-        if (nowMs < _subscriptionReplayDueMs) {
-            return OK();
+        auto ret = OK();
+        if (_subscriptionReplayPending &&
+            _timeDue(nowMs, _subscriptionReplayDueMs)) {
+            _subscriptionReplayPending = false;
+            ret.combine(_subscriptionManager.replaySubscriptions());
+            if (config().subscriptionReplayIntervalMs != 0) {
+                _nextSubscriptionReplayMs =
+                    nowMs + config().subscriptionReplayIntervalMs;
+            }
         }
-        _subscriptionReplayPending = false;
-        return _subscriptionManager.replaySubscriptions();
+        if (config().subscriptionReplayIntervalMs != 0 &&
+            _nextSubscriptionReplayMs != 0 &&
+            _timeDue(nowMs, _nextSubscriptionReplayMs)) {
+            _nextSubscriptionReplayMs =
+                nowMs + config().subscriptionReplayIntervalMs;
+            ret.combine(_subscriptionManager.replaySubscriptions());
+        }
+        return ret;
+    }
+
+    [[nodiscard]] static bool _timeDue(uint32_t nowMs, uint32_t dueMs) {
+        return static_cast<int32_t>(nowMs - dueMs) >= 0;
     }
 
     std::expected<bool, ReturnCode>
@@ -361,7 +381,7 @@ class Node : public HasLifecycle<Node, Config>,
 
     bool _subscriptionReplayPending = false;
     uint32_t _subscriptionReplayDueMs = 0;
-    static constexpr uint32_t subscriptionReplayDelayMs = 50;
+    uint32_t _nextSubscriptionReplayMs = 0;
 
     SubscriptionManager _subscriptionManager{SubscriptionManagerDependencies{
         .pubSubNode = this,

@@ -47,6 +47,10 @@ Each `PubSubBackend::detail::Node` owns:
 A task step receives from transports, replays due subscriptions, drains queued
 messages, then lets transports send pending egress. Transport and subscriber
 fanout is based on topic masks maintained by subscription control messages.
+Subscription replay is normally triggered by transport availability. A config
+may also enable periodic replay for hardware bring-up or transports where a
+missed availability-era control frame should be repaired as soft state rather
+than leaving later application publishes unrouted.
 
 Transport ingress may keep the serialized wire image in the ingress buffer.
 Forwarding paths can reuse those bytes without decoding and reserializing. Full
@@ -104,7 +108,9 @@ The active hardware harnesses for current wire work are
 `include/Setups/PubSubSpiTest.hpp`. They use the real RS485 or SPI wire
 transport between one master and one slave, record aggregate
 throughput/latency stats, and act as the reference harnesses for transport
-bring-up behavior.
+bring-up behavior. The SPI harness reports application publish counters
+separately from SPI transport counters so a local publish with no remote route
+does not look like a successful wire transmission.
 
 Transport availability can change while the drainer is publishing a frame. A
 transport enqueue failure after in-flight storage should release that target and

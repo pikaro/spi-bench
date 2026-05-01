@@ -159,11 +159,6 @@ class SubscriptionManager {
 
         switch (event.type) {
         case SubscribeEventType::Register:
-            _log_i(
-                "SubscriptionManager: transport %u peer %u subscribed to "
-                "topic " SV_FMT,
-                ingressContext->transportId, ingressContext->peerId,
-                SV_ARG(magic_enum::enum_name(static_cast<Topic>(event.topic))));
             return _transporters.subscribeTransport(*ingressContext,
                                                     event.topic);
         case SubscribeEventType::Unregister:

@@ -31,6 +31,7 @@
 #include "Types/Error.hpp"
 #include "Types/Signal.hpp"
 #include "magic_enum/magic_enum.hpp"
+#include <array>
 #include <atomic>
 #include <climits>
 #include <cstddef>
@@ -274,8 +275,9 @@ class Node : public HasLifecycle<Node, Config>,
             std::string_view name;
         };
 
+        std::array<DirectDispatch, Spec::Limits::maxTransports>
+            directDispatches{};
         size_t dispatchCount = 0;
-        DirectDispatch directDispatch;
         FAIL_IF_ERR_FWD_UNEXPECTED(
             _transporters.withAll(
                 [&](const TransportId &,
@@ -285,14 +287,14 @@ class Node : public HasLifecycle<Node, Config>,
                     if (!dispatch.has_value()) {
                         return OK();
                     }
-                    ++dispatchCount;
-                    if (dispatchCount == 1) {
-                        directDispatch = DirectDispatch{
-                            .transporter = entry.transporter,
-                            .dispatch = *dispatch,
-                            .name = entry.name,
-                        };
-                    }
+                    FAIL_IF(dispatchCount >= directDispatches.size(),
+                            ERR(Overflow),
+                            "Too many direct PubSub ingress dispatch targets");
+                    directDispatches[dispatchCount++] = DirectDispatch{
+                        .transporter = entry.transporter,
+                        .dispatch = *dispatch,
+                        .name = entry.name,
+                    };
                     return OK();
                 }),
             "Failed to scan transports for direct ingress dispatch");
@@ -303,31 +305,36 @@ class Node : public HasLifecycle<Node, Config>,
                    name, MAGIC_PUBSUB_SV_ARG(header));
             return true;
         }
-        if (dispatchCount > 1) {
-            return false;
+
+        size_t sentCount = 0;
+        for (size_t i = 0; i < dispatchCount; ++i) {
+            const auto &directDispatch = directDispatches[i];
+            auto enqueueRet = directDispatch.transporter->enqueueRaw(
+                header, frame, directDispatch.dispatch);
+            if (enqueueRet.ok()) {
+                ++sentCount;
+                continue;
+            }
+
+            if (enqueueRet == ERR(Timeout) || enqueueRet == ERR(Overflow) ||
+                enqueueRet == ERR(InvalidState)) {
+                _log_w("%s: direct relay dropped target " SV_FMT " for "
+                       MAGIC_PUBSUB_SV_FMT " after egress backpressure: "
+                       ERR_FMT,
+                       name, SV_ARG(directDispatch.name),
+                       MAGIC_PUBSUB_SV_ARG(header), ERR_ARG(enqueueRet));
+                continue;
+            }
+
+            FAIL(std::unexpected(enqueueRet),
+                 "Failed to direct-relay transport ingress frame " ERR_FMT,
+                 ERR_ARG(enqueueRet));
         }
 
-        auto enqueueRet = directDispatch.transporter->enqueueRaw(
-            header, frame, directDispatch.dispatch);
-        if (enqueueRet.ok()) {
-            _log_d("%s: direct-relayed transport ingress "
-                   "frame " MAGIC_PUBSUB_SV_FMT " to " SV_FMT,
-                   name, MAGIC_PUBSUB_SV_ARG(header),
-                   SV_ARG(directDispatch.name));
-            return true;
-        }
-
-        if (enqueueRet == ERR(Timeout) || enqueueRet == ERR(Overflow) ||
-            enqueueRet == ERR(InvalidState)) {
-            _log_d("%s: direct relay backpressured for " MAGIC_PUBSUB_SV_FMT
-                   ", falling back to ingress buffering",
-                   name, MAGIC_PUBSUB_SV_ARG(header));
-            return false;
-        }
-
-        FAIL(std::unexpected(enqueueRet),
-             "Failed to direct-relay transport ingress frame " ERR_FMT,
-             ERR_ARG(enqueueRet));
+        _log_d("%s: direct-relayed transport ingress "
+               "frame " MAGIC_PUBSUB_SV_FMT " to %zu/%zu transports",
+               name, MAGIC_PUBSUB_SV_ARG(header), sentCount, dispatchCount);
+        return true;
     }
 
     ReturnCode _onTaskStep() {

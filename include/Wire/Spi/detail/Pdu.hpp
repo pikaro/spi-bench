@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Macros/Facade.hpp"
+#include "Platform/Crc/Facade.hpp"
 #include "Types/Error.hpp"
 #include "Wire/Interfaces/Request.hpp"
 #include <algorithm>
@@ -10,11 +11,6 @@
 #include <expected>
 #include <limits>
 #include <span>
-
-#pragma push_macro("BIT_MASK")
-#undef BIT_MASK
-#include "inc/CRC.h"
-#pragma pop_macro("BIT_MASK")
 
 namespace Totem::Wire::Spi::detail {
 
@@ -108,8 +104,7 @@ inline void writeLe16(std::span<std::byte> bytes, size_t offset,
 }
 
 inline uint8_t crc8(std::span<const std::byte> bytes) {
-    static const auto table = CRC::CRC_8().MakeTable();
-    return CRC::Calculate(bytes.data(), bytes.size(), table);
+    return Totem::Platform::Crc::Platform::crc8(bytes);
 }
 
 struct SlotHeader {

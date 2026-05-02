@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Audio/Interfaces/BeatTrackerConfig.hpp"
 #include "Audio/Interfaces/Types.hpp"
 #include <algorithm>
 #include <array>
@@ -24,18 +25,16 @@ class BeatTracker {
 
     [[nodiscard]] std::optional<BeatEvent> update(const FftFrame &frame) {
         const auto energy = _energy(frame);
-        const auto previousBaseline = _baselineInitialized
-                                          ? _baseline
-                                          : static_cast<float>(energy);
+        const auto previousBaseline =
+            _baselineInitialized ? _baseline : static_cast<float>(energy);
         const bool refractoryOk =
             _lastBeatUs == 0 ||
             frame.timestampUs >=
-                _lastBeatUs + static_cast<uint64_t>(_config.refractoryMs) *
-                                  1000ULL;
+                _lastBeatUs +
+                    (static_cast<uint64_t>(_config.refractoryMs) * 1000ULL);
         const bool aboveNoise = energy >= _config.minEnergy;
         const bool aboveBaseline =
-            static_cast<float>(energy) >
-            previousBaseline * _config.sensitivity;
+            static_cast<float>(energy) > previousBaseline * _config.sensitivity;
         const bool rising =
             energy > static_cast<uint16_t>(_lastEnergy + _config.onsetDelta);
 
@@ -123,8 +122,7 @@ class BeatTracker {
             return;
         }
 
-        const auto bpm =
-            60.0F * 1000000.0F / static_cast<float>(ibi);
+        const auto bpm = 60.0F * 1000000.0F / static_cast<float>(ibi);
         _bpm = std::clamp(bpm, static_cast<float>(_config.minBpm),
                           static_cast<float>(_config.maxBpm));
     }

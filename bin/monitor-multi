@@ -92,9 +92,7 @@ def parse_duration(value: str) -> float:
     try:
         duration = float(value) * multiplier
     except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            f"invalid duration: {raw_value!r}"
-        ) from exc
+        raise argparse.ArgumentTypeError(f"invalid duration: {raw_value!r}") from exc
 
     if duration <= 0:
         raise argparse.ArgumentTypeError("duration must be greater than zero")
@@ -123,8 +121,21 @@ def parse_positive_int(value: str) -> int:
     return parsed
 
 
+def parse_baud(value: str) -> str:
+    if value in {"h", "l"} or value.isdigit():
+        return value
+
+    raise argparse.ArgumentTypeError("baud must be 'h', 'l', or numeric")
+
+
 def parse_args(argv: list[str]) -> Config:
-    parser = argparse.ArgumentParser(usage="%(prog)s [options] <env...> [baud]")
+    parser = argparse.ArgumentParser(usage="%(prog)s [options] <env...>")
+    parser.add_argument(
+        "-b",
+        "--baud",
+        type=parse_baud,
+        help="monitor baud rate; accepts h, l, or a numeric baud",
+    )
     parser.add_argument(
         "-t",
         "--timeout",
@@ -134,12 +145,12 @@ def parse_args(argv: list[str]) -> Config:
     parser.add_argument(
         "--reset",
         action="store_true",
-        help="reset owned boards before opening their monitors",
+        help="run pio reset for owned boards before opening monitors",
     )
     parser.add_argument(
         "--upload",
         action="store_true",
-        help="upload owned boards before opening their monitors",
+        help="run pio upload for owned boards before opening monitors",
     )
     parser.add_argument(
         "--strip-ansi",
@@ -177,24 +188,18 @@ def parse_args(argv: list[str]) -> Config:
         type=Path,
         help="append the full prefixed monitor stream to PATH before filtering",
     )
-    parser.add_argument("args", nargs="+", metavar="env/baud")
+    parser.add_argument("envs", nargs="+", metavar="env")
     parsed = parser.parse_args(argv)
 
-    baud: str | None = None
-    envs = parsed.args
-    if parsed.args[-1] in {"h", "l"} or parsed.args[-1].isdigit():
-        baud = parsed.args[-1]
-        envs = parsed.args[:-1]
+    if parsed.envs[-1] in {"h", "l"} or parsed.envs[-1].isdigit():
+        parser.error("baud must be passed with --baud")
 
-    if not envs:
-        parser.error("at least one environment is required")
-
-    if len(set(envs)) != len(envs):
+    if len(set(parsed.envs)) != len(parsed.envs):
         parser.error("duplicate environments are not supported")
 
     return Config(
-        envs=envs,
-        baud=baud,
+        envs=parsed.envs,
+        baud=parsed.baud,
         reset=parsed.reset,
         upload=parsed.upload,
         timeout=parsed.timeout,
@@ -252,26 +257,139 @@ def ensure_command_fifo(env: str) -> tuple[int, int]:
     return read_fd, keepalive_fd
 
 
-def child_env(config: Config) -> dict[str, str]:
+def monitor_env() -> dict[str, str]:
     env = os.environ.copy()
-    if config.reset:
-        env["RESET"] = "true"
+    env.pop("RESET", None)
+    env.pop("UPLOAD", None)
+    return env
 
-    if config.upload:
-        env["UPLOAD"] = "true"
-        if not config.reset:
-            env.pop("RESET", None)
+
+def tool_env(root: Path) -> dict[str, str]:
+    env = monitor_env()
+    venv_bin = root / ".venv" / "bin"
+    env["PATH"] = f"{venv_bin}:{env.get('PATH', '')}"
+    return env
+
+
+def parse_exported_env(output: str) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    pattern = re.compile(r'^export ([A-Za-z_][A-Za-z0-9_]*)="(.*)"$')
+    for line in output.splitlines():
+        match = pattern.match(line.strip())
+        if match:
+            parsed[match.group(1)] = match.group(2)
+
+    return parsed
+
+
+def selected_port_env(root: Path, env_name: str) -> dict[str, str]:
+    env = tool_env(root)
+    result = subprocess.run(
+        [
+            str(root / "bin" / "select_port.py"),
+            env_name,
+        ],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    if result.stdout:
+        env.update(parse_exported_env(result.stdout))
+
+    if result.stderr:
+        print(result.stderr, end="", file=sys.stderr)
+
+    if result.returncode != 0:
+        if result.stdout:
+            print(result.stdout, end="", file=sys.stderr)
+        raise subprocess.CalledProcessError(result.returncode, result.args)
 
     return env
 
 
-def monitor_command_display(command: list[str], config: Config) -> str:
-    prefix: list[str] = []
-    if config.reset:
-        prefix.append("RESET=true")
+def run_pio_target(
+    root: Path,
+    env_name: str,
+    target: str,
+    env: dict[str, str],
+) -> subprocess.Popen[bytes]:
+    command = [
+        str(root / ".venv" / "bin" / "pio"),
+        "run",
+        "-e",
+        env_name,
+        "--target",
+        target,
+    ]
+    print(f"{env_name}: {' '.join(command)}", file=sys.stderr)
+    return subprocess.Popen(command, cwd=root, env=env)
+
+
+def command_display(command: object) -> str:
+    if isinstance(command, (list, tuple)):
+        return " ".join(str(part) for part in command)
+    return str(command)
+
+
+def run_pio_target_stage(
+    root: Path,
+    envs: list[str],
+    target: str,
+    env_by_name: dict[str, dict[str, str]],
+    parallel: bool = False,
+) -> None:
+    if parallel:
+        processes = [
+            (env_name, run_pio_target(root, env_name, target, env_by_name[env_name]))
+            for env_name in envs
+        ]
+        failures: list[tuple[str, int]] = []
+        for env_name, process in processes:
+            returncode = process.wait()
+            if returncode != 0:
+                failures.append((env_name, returncode))
+
+        if failures:
+            failed_env, returncode = failures[0]
+            raise subprocess.CalledProcessError(
+                returncode,
+                f"pio run -e {failed_env} --target {target}",
+            )
+        return
+
+    for env_name in envs:
+        process = run_pio_target(root, env_name, target, env_by_name[env_name])
+        returncode = process.wait()
+        if returncode != 0:
+            raise subprocess.CalledProcessError(
+                returncode,
+                f"pio run -e {env_name} --target {target}",
+            )
+
+
+def run_pre_ops(
+    root: Path,
+    envs: list[str],
+    config: Config,
+    env_by_name: dict[str, dict[str, str]],
+) -> None:
     if config.upload:
-        prefix.append("UPLOAD=true")
-    return " ".join([*prefix, *command])
+        print("monitor-multi: uploading all requested environments", file=sys.stderr)
+        run_pio_target_stage(root, envs, "upload", env_by_name, parallel=True)
+
+    if config.reset:
+        print("monitor-multi: resetting all requested environments", file=sys.stderr)
+        run_pio_target_stage(root, envs, "reset", env_by_name, parallel=True)
+
+
+def baud_value(config: Config) -> str:
+    if config.baud == "h" or config.baud is None:
+        return "921600"
+    if config.baud == "l":
+        return "115200"
+    return config.baud
 
 
 def spawn_monitor(
@@ -280,18 +398,26 @@ def spawn_monitor(
     config: Config,
     width: int,
     spool_writer: TextIO,
+    child_env: dict[str, str],
 ) -> Monitor:
-    command = [str(root / "bin" / "monitor"), env]
-    if config.baud is not None:
-        command.append(config.baud)
+    command = [
+        str(root / ".venv" / "bin" / "pio"),
+        "device",
+        "monitor",
+        "-b",
+        baud_value(config),
+        "--raw",
+        "--port",
+        child_env["UPLOAD_PORT"],
+    ]
 
     pid, fd = pty.fork()
     if pid == 0:
-        os.execve(command[0], command, child_env(config))
+        os.execve(command[0], command, child_env)
 
     os.set_blocking(fd, False)
     command_fd, command_keepalive_fd = ensure_command_fifo(env)
-    print(f"{env}: {monitor_command_display(command, config)}", file=sys.stderr)
+    print(f"{env}: {' '.join(command)}", file=sys.stderr)
     return Monitor(
         env=env,
         label=label_for(env, width, sys.stdout.isatty() and not config.strip_ansi),
@@ -490,10 +616,10 @@ def terminate(monitors: list[Monitor]) -> None:
             continue
         try:
             os.killpg(monitor.pid, signal.SIGTERM)
-        except (PermissionError, ProcessLookupError):
+        except PermissionError, ProcessLookupError:
             try:
                 os.kill(monitor.pid, signal.SIGTERM)
-            except (PermissionError, ProcessLookupError):
+            except PermissionError, ProcessLookupError:
                 pass
 
 
@@ -547,9 +673,7 @@ def print_summary(runtime: Runtime) -> None:
         return
 
     repeated = [
-        (env, entry)
-        for (env, _), entry in runtime.summary.items()
-        if entry.count > 1
+        (env, entry) for (env, _), entry in runtime.summary.items() if entry.count > 1
     ]
     if not repeated:
         return
@@ -683,11 +807,7 @@ def finish(monitors: list[Monitor], runtime: Runtime, code: int) -> int:
 
 def run(monitors: list[Monitor], runtime: Runtime) -> int:
     selector = selectors.DefaultSelector()
-    by_fd = {
-        monitor.fd: monitor
-        for monitor in monitors
-        if monitor.fd is not None
-    }
+    by_fd = {monitor.fd: monitor for monitor in monitors if monitor.fd is not None}
     by_command_fd = {
         monitor.command_fd: monitor
         for monitor in monitors
@@ -782,7 +902,9 @@ def run(monitors: list[Monitor], runtime: Runtime) -> int:
         close_fds(list(by_fd.values()))
         return finish(monitors, runtime, 0)
 
-    return finish(monitors, runtime, next((code for code in exit_codes if code != 0), 0))
+    return finish(
+        monitors, runtime, next((code for code in exit_codes if code != 0), 0)
+    )
 
 
 def lock_path_for(env: str) -> Path:
@@ -819,6 +941,7 @@ def main() -> int:
 
     locks: list[TextIO] = []
     locks_by_env: dict[str, TextIO] = {}
+    env_by_name: dict[str, dict[str, str]] = {}
     monitors: list[Monitor] = []
     log_file: TextIO | None = None
     try:
@@ -835,6 +958,12 @@ def main() -> int:
             locks.append(lock)
             locks_by_env[env] = lock
 
+        owned_envs = [env for env in config.envs if env in locks_by_env]
+        for env in owned_envs:
+            env_by_name[env] = selected_port_env(root, env)
+
+        run_pre_ops(root, owned_envs, config, env_by_name)
+
         log_file = open_log_file(config)
         runtime = Runtime(config=config, log=log_file)
         for env in config.envs:
@@ -849,10 +978,18 @@ def main() -> int:
                     config,
                     width,
                     open_spool_writer(env),
+                    env_by_name[env],
                 )
             )
 
         return run(monitors, runtime)
+    except subprocess.CalledProcessError as exc:
+        print(
+            "monitor-multi: command failed "
+            f"({exc.returncode}): {command_display(exc.cmd)}",
+            file=sys.stderr,
+        )
+        return exc.returncode
     finally:
         close_fds(monitors)
         close_spools(monitors)

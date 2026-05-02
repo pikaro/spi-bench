@@ -10,10 +10,10 @@ ENV="${1}"
 shift
 
 case "$ENV" in
-master)
+master | gpu0 | gpu1 | media)
     GDB=~/.platformio/packages/tool-xtensa-esp-elf-gdb/bin/xtensa-esp-elf-gdb-no-python
     ;;
-slave)
+io)
     GDB=~/.platformio/packages/tool-riscv32-esp-elf-gdb/bin/riscv32-esp-elf-gdb-no-python
     ;;
 *)

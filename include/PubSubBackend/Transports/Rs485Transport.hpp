@@ -12,6 +12,7 @@
 #include "Types/Error.hpp"
 #include "Wire/Interfaces/Request.hpp"
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -48,8 +49,8 @@ template <class Link> struct Rs485TransportDependencies {
 template <class Link> class Rs485Transport : public BaseTransport {
     using Base = BaseTransport;
 
-    static constexpr size_t rxQueueDepth = 4;
-    static constexpr size_t inFlightDepth = 4;
+    static constexpr size_t rxQueueDepth = 8;
+    static constexpr size_t inFlightDepth = 8;
 
     struct RxFrame {
         std::array<std::byte, Base::bufferSize> data{};
@@ -63,9 +64,20 @@ template <class Link> class Rs485Transport : public BaseTransport {
         std::array<std::byte, Base::bufferSize> data{};
         size_t size = 0;
         bool occupied = false;
+        bool acknowledgeOnComplete = false;
     };
 
   public:
+    struct Stats {
+        uint32_t txQueued = 0;
+        uint32_t txAcked = 0;
+        uint32_t txFailed = 0;
+        uint32_t txInFlightFull = 0;
+        uint32_t txSerializeDropped = 0;
+        uint32_t rxQueued = 0;
+        uint32_t rxDropped = 0;
+    };
+
     explicit Rs485Transport(Rs485TransportDependencies<Link> deps)
         : Base(_makeBaseDeps(this, deps)), _link(deps.link) {
         ABORT_IF_NOT(deps.valid(), "Invalid Rs485Transport dependencies");
@@ -90,6 +102,23 @@ template <class Link> class Rs485Transport : public BaseTransport {
         return _findInFlight(header) == nullptr;
     }
 
+    // Test-harness counters split PubSub publication from actual RS485 handoff.
+    // They are reset on read so periodic reports can show per-window rates.
+    [[nodiscard]] Stats takeStats() {
+        auto take = [](std::atomic<uint32_t> &value) {
+            return value.exchange(0, std::memory_order_relaxed);
+        };
+        return Stats{
+            .txQueued = take(_statsTxQueued),
+            .txAcked = take(_statsTxAcked),
+            .txFailed = take(_statsTxFailed),
+            .txInFlightFull = take(_statsTxInFlightFull),
+            .txSerializeDropped = take(_statsTxSerializeDropped),
+            .rxQueued = take(_statsRxQueued),
+            .rxDropped = take(_statsRxDropped),
+        };
+    }
+
     ReturnCode
     send(size_t maxCount = std::numeric_limits<size_t>::max()) override {
         FAIL_IF_INACTIVE_ERR("Cannot work inactive transport %s",
@@ -104,6 +133,8 @@ template <class Link> class Rs485Transport : public BaseTransport {
         while (count < maxCount) {
             auto *slot = _findFreeInFlight();
             if (slot == nullptr) {
+                _statsTxInFlightFull.fetch_add(1,
+                                               std::memory_order_relaxed);
                 return OK();
             }
 
@@ -122,6 +153,8 @@ template <class Link> class Rs485Transport : public BaseTransport {
 
             auto frameSizeResult = _prepareFrameForSend(item, slot->data);
             if (!frameSizeResult) {
+                _statsTxSerializeDropped.fetch_add(
+                    1, std::memory_order_relaxed);
                 _log_w(SV_FMT
                        ": dropping unserializable PubSub message %u: " ERR_FMT,
                        SV_ARG(_instanceName),
@@ -150,6 +183,7 @@ template <class Link> class Rs485Transport : public BaseTransport {
             slot->size = frameSize;
             slot->transport = this;
             slot->occupied = true;
+            slot->acknowledgeOnComplete = true;
 
             auto request = Wire::WriteRequest{
                 .owner = slot,
@@ -160,11 +194,13 @@ template <class Link> class Rs485Transport : public BaseTransport {
             };
             auto sendRet = _link.send(request);
             if (!sendRet.ok()) {
-                slot->occupied = false;
+                *slot = {};
+                _statsTxFailed.fetch_add(1, std::memory_order_relaxed);
                 FAIL(sendRet,
                      "Failed to enqueue PubSub frame on RS485 link: " ERR_FMT,
                      ERR_ARG(sendRet));
             }
+            _statsTxQueued.fetch_add(1, std::memory_order_relaxed);
             detail::log_trace_packet("rs485.tx.queued", item->envelope.header,
                                      _instanceName.data());
             ++count;
@@ -187,10 +223,10 @@ template <class Link> class Rs485Transport : public BaseTransport {
         return self->_link.ready();
     }
 
-    static ReturnCode _sendCallback(void * /*transport*/,
-                                    const Header & /*header*/,
-                                    std::span<const std::byte> /*frame*/) {
-        return ERR(CoreError, InvalidState);
+    static ReturnCode _sendCallback(void *transport, const Header &header,
+                                    std::span<const std::byte> frame) {
+        auto *self = static_cast<Rs485Transport *>(transport);
+        return self->_sendRawFrame(header, frame);
     }
 
     static std::expected<size_t, ReturnCode>
@@ -233,8 +269,11 @@ template <class Link> class Rs485Transport : public BaseTransport {
     }
 
     ReturnCode _receiveWireData(std::span<const std::byte> payload) {
-        FAIL_IF(payload.size() > Base::bufferSize, ERR(CoreError, Overflow),
-                "RS485 PubSub frame exceeds transport buffer size");
+        if (payload.size() > Base::bufferSize) {
+            _statsRxDropped.fetch_add(1, std::memory_order_relaxed);
+            FAIL(ERR(CoreError, Overflow),
+                 "RS485 PubSub frame exceeds transport buffer size");
+        }
         FAIL_IF_ERR_FWD(_ensureRxFrameQueue(),
                         "Failed to ensure RS485 RX queue for ingress");
 
@@ -244,10 +283,23 @@ template <class Link> class Rs485Transport : public BaseTransport {
         detail::log_trace_frame("rs485.wire.ingress", payload,
                                 detail::SerDe::peekHeader,
                                 _instanceName.data());
-        FAIL_IF_ERR_FWD(Totem::Queue::Platform::send(_rxFrameQueue, &rxFrame,
-                                                     queueSendTimeoutTicks),
-                        "Failed to enqueue RS485 PubSub ingress frame");
-        FAIL_IF_ERR_FWD(_wake(), "Failed to wake PubSub after RS485 ingress");
+        auto enqueueRet = Totem::Queue::Platform::send(
+            _rxFrameQueue, &rxFrame, queueSendTimeoutTicks);
+        if (!enqueueRet.ok()) {
+            _statsRxDropped.fetch_add(1, std::memory_order_relaxed);
+            _log_w(SV_FMT
+                   ": dropping RS485 PubSub frame after RX queue "
+                   "backpressure: " ERR_FMT,
+                   SV_ARG(_instanceName), ERR_ARG(enqueueRet));
+            return OK();
+        }
+        _statsRxQueued.fetch_add(1, std::memory_order_relaxed);
+        auto wakeRet = _wake();
+        if (!wakeRet.ok()) {
+            _log_w(SV_FMT ": accepted RS485 PubSub frame but failed to wake "
+                   "PubSub: " ERR_FMT,
+                   SV_ARG(_instanceName), ERR_ARG(wakeRet));
+        }
         return OK();
     }
 
@@ -266,15 +318,22 @@ template <class Link> class Rs485Transport : public BaseTransport {
         }
 
         auto envelope = slot.envelope;
-        detail::log_trace_packet("rs485.tx.complete", envelope.header,
+        const auto header = slot.header;
+        const auto shouldAck = slot.acknowledgeOnComplete;
+        detail::log_trace_packet("rs485.tx.complete", header,
                                  _instanceName.data());
         slot = {};
 
         if (!result.result.ok()) {
+            _statsTxFailed.fetch_add(1, std::memory_order_relaxed);
             _log_w(SV_FMT
                    ": RS485 write failed for PubSub message %u: " ERR_FMT,
-                   SV_ARG(_instanceName), envelope.header.messageId,
-                   ERR_ARG(result.result));
+                   SV_ARG(_instanceName), header.messageId, ERR_ARG(result.result));
+        } else {
+            _statsTxAcked.fetch_add(1, std::memory_order_relaxed);
+        }
+        if (!shouldAck) {
+            return OK();
         }
         auto ackRet = _ack(envelope);
         if (!ackRet.ok()) {
@@ -288,6 +347,43 @@ template <class Link> class Rs485Transport : public BaseTransport {
             }
         }
         return ackRet;
+    }
+
+    ReturnCode _sendRawFrame(const Header &header,
+                             std::span<const std::byte> frame) {
+        FAIL_IF(frame.size() > Base::bufferSize, ERR(CoreError, Overflow),
+                "Raw RS485 PubSub frame exceeds transport buffer size");
+        auto *slot = _findFreeInFlight();
+        if (slot == nullptr) {
+            _statsTxInFlightFull.fetch_add(1, std::memory_order_relaxed);
+            return ERR(CoreError, Overflow);
+        }
+
+        std::memcpy(slot->data.data(), frame.data(), frame.size());
+        slot->header = header;
+        slot->size = frame.size();
+        slot->transport = this;
+        slot->occupied = true;
+        slot->acknowledgeOnComplete = false;
+
+        detail::log_trace_packet("rs485.tx.raw.prepared", header,
+                                 _instanceName.data());
+        auto request = Wire::WriteRequest{
+            .owner = slot,
+            .payloadType = Wire::PayloadType::PubSub,
+            .data = std::span<const std::byte>{slot->data.data(), slot->size},
+            .onComplete = _onWireWriteComplete,
+        };
+        auto sendRet = _link.send(request);
+        if (!sendRet.ok()) {
+            *slot = {};
+            _statsTxFailed.fetch_add(1, std::memory_order_relaxed);
+            return sendRet;
+        }
+        _statsTxQueued.fetch_add(1, std::memory_order_relaxed);
+        detail::log_trace_packet("rs485.tx.raw.queued", header,
+                                 _instanceName.data());
+        return OK();
     }
 
     ReturnCode _ensureRxFrameQueue() {
@@ -326,6 +422,14 @@ template <class Link> class Rs485Transport : public BaseTransport {
         _rxFrameQueueStorage{};
 
     std::array<InFlightFrame, inFlightDepth> _inFlight{};
+
+    std::atomic<uint32_t> _statsTxQueued{0};
+    std::atomic<uint32_t> _statsTxAcked{0};
+    std::atomic<uint32_t> _statsTxFailed{0};
+    std::atomic<uint32_t> _statsTxInFlightFull{0};
+    std::atomic<uint32_t> _statsTxSerializeDropped{0};
+    std::atomic<uint32_t> _statsRxQueued{0};
+    std::atomic<uint32_t> _statsRxDropped{0};
 
     static constexpr ::platform::Tick queueSendTimeoutTicks = 1;
 };

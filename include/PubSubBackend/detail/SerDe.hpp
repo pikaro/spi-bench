@@ -6,6 +6,7 @@
 #include "PubSubBackend/detail/Codec.hpp"
 #include "PubSubBackend/detail/Trace.hpp"
 #include "PubSubBackend/detail/Types.hpp"
+#include "Platform/Crc/Facade.hpp"
 #include "Types/Error.hpp"
 #include <cstddef>
 #include <cstdint>
@@ -14,11 +15,6 @@
 #include <span>
 #include <type_traits>
 #include <utility>
-
-#pragma push_macro("BIT_MASK")
-#undef BIT_MASK
-#include "inc/CRC.h"
-#pragma pop_macro("BIT_MASK")
 
 namespace Totem::PubSubBackend::detail {
 
@@ -242,8 +238,7 @@ class SerDe {
 
     [[nodiscard]] static uint32_t
     _crcSum(const std::span<const std::byte> frame) {
-        static const auto table = CRC::CRC_32().MakeTable();
-        return CRC::Calculate(frame.data(), frame.size(), table);
+        return Totem::Platform::Crc::Platform::crc32(frame);
     }
 };
 

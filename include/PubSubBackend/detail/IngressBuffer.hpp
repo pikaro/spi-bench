@@ -27,8 +27,12 @@ struct IngressByteArenaConfig {
     static constexpr size_t maxRecordAgeMs =
         Spec::Limits::maxIngressRecordAgeMs;
 
-    [[nodiscard]] static bool isCritical(const Header &header) {
-        return header.trafficClass == TrafficClass::Critical;
+    [[nodiscard]] static bool isCritical(const Header & /*header*/) {
+        // Ingress envelopes can remain referenced by transport send queues and
+        // in-flight tables. Evicting retained records corrupts forwarding, so
+        // ingress pressure must drop the new frame instead of reusing old
+        // storage.
+        return true;
     }
 
     static ReturnCode onEvictNoncritical(const Header & /*unused*/) {
@@ -80,7 +84,7 @@ class IngressBuffer : public ByteArenaImpl {
                 data, SerDe::deserializeRaw(frame),
                 "Failed to deserialize frame for payload-only storage");
             auto storeResult = store(data.first, data.second);
-            if (storeResult == ERR(StorageError, Backpressure)) {
+            if (_isRecoverableStoreError(storeResult)) {
                 return std::optional<Envelope>{};
             }
             FAIL_IF_ERR_FWD_UNEXPECTED(
@@ -95,7 +99,7 @@ class IngressBuffer : public ByteArenaImpl {
             }};
         }
         auto storeResult = ByteArena::store(header, frame);
-        if (storeResult == ERR(StorageError, Backpressure)) {
+        if (_isRecoverableStoreError(storeResult)) {
             return std::optional<Envelope>{};
         }
         FAIL_IF_ERR_FWD_UNEXPECTED(
@@ -203,6 +207,11 @@ class IngressBuffer : public ByteArenaImpl {
     }
 
   private:
+    [[nodiscard]] static bool _isRecoverableStoreError(ReturnCode error) {
+        return error == ERR(StorageError, Backpressure) ||
+               error == ERR(Overflow) || error == ERR(AlreadyExists);
+    }
+
     [[nodiscard]] std::optional<size_t>
     _serializedRecordIndex(const Header &header) const {
         for (size_t i = 0; i < _serializedRecords.size(); ++i) {

@@ -9,7 +9,7 @@
 #include "PubSubBackend/Interfaces/Envelope.hpp"
 #include "Services/PubSub.hpp"
 #include "Setups/Core.hpp"
-#include "Setups/PubSubRs485Test.hpp"
+#include "Setups/PubSubStarTest.hpp"
 #include "Types/Error.hpp"
 #include "Wire/Rs485/Facade.hpp"
 #include "config.hpp"
@@ -19,9 +19,8 @@ CoreSetup core{};
 
 Totem::Wire::Rs485::Slave rs485Slave{core.taskRegistry};
 Totem::Clock::Clock clockSlave{Totem::Clock::Clock::Role::Slave};
-PubSubRs485TestSetup<Totem::Wire::Rs485::Slave> pubSubRs485{
-    core.taskRegistry, rs485Slave,
-    PubSubRs485TestSetup<Totem::Wire::Rs485::Slave>::Role::Slave};
+PubSubStarRs485EdgeSetup<Totem::Wire::Rs485::Slave> pubSubStar{
+    core.taskRegistry, rs485Slave};
 
 Totem::Buttons::Buttons buttons{core.taskRegistry};
 Totem::LedPwm::LedPwm ledPwm{core.taskRegistry};
@@ -39,7 +38,7 @@ void setup() {
     ABORT_IF_ERR_BEGIN(rs485Slave.begin(rs485SlaveConfig));
 
     ABORT_IF_ERR_BEGIN(ledPwm.begin(ledPwmConfig));
-    pubSubRs485.setup();
+    pubSubStar.setup();
     ABORT_IF_UNEXPECTED(
         _,
         PubSubService::get().subscribe(
@@ -102,7 +101,7 @@ void app_main() {
     for (;;) {
         const auto nowMs = ::platform::get_time();
         (void)core.work(nowMs);
-        (void)pubSubRs485.work(nowMs);
+        (void)pubSubStar.work(nowMs);
 
         if (rs485Slave.ready() &&
             (!clockSlave.synced() || epoch % 10000 == 0) &&

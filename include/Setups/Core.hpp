@@ -18,7 +18,7 @@
 struct CoreSetup {
     CoreSetup()
         : metricsBinding(metricsBackend), aggregator(taskRegistry),
-          consoleOutput(), commandController(taskRegistry),
+          commandController(taskRegistry),
           consoleSource(commandController.store(), &commandController,
                         Totem::CommandBackend::Controller::wake),
           systemTaskSource(taskRegistry), monitoring(taskRegistry) {}

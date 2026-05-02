@@ -3,15 +3,16 @@
 #pragma once
 
 #include "Macros/Facade.hpp"
+#include "Platform/Hardware.hpp"
 #include "Types/Error.hpp"
 #include "Types/Uart.hpp"
 #include "driver/gpio.h" // IWYU pragma: keep
 #include "driver/uart.h"
-#include "freertos/FreeRTOS.h"
 #include "freertos/projdefs.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "hal/uart_types.h"
+#include "portmacro.h"
 #include "soc/clk_tree_defs.h"
 #include <algorithm>
 #include <array>

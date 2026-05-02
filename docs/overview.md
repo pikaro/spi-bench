@@ -16,16 +16,25 @@ events and render their own LED segment locally.
 
 ## Current Scope
 
-- `env:master` and `env:media` are active targets for the current point-to-point
-    SPI Clock and PubSub hardware loop.
-- `env:gpu0`, `env:gpu1`, and `env:io` exist for the current source roots but
-    are not part of the active master/media SPI PubSub loop.
+- `env:master`, `env:media`, `env:gpu0`, and `env:io` are active targets for
+    the current hardware PubSub star test. The master owns a low-speed SPI bus
+    currently wired to media, a high-speed SPI bus currently wired to GPU0, and
+    one RS485 link to IO.
+- The active proof routes synthetic IO power events over RS485 through the
+    master to media and GPU0 while media publishes synthetic beat events back
+    through the master to IO.
+- The current SPI driver is still point-to-point, so each active SPI bus has
+    one attached slave during this stage. The final bus topology requires
+    multi-peer SPI support: four GPU nodes on the high-speed bus, and media,
+    LoRA radio, and GPS on the low-speed bus.
+- `env:gpu1` exists for the shared GPU source root but is not part of the
+    active hardware topology yet.
 - There is no `env:slave` in this checkout. Historical RS485 slave
     documentation may refer to that environment, but `platformio.ini` no
     longer defines it.
 - When a task touches shared wire, PubSub, Clock, or platform abstractions,
-    build both `master` and `media` unless the task is explicitly scoped to one
-    environment.
+    build `master`, `media`, `gpu0`, and `io` unless the task is explicitly
+    scoped to one environment.
 
 ## Design Intent
 

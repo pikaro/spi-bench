@@ -6,7 +6,10 @@ this document once they stop describing the active protocol.
 
 ## Current Status
 
-The current implementation is a point-to-point SPI link:
+The current implementation is a point-to-point SPI link. The active hardware
+star instantiates that link once for the low-speed SPI bus and once for the
+high-speed SPI bus. Each bus currently has one attached slave, so this is not
+yet a shared-bus implementation:
 
 - public facade: `include/Wire/Spi/Facade.hpp`
 - configuration: `include/Wire/Spi/Interfaces/MasterConfig.hpp` and
@@ -16,15 +19,23 @@ The current implementation is a point-to-point SPI link:
 - link runners: `include/Wire/Spi/detail/Master.hpp` and `Slave.hpp`
 - ESP-IDF binding: `include/Wire/Spi/detail/platform/PlatformESP32.hpp`
 - PubSub bridge: `include/PubSubBackend/Transports/SpiTransport.hpp`
-- hardware test harness: `include/Setups/PubSubSpiTest.hpp`
+- focused point-to-point hardware test harness:
+  `include/Setups/PubSubSpiTest.hpp`
+- current multi-board PubSub star harness:
+  `include/Setups/PubSubStarTest.hpp`
 
-The active hardware loop is `env:master` to `env:media`. The master owns the
-SPI clock; the slave keeps a DMA transfer queued and asserts an attention GPIO
-when the master should clock a turn.
+The active PubSub star has `env:master` linked to `env:media` on the low-speed
+SPI bus and `env:gpu0` on the high-speed SPI bus. The master owns both SPI
+clocks; each current slave keeps a DMA transfer queued and asserts its own
+attention GPIO when the master should clock that link. `env:io` joins the same
+PubSub graph through RS485.
 
-The shared-bus router, multi-slave scheduler, and per-peer PubSub routing are
-not implemented yet. Do not describe the current point-to-point transport as a
-shared-bus design.
+The shared-bus SPI router and multi-slave scheduler are not implemented. Do not
+describe the current SPI transport as a shared-bus design; the current
+multi-node proof works by registering two bus-scoped point-to-point transports
+on the master PubSub node. The target is still multi-peer per bus: four GPU
+nodes on the high-speed bus, and media, LoRA radio, and GPS on the low-speed
+bus.
 
 ## Target Shape
 
@@ -213,17 +224,18 @@ control-plane soft state, not benchmark traffic. It prevents one missed
 subscription advertisement during link bring-up from permanently black-holing
 application data until reboot.
 
-The hardware PubSub SPI harness currently drives stress traffic at two publishes
-every 5 ms in each direction. With the 60-byte test payload this is about
-24 kB/s of application payload per direction before PubSub and SPI framing. The
-larger harness message pool is intentional: the test should expose transport
-and scheduling pressure before failing from a small local payload pool.
+The hardware PubSub star harness currently drives synthetic traffic from IO to
+the SPI peers and from media back to IO. The larger harness message pools are
+intentional: the test should expose transport and scheduling pressure before
+failing from a small local payload pool.
 
 ## Known Limitations
 
-- The implementation is still point-to-point. A real shared-bus SPI design
-  still needs a master peer table, per-peer attention inputs, scheduling
-  fairness, per-peer availability, and per-target PubSub ACK accounting.
+- The SPI implementation is still point-to-point. The current multi-node
+  topology uses separate master SPI buses with one slave on each bus. A real
+  shared-bus SPI design still needs a master peer table, per-peer attention
+  inputs, scheduling fairness, per-peer availability, and per-target PubSub ACK
+  accounting.
 - The slave queues one DMA transaction at a time. This keeps ownership simple
   but limits maximum transaction cadence and makes queue starvation visible as
   no-slot observations if the master clocks too early. Higher throughput should

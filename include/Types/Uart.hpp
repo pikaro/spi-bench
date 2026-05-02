@@ -22,7 +22,7 @@ struct UartEvent {
 
 using UartEventCallback = ReturnCode (*)(void *owner, UartEvent event);
 
-struct Pins {
+struct UartPins {
     std::optional<Pin> txPin = std::nullopt;
     std::optional<Pin> rxPin = std::nullopt;
     std::optional<Pin> rtsPin = std::nullopt;
@@ -45,7 +45,7 @@ struct UartConfig {
     uint8_t uartNumber = 0;
     size_t txBufferSize = 2048;
     size_t maxReadLen = 128;
-    Pins pins{};
+    UartPins pins{};
 
     [[nodiscard]] bool validate() const {
         if (txBufferSize == 0) {

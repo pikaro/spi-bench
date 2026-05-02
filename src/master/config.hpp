@@ -15,6 +15,18 @@ inline Totem::Wire::Rs485::MasterConfig rs485MasterConfig{
                     .rxPin = Pin::GPIO2,
                 },
         },
+    .task =
+        {
+            .name = "Rs485MasterTask",
+            .priority = 2,
+            .core = Totem::TaskController::Config::CorePreference::specific(0),
+            .stackSize = 8192,
+            .intervalMs = 100,
+            .noCatchup = true,
+            .useNotify = true,
+            .notifyExpectTimeout = false,
+            .notifyTimeoutMs = 10,
+        },
     .attentionPin = Pin::GPIO14,
 };
 
@@ -38,6 +50,18 @@ inline Totem::Wire::Spi::MasterConfig spiMasterBusHighSpeedConfig{
             .bitOrder = Totem::Wire::Spi::BitOrder::MsbFirst,
             .queueSize = 1,
             .inputDelayNs = 0,
+        },
+    .task =
+        {
+            .name = "SpiMasterTask",
+            .priority = 2,
+            .core = Totem::TaskController::Config::CorePreference::specific(0),
+            .stackSize = 8192,
+            .intervalMs = 100,
+            .noCatchup = true,
+            .useNotify = true,
+            .notifyExpectTimeout = false,
+            .notifyTimeoutMs = 10,
         },
     .attentionPin = Pin::GPIO5,
     // {
@@ -74,6 +98,7 @@ inline Totem::Wire::Spi::MasterConfig spiMasterBusLowSpeedConfig{
         {
             .name = "SpiMasterTask",
             .priority = 2,
+            .core = Totem::TaskController::Config::CorePreference::specific(0),
             .stackSize = 8192,
             .intervalMs = 10,
             .noCatchup = true,

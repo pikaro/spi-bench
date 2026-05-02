@@ -3,8 +3,7 @@
 #include "Platform/PlatformSelect.hpp"
 #include "Services/Clock.hpp"
 #include "Setups/Core.hpp"
-#include "Setups/PubSubRs485Test.hpp"
-#include "Setups/PubSubSpiTest.hpp"
+#include "Setups/PubSubStarTest.hpp"
 #include "Wire/Rs485/Facade.hpp"
 #include "Wire/Spi/Facade.hpp"
 #include "config.hpp"
@@ -16,19 +15,10 @@ Totem::Wire::Rs485::Master rs485master{core.taskRegistry};
 Totem::Wire::Spi::Master spiMasterHighSpeed{core.taskRegistry};
 Totem::Wire::Spi::Master spiMasterLowSpeed{core.taskRegistry};
 Totem::Clock::Clock clockMaster{Totem::Clock::Clock::Role::Master};
-PubSubSpiTestSetup<Totem::Wire::Spi::Master> pubSubSpi{
-    core.taskRegistry,
-    spiMasterLowSpeed,
-    PubSubSpiTestSetup<Totem::Wire::Spi::Master>::Role::Master,
-    {
-        .masterPublishIntervalMs = 5,
-        .slavePublishIntervalMs = 5,
-        .masterPublishesPerInterval = 2,
-        .slavePublishesPerInterval = 2,
-    }};
-PubSubRs485TestSetup<Totem::Wire::Rs485::Master> pubSubRs485{
-    core.taskRegistry, rs485master,
-    PubSubRs485TestSetup<Totem::Wire::Rs485::Master>::Role::Master};
+PubSubStarMasterSetup<Totem::Wire::Spi::Master, Totem::Wire::Spi::Master,
+                      Totem::Wire::Rs485::Master>
+    pubSubStar{core.taskRegistry, spiMasterLowSpeed, spiMasterHighSpeed,
+               rs485master};
 
 void setup() {
     ::platform::delay(::platform::ms_to_ticks(3000));
@@ -53,8 +43,7 @@ void setup() {
     ABORT_IF_ERR(clockMaster.registerHandler(rs485master),
                  "Failed to register RS485 clock handler");
 
-    pubSubSpi.setup();
-    pubSubRs485.setup();
+    pubSubStar.setup();
 
     _log_i("Setup complete");
 }
@@ -70,8 +59,7 @@ void app_main() {
     for (;;) {
         const auto nowMs = ::platform::get_time();
         (void)core.work(nowMs);
-        (void)pubSubSpi.work(nowMs);
-        (void)pubSubRs485.work(nowMs);
+        (void)pubSubStar.work(nowMs);
 
         ::platform::delay(::platform::ms_to_ticks(1));
         epoch++;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Macros/Facade.hpp"
+#include "Platform/Crc/Facade.hpp"
 #include "Types/Error.hpp"
 #include "Wire/Interfaces/Request.hpp"
 #include "Wire/Rs485/detail/Types.hpp" // IWYU pragma: keep
@@ -10,11 +11,6 @@
 #include <cstdint>
 #include <expected>
 #include <span>
-
-#pragma push_macro("BIT_MASK")
-#undef BIT_MASK
-#include "inc/CRC.h"
-#pragma pop_macro("BIT_MASK")
 
 namespace Totem::Wire::Rs485::detail {
 
@@ -128,10 +124,8 @@ struct Header {
     }
 
     [[nodiscard]] uint8_t crcSum() const {
-        static const auto table = CRC::CRC_8().MakeTable();
         auto ints = _checkedToBytes();
-        auto bytes = std::as_bytes(std::span(ints));
-        return CRC::Calculate(bytes.data(), bytes.size(), table);
+        return Totem::Platform::Crc::Platform::crc8(std::span(ints));
     }
 
     [[nodiscard]] ReturnCode validateCrc() const {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Audio/Interfaces/SourceConfig.hpp"
 #include "Audio/Interfaces/Types.hpp"
 #include "Audio/detail/PlatformSelect.hpp"
 #include "Audio/detail/Types.hpp"
@@ -50,15 +51,13 @@ class I2SSource : public HasLifecycle<I2SSource, I2SSourceConfig> {
   private:
     ReturnCode _onBegin() {
         _deviceConfig = this->config().resolvedDevice();
+        const auto &pins = this->config().pins;
         _log_i("Starting I2S input: %lu Hz, %u ch, %u bit, pins bck=%d ws=%d "
                "data=%d",
                static_cast<unsigned long>(_deviceConfig.audio.sampleRate),
-               _deviceConfig.audio.channels,
-               _deviceConfig.audio.bitsPerSample,
-               _deviceConfig.pins.bitClock,
-               _deviceConfig.pins.wordSelect,
-               _deviceConfig.pins.dataIn);
-        FAIL_IF_ERR_FWD(_input.begin(_deviceConfig),
+               _deviceConfig.audio.channels, _deviceConfig.audio.bitsPerSample,
+               pins.bitClock, pins.wordSelect, pins.dataIn);
+        FAIL_IF_ERR_FWD(_input.begin(pins, _deviceConfig),
                         "Failed to start I2S input");
         FAIL_IF_ERR_FWD(
             _input.setReadTimeoutMs(this->config().readiness.readTimeoutMs),
@@ -91,9 +90,8 @@ class I2SSource : public HasLifecycle<I2SSource, I2SSourceConfig> {
 
         _lastProbeMs = nowMs;
         _probes.fetch_add(1, std::memory_order_acq_rel);
-        const auto bytesRead =
-            _input.readBytes(_probeBuffer.data(),
-                             this->config().readiness.probeBytes);
+        const auto bytesRead = _input.readBytes(
+            _probeBuffer.data(), this->config().readiness.probeBytes);
         observeReadResult(bytesRead, nowMs);
         return bytesRead > 0;
     }
@@ -118,6 +116,7 @@ class I2SSource : public HasLifecycle<I2SSource, I2SSourceConfig> {
         }
     }
 
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
     void _markDataAvailable(size_t bytesRead, uint32_t nowMs) {
         _consecutiveEmptyReads = 0;
         _observedBytes.fetch_add(static_cast<uint32_t>(bytesRead),
@@ -139,7 +138,7 @@ class I2SSource : public HasLifecycle<I2SSource, I2SSourceConfig> {
         _lastDataMs.store(0, std::memory_order_release);
     }
 
-    Platform::I2SInputStream _input{};
+    Platform::I2SInputStream _input;
     I2SDeviceConfig _deviceConfig{};
     AudioInfo _audioInfo{};
     std::array<uint8_t, i2sMaxProbeBytes> _probeBuffer{};

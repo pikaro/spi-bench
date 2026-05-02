@@ -21,10 +21,12 @@ GIT_ROOT="$(git rev-parse --show-toplevel)"
 
 eval "$("${BASH_SOURCE%/*}/select_port.py" "$ENV")"
 
+if [ "${UPLOAD:-}" = "true" ]; then
+    pio run -e "${ENV}" --target "upload"
+fi
+
 if [ "${RESET:-}" = "true" ]; then
     pio run -e "${ENV}" --target "reset"
-elif [ "${UPLOAD:-}" = "true" ]; then
-    pio run -e "${ENV}" --target "upload"
 fi
 
 pio device monitor -b "${BAUD}" --raw --port "$UPLOAD_PORT"

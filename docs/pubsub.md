@@ -63,6 +63,12 @@ Forwarding paths can reuse those bytes without decoding and reserializing. Full
 CRC validation is deferred until local payload access, so the active invariant
 is: payload access implies frame validation.
 
+When an ingress frame has no local subscriber interest and is not control-plane
+traffic, the node may cut through by inspecting only the header and forwarding
+the original serialized frame directly to interested egress transports. Hardware
+transports own a short wire in-flight copy for raw cut-through sends, so this
+path avoids PubSub ingress storage and drainer in-flight retention.
+
 ## Transport Model
 
 The core distinguishes three transport forwarding policies:
@@ -82,6 +88,14 @@ RS485 transport. It serializes PubSub frames into RS485 `Data` payloads using
 and releases the PubSub drainer ack only when the RS485 write completion
 callback fires. Ingress frames are copied into a small RX queue from the RS485
 data handler and published during the normal PubSub transport polling path.
+
+`PubSubBackend/Transports/SpiTransport.hpp` is the hardware point-to-point SPI
+transport. The current master star setup uses two SPI transport IDs named for
+the low-speed and high-speed buses. Each bus currently has one attached slave
+because the SPI multi-peer scheduler is not implemented yet. Do not model the
+target topology as one master transport per endpoint: the high-speed bus must
+eventually host the four GPU nodes, and the low-speed bus must host media plus
+future LoRA and GPS peripherals.
 
 Application PubSub envelopes require a synced clock before creation. The wire
 header carries both the legacy millisecond timestamp and a synced microsecond
@@ -109,25 +123,52 @@ they immediately release it after queueing bytes into a link. That pattern adds
 locks, scans, copies, and static storage without representing the final wire
 driver.
 
-The active hardware harnesses for current wire work are
-`include/Setups/PubSubRs485Test.hpp` and
-`include/Setups/PubSubSpiTest.hpp`. They use the real RS485 or SPI wire
-transport between one master and one slave, record aggregate
-throughput/latency stats, and act as the reference harnesses for transport
-bring-up behavior. The SPI harness reports application publish counters
-separately from SPI transport counters so a local publish with no remote route
-does not look like a successful wire transmission.
+The active hardware harness for the current multi-board stage is
+`include/Setups/PubSubStarTest.hpp`. It runs one PubSub node per MCU:
+
+- master registers low-speed SPI, high-speed SPI, and RS485 transports and only
+  bridges traffic
+- media subscribes to synthetic `Power` events and publishes synthetic `Beat`
+  events
+- GPU0 subscribes to synthetic `Power` events
+- IO publishes synthetic `Power` events and subscribes to synthetic `Beat`
+  events
+
+The older `include/Setups/PubSubRs485Test.hpp` and
+`include/Setups/PubSubSpiTest.hpp` harnesses remain useful for focused
+point-to-point transport bring-up. Hardware harness reports split application
+publish counters from transport counters so a local publish with no remote
+route does not look like a successful wire transmission.
+The star harness also reports receive latency per logical route, for example
+`io->gpu0 power` and `media->io beat`, instead of collapsing every received
+test packet into one node-wide bucket. Latency summaries include rough fixed
+histogram percentiles (`p50`, `p90`, `p99`) and a `targetMiss` count for packets
+above the current 10 ms propagation target. These percentiles are intentionally
+bucketed rather than exact to keep the on-device memory cost small.
 
 Transport availability can change while the drainer is publishing a frame. A
 transport enqueue failure after in-flight storage should release that target and
 drop the frame for that transport instead of stopping the PubSub task; later
 availability replay is responsible for control-plane recovery.
 
+Cut-through forwarding follows the same per-target drop rule for egress
+backpressure. A saturated target transport may lose that non-local data frame,
+but backpressure must not force the bridge back into the buffered drainer path
+or stop the PubSub runner.
+
 Malformed transport ingress frames are recoverable. Transports should drop
 frames that fail the fixed PubSub header/size check and keep the PubSub runner
 alive. SPI PubSub ingress also treats RX queue backpressure as a local drop
 instead of NACKing the peer, because current wire write NACKs release the
 sender's PubSub frame rather than retrying it.
+Duplicate ingress records are also recoverable. Subscription replay and link
+recovery can legitimately deliver the same control-plane frame more than once,
+and that should not stop the PubSub task.
+
+Transport ingress records are retained while forwarding paths and transport
+send queues still reference them. The ingress arena therefore must not evict
+old records to admit new traffic; under pressure, transports should drop the
+new ingress frame and keep the runner and wire protocol alive.
 
 Transport write completions may arrive from a transport-owned task while the
 PubSub runner is enqueueing new frames. The drainer owns the in-flight frame
@@ -206,4 +247,4 @@ Keep PubSub changes minimal and reviewable:
   already required by transport abstraction
 - update this document when ownership, scheduling, or transport semantics
   change
-- build `master` after PubSub changes with `pio run -e master`
+- build `master`, `media`, `gpu0`, and `io` after hardware PubSub changes

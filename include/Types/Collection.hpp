@@ -5,6 +5,7 @@
 #include "Types/Basic.hpp"
 #include "Types/Error.hpp"
 #include <array>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -63,18 +64,18 @@ template <size_t N> struct NameKey {
 template <typename Key>
 [[nodiscard]] inline size_t collection_key_hash(const Key &key) {
     if constexpr (requires {
-                      key.name;
-                      key.len;
+                      {
+                          key.view()
+                      } -> std::convertible_to<std::string_view>;
                   }) {
-        return hash(key.name.data(), key.len);
+        return std::hash<std::string_view>{}(key.view());
     } else if constexpr (std::is_pointer_v<Key>) {
-        auto value = reinterpret_cast<uintptr_t>(key);
-        return hash(reinterpret_cast<const char *>(&value), sizeof(value));
+        return std::hash<Key>{}(key);
     } else if constexpr (std::is_enum_v<Key>) {
-        auto value = static_cast<std::underlying_type_t<Key>>(key);
-        return hash(reinterpret_cast<const char *>(&value), sizeof(value));
+        using Underlying = std::underlying_type_t<Key>;
+        return std::hash<Underlying>{}(static_cast<Underlying>(key));
     } else if constexpr (std::is_integral_v<Key>) {
-        return hash(reinterpret_cast<const char *>(&key), sizeof(key));
+        return std::hash<Key>{}(key);
     } else {
         static_assert(sizeof(Key) == 0, "Unsupported collection key type");
     }

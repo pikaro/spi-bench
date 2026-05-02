@@ -11,7 +11,7 @@ if [ "$1" = "-f" ]; then
     FULL=1
 fi
 
-PIOENV="${1}"
+ENV="${1}"
 shift
 
 color() {
@@ -37,10 +37,21 @@ color() {
     printf "${code}$*\e[0m"
 }
 
+case "$ENV" in
+master | gpu0 | gpu1 | media)
+    ADDR2LINE=~/.platformio/packages/toolchain-xtensa-esp-elf/bin/xtensa-esp32s3-elf-addr2line
+    ;;
+io)
+    ADDR2LINE=~/.platformio/packages/toolchain-riscv32-esp/bin/riscv32-esp-elf-addr2line
+    ;;
+*)
+    echo "Unknown environment"
+    exit 1
+    ;;
+esac
+
 LINE_COUNT="$(echo "$@" | wc -w)"
-TRACE="$(${HOME}/.platformio/packages/toolchain-xtensa-esp-elf/bin/xtensa-esp32s3-elf-addr2line \
-    -fCe ".pio/build/${PIOENV}/firmware.elf" \
-    "$@")"
+TRACE="$("${ADDR2LINE}" -fCe ".pio/build/${ENV}/firmware.elf" "$@")"
 
 if [ $FULL -ne 1 ]; then
     _DIR_REPR=(

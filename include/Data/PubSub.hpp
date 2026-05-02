@@ -43,9 +43,16 @@ template <> struct NodeTraits<NodeName::Master> {
 
     enum class Transport : uint8_t {
         None = 0,
-        SPI = 1U << 0,
-        WebSocket = 1U << 1,
+        LowSpeedSPI = 1U << 0,
+        HighSpeedSPI = 1U << 1,
         RS485 = 1U << 2,
+        WebSocket = 1U << 3,
+
+        // Current hardware has one attached peer on each SPI bus, but the
+        // target topology is multi-peer per bus. Prefer bus names for new code.
+        MediaSPI = LowSpeedSPI,
+        GPU0SPI = HighSpeedSPI,
+        SPI = LowSpeedSPI,
     };
     using Limits = PubSubConfig;
 };
@@ -53,14 +60,7 @@ template <> struct NodeTraits<NodeName::Master> {
 template <> struct NodeTraits<NodeName::Media> {
     static constexpr NodeId nodeId = NodeId::Media;
 
-    // FIXME: UNDO
-    enum class Transport : uint8_t {
-        None = 0,
-        SPI = 1U << 0,
-        WebSocket = 1U << 1,
-        RS485 = 1U << 2,
-    };
-    // using Transport = SPIOnlyTransport;
+    using Transport = SPIOnlyTransport;
     using Limits = PubSubConfig;
 };
 
@@ -69,7 +69,7 @@ template <> struct NodeTraits<NodeName::InputOutput> {
 
     enum class Transport : uint8_t {
         None = 0,
-        RS485 = 1U << 1,
+        RS485 = 1U << 0,
     };
     using Limits = PubSubConfig;
 };

@@ -1,11 +1,13 @@
 #pragma once
 
+#include "Audio/Interfaces/AnalyzerConfig.hpp"
 #include "Audio/Interfaces/Types.hpp"
 #include "Audio/detail/BeatTracker.hpp"
 #include "Audio/detail/I2SSource.hpp"
 #include "Audio/detail/MagnitudeCache.hpp"
 #include "Audio/detail/PlatformSelect.hpp"
 #include "Audio/detail/Types.hpp"
+#include "AudioTools/CoreAudio/AudioTypes.h"
 #include "Base/HasLifecycle.hpp"
 #include "Base/HasTaskController.hpp"
 #include "Macros/Facade.hpp"
@@ -238,16 +240,16 @@ class FftAnalyzer : public HasLifecycle<FftAnalyzer, FftAnalyzerConfig>,
             return 0.0F;
         }
 
-        const auto f2 =
+        const auto freq2 =
             static_cast<double>(frequencyHz) * static_cast<double>(frequencyHz);
-        const auto numerator = (12200.0 * 12200.0) * f2 * f2;
+        const auto numerator = (12200.0 * 12200.0) * freq2 * freq2;
         const auto denominator =
-            (f2 + (20.6 * 20.6)) *
-            std::sqrt((f2 + (107.7 * 107.7)) * (f2 + (737.9 * 737.9))) *
-            (f2 + (12200.0 * 12200.0));
+            (freq2 + (20.6 * 20.6)) *
+            std::sqrt((freq2 + (107.7 * 107.7)) * (freq2 + (737.9 * 737.9))) *
+            (freq2 + (12200.0 * 12200.0));
         const auto ratio = numerator / denominator;
-        const auto db = 2.0 + (20.0 * std::log10(ratio));
-        return static_cast<float>(std::pow(10.0, db / 20.0));
+        const auto decibels = 2.0 + (20.0 * std::log10(ratio));
+        return static_cast<float>(std::pow(10.0, decibels / 20.0));
     }
 
     static void _onFftResult(Platform::AudioFftBase &fft) {
@@ -378,11 +380,11 @@ class FftAnalyzer : public HasLifecycle<FftAnalyzer, FftAnalyzerConfig>,
     }
 
     I2SSource &_source;
-    Platform::FftSink _fft{};
-    Platform::AudioFftConfig _fftConfig{};
+    Platform::FftSink _fft;
+    Platform::AudioFftConfig _fftConfig;
     Platform::StreamCopier _copier{0};
-    Platform::HammingWindow _hamming{};
-    Platform::HannWindow _hann{};
+    Platform::HammingWindow _hamming;
+    Platform::HannWindow _hann;
     std::array<BandPlan, fftBandCount> _bandPlan{};
     MagnitudeCache _magnitudeCache{};
     BeatTracker _beatTracker{};

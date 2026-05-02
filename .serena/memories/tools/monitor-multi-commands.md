@@ -1,0 +1,1 @@
+For this project, `bin/monitor-multi` can both monitor and send console commands to live nodes. Prefix input with `!<node> <command>`, e.g. `!master /monitor` to send `/monitor` to the master node. Use `/metrics` or monitor-related commands through this path when inspecting live transport/PubSub state.

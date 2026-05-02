@@ -16,6 +16,37 @@
 
 namespace Totem::Monitoring::detail {
 
+static constexpr const char *task_state_str(TaskController::State state) {
+    switch (state) {
+    case TaskController::State::Stopped:
+        return "X";
+    case TaskController::State::Starting:
+        return "B";
+    case TaskController::State::Running:
+        return "R";
+    case TaskController::State::Stopping:
+        return "H";
+    default:
+        return "?";
+    }
+}
+
+static constexpr const char *
+platform_state_str(TaskController::PlatformState state) {
+    switch (state) {
+    case TaskController::PlatformState::Running:
+        return "R";
+    case TaskController::PlatformState::Ready:
+        return "W";
+    case TaskController::PlatformState::Blocked:
+        return "B";
+    case TaskController::PlatformState::Suspended:
+        return "S";
+    default:
+        return "?";
+    }
+}
+
 inline static ReturnCode dump_monitoring_snaphot(const MonitoringFrame &frame) {
     _log_i("Monitoring snapshot at timestamp %lu:", frame.timestamp);
 
@@ -62,14 +93,14 @@ inline static ReturnCode dump_monitoring_snaphot(const MonitoringFrame &frame) {
             task.config != nullptr ? task.config->stackSize : 0;
         if (stackSize > 0 && task.stackLowestFree <= stackSize) {
             _log_i(
-                "    %2zu: " SV_FMT " -> " SV_FMT " <%s" SV_FMT SV_FMT
+                "    %2zu: " SV_FMT " -> " SV_FMT " <%s%s%s>"
                 "> p%3u @ c%2d "
                 "(%5zuB / %5zuB = %6.2f%%) %6.2f%% in %8zums | %6.2f%% total",
                 i,
                 SV_ARG(task.sourceName, TaskRegistryConfig::sourceNameMaxLen),
                 SV_ARG(task.name, -TaskControllerConfig::maxTaskNameLen),
-                task.hasEverStarted ? "S" : "X",
-                SV_ARG(magic_enum::enum_name(task.state)),
+                task.hasEverStarted ? "S" : "X", task_state_str(task.state),
+                platform_state_str(task.platformState),
                 SV_ARG(magic_enum::enum_name(task.platformState)),
                 task.currentPriority, task.coreId,
                 stackSize - task.stackLowestFree, stackSize,
@@ -78,16 +109,14 @@ inline static ReturnCode dump_monitoring_snaphot(const MonitoringFrame &frame) {
             continue;
         }
 
-        _log_i("    %2zu: " SV_FMT " -> " SV_FMT " <%s" SV_FMT SV_FMT
+        _log_i("    %2zu: " SV_FMT " -> " SV_FMT " <%s%s%s>"
                "> p%3u @ c%2d "
                "( low %5luB              ) %6.2f%% in %8zums | %6.2f%% total",
                i, SV_ARG(task.sourceName, TaskRegistryConfig::sourceNameMaxLen),
                SV_ARG(task.name, -TaskControllerConfig::maxTaskNameLen),
-               task.hasEverStarted ? "S" : "X",
-               SV_ARG(magic_enum::enum_name(task.state)),
-               SV_ARG(magic_enum::enum_name(task.platformState)),
-               task.currentPriority, task.coreId,
-               static_cast<unsigned long>(task.stackLowestFree),
+               task.hasEverStarted ? "S" : "X", task_state_str(task.state),
+               platform_state_str(task.platformState), task.currentPriority,
+               task.coreId, static_cast<unsigned long>(task.stackLowestFree),
                (double)task.runTimeDeltaPct, task.timestampDelta,
                (double)task.runTimeTotalPct);
     }

@@ -1,10 +1,19 @@
 #pragma once
 
-#include "Audio/Interfaces/Types.hpp"
+#include "Audio/Interfaces/AnalyzerConfig.hpp"
+#include "Audio/Interfaces/SourceConfig.hpp"
+#include "Platform/Hardware.hpp"
 #include "Wire/Spi/Interfaces/SlaveConfig.hpp"
+#include "Wire/Spi/Interfaces/Types.hpp"
 
 inline Totem::Audio::I2SSourceConfig i2sSourceConfig{
     .device = Totem::Audio::I2SDevicePreset::LegacySoundCard,
+    .pins =
+        {
+            .bitClock = Pin::GPIO25,
+            .wordSelect = Pin::GPIO32,
+            .dataIn = Pin::GPIO33,
+        },
 };
 
 inline Totem::Audio::FftAnalyzerConfig fftAnalyzerConfig{};

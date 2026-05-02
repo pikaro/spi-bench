@@ -2,13 +2,16 @@
 
 #pragma once
 
-#include "esp_idf_version.h"
+#include "Audio/Interfaces/SourceConfig.hpp"
+#include "AudioTools/AudioLibs/AudioFFT.h"
+#include "AudioTools/CoreAudio/AudioI2S/I2SConfigESP32V1.h"
+#include "AudioTools/CoreAudio/AudioTypes.h"
 
 #include "Audio/Interfaces/Types.hpp"
-#include "Audio/detail/Types.hpp"
 #include "AudioTools/AudioLibs/AudioRealFFT.h"
 #include "AudioTools/AudioLibs/FFT/FFTWindows.h"
 #include "AudioTools/CoreAudio/AudioI2S/I2SStream.h"
+#include "AudioTools/CoreAudio/BaseStream.h"
 #include "AudioTools/CoreAudio/StreamCopy.h"
 #include "Macros/Facade.hpp"
 #include "Types/Error.hpp"
@@ -67,7 +70,7 @@ class I2SInputStream {
 
     I2SInputStream() = default;
 
-    ReturnCode begin(const I2SDeviceConfig &config) {
+    ReturnCode begin(const I2SPins &pins, const I2SDeviceConfig &config) {
         FAIL_IF(_active, ERR(CoreError, InvalidState),
                 "I2S input stream already active");
         FAIL_IF(!config.validate(), ERR(CoreError, InvalidArgument),
@@ -81,12 +84,10 @@ class I2SInputStream {
         platformConfig.is_master = config.role == I2SRole::Master;
         platformConfig.i2s_format = toPlatformFormat(config.format);
         platformConfig.channel_format = toPlatformChannel(config.channel);
-        platformConfig.pin_bck = config.pins.bitClock;
-        platformConfig.pin_ws = config.pins.wordSelect;
-        platformConfig.pin_data = config.pins.dataIn;
-        platformConfig.pin_data_rx = config.pins.dataIn;
-        platformConfig.buffer_size = config.dmaBufferSize;
-        platformConfig.buffer_count = config.dmaBufferCount;
+        platformConfig.pin_bck = static_cast<int>(pins.bitClock);
+        platformConfig.pin_ws = static_cast<int>(pins.wordSelect);
+        platformConfig.pin_data = static_cast<int>(pins.dataIn);
+        platformConfig.pin_data_rx = static_cast<int>(pins.dataIn);
         platformConfig.use_apll = config.useApll;
 
         FAIL_IF(!_stream.begin(platformConfig), ERR(CoreError, OperationFailed),
@@ -123,7 +124,7 @@ class I2SInputStream {
     audio_tools::AudioStream &stream() { return _stream; }
 
   private:
-    audio_tools::I2SStream _stream{};
+    audio_tools::I2SStream _stream;
     AudioInfo _info{};
     bool _active = false;
 };

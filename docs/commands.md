@@ -5,7 +5,9 @@ These are the primary project commands currently used in practice.
 ## Build
 
 - Build the active master target: `bin/build -e master`
-- Build the active SPI slave/media target: `bin/build -e media`
+- Build the active media SPI target: `bin/build -e media`
+- Build the active GPU0 SPI target: `bin/build -e gpu0`
+- Build the active IO RS485 target: `bin/build -e io`
 - Build and emit a compilation database: `pio run -e master -t compiledb`
 
 Build output notes:
@@ -33,6 +35,8 @@ Build output notes:
 - Monitor one environment: `bin/monitor master`
 - Monitor multiple environments with prefixed output:
     `bin/monitor-multi master media`
+- Override monitor baud:
+    `bin/monitor-multi --baud 115200 io`
 - Reset or upload before monitoring:
     `bin/monitor-multi --reset master`
     `bin/monitor-multi --upload master`
@@ -47,20 +51,24 @@ Build output notes:
 - Collapse repeated matching lines:
     `bin/monitor-multi --strip-ansi --include 'SPI write failed' --summary master`
 
-`bin/monitor-multi` allocates a pseudo-terminal for each PlatformIO monitor so
-PlatformIO's interactive serial monitor can start in the background. The first
-instance for an environment owns the serial monitor and writes a per-environment
-spool file under `/tmp`; later instances for the same environment attach to that
-spool and apply their own filters. A single FIFO is not used for monitor output
-because multiple FIFO readers split bytes instead of each receiving the full
-stream.
+`bin/monitor-multi` resolves each owned device with `bin/select_port.py`, runs
+optional pre-ops, then starts `pio device monitor` directly inside a
+pseudo-terminal. The first instance for an environment owns the serial monitor
+and writes a per-environment spool file under `/tmp`; later instances for the
+same environment attach to that spool and apply their own filters. A single FIFO
+is not used for monitor output because multiple FIFO readers split bytes instead
+of each receiving the full stream.
 
 The timeout option accepts `ms`, `s`, and `m` suffixes. `--include` and
 `--exclude` may be repeated and match the prefixed, ANSI-stripped line.
-`--reset` and `--upload` pass `RESET=true` and `UPLOAD=true` respectively to
-owned `bin/monitor` subprocesses, matching the environment-variable behavior of
-`bin/monitor`. These options require owning the monitor for the requested
-environment; attached follower instances cannot reset or upload.
+Use `--baud` for non-default monitor baud rates; trailing positional baud
+arguments are not supported.
+`--upload` runs `pio run -e <env> --target upload` for every owned environment
+before any monitor starts. `--reset` runs `pio run -e <env> --target reset` for
+every owned environment after uploads and before any monitor starts; reset
+commands are launched as one stage so final boot timing is closely aligned.
+These options require owning the monitor for the requested environment; attached
+follower instances cannot reset or upload.
 
 When running interactively, send a command to a specific board with
 `!<env> <command>`, for example `!master /monitor`. If the current instance is
@@ -92,10 +100,10 @@ Implementation notes:
 
 ## Environment Notes
 
-- `master` and `media` are the active environments for the current SPI Clock
-    and PubSub hardware loop
-- `gpu0`, `gpu1`, and `io` are present but should be built only when the task
-    involves those source roots
+- `master`, `media`, `gpu0`, and `io` are the active environments for the
+    current hardware PubSub star loop.
+- `gpu1` is present through the shared GPU source root but is not part of the
+    active hardware topology yet.
 - `slave` is not defined in the current `platformio.ini`
 
 Use other environments only when the task explicitly involves that work

@@ -415,7 +415,8 @@ class BaseTransport : public HasLifecycle<BaseTransport>,
     }
 
     [[nodiscard]] static bool _isRecoverableIngressError(ReturnCode error) {
-        return error == ERR(CoreError, InvalidData);
+        return error == ERR(CoreError, InvalidData) ||
+               error == ERR(AlreadyExists);
     }
 
     ReturnCode _observeAvailability() {

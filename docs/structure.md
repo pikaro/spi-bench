@@ -25,9 +25,10 @@ areas.
 ## Source Roots
 
 - `src/master/`: current master execution target
-- `src/media/`: current point-to-point SPI slave/media execution target
-- `src/gpu/`: shared source root for `gpu0` and `gpu1`
-- `src/io/`: input/output side-node execution target
+- `src/media/`: current media SPI slave execution target on the low-speed bus
+- `src/gpu/`: shared source root for `gpu0` and `gpu1`; GPU0 is active on the
+    high-speed bus in the current hardware PubSub star, GPU1 is not
+- `src/io/`: input/output side-node execution target over RS485
 
 The source root used in a build is selected by `src/CMakeLists.txt` from the
 current PlatformIO environment.
@@ -78,6 +79,10 @@ Wire-level helpers that are reused across physical transports belong in
 `include/Wire/detail/`. `Wire/detail/AttentionLine.hpp` is one such helper: it
 owns the active-low open-drain GPIO attention-line behavior used by RS485 and
 SPI while transport-specific code decides which side observes or drives it.
+CRC helpers shared by wire transports and PubSub serialization live under
+`include/Platform/Crc/`; `PlatformSelect.hpp` selects the active backend while
+the generic CRCpp and ESP-IDF ROM-backed implementations stay split for
+benchmarking and portability.
 
 ## Editing Guidance
 

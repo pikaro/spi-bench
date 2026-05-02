@@ -1,6 +1,5 @@
 #pragma once
 
-#include "Audio/Interfaces/Types.hpp"
 #include "Audio/detail/FftAnalyzer.hpp"
 #include "Audio/detail/I2SSource.hpp"
 

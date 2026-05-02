@@ -65,6 +65,7 @@ template <class Link> class SpiTransport : public BaseTransport {
         std::array<std::byte, Base::bufferSize> data{};
         size_t size = 0;
         bool occupied = false;
+        bool acknowledgeOnComplete = false;
     };
 
   public:
@@ -184,6 +185,7 @@ template <class Link> class SpiTransport : public BaseTransport {
             slot->size = frameSize;
             slot->transport = this;
             slot->occupied = true;
+            slot->acknowledgeOnComplete = true;
 
             detail::log_trace_packet("spi.tx.prepared", item->envelope.header,
                                      _instanceName.data());
@@ -196,8 +198,7 @@ template <class Link> class SpiTransport : public BaseTransport {
             };
             auto sendRet = _link.send(request);
             if (!sendRet.ok()) {
-                slot->occupied = false;
-                slot->transport = nullptr;
+                *slot = {};
                 detail::metrics().addSpiFail();
                 _statsTxFailed.fetch_add(1, std::memory_order_relaxed);
                 FAIL(sendRet,
@@ -227,10 +228,10 @@ template <class Link> class SpiTransport : public BaseTransport {
         return self->_link.ready();
     }
 
-    static ReturnCode _sendCallback(void * /*transport*/,
-                                    const Header & /*header*/,
-                                    std::span<const std::byte> /*frame*/) {
-        return ERR(CoreError, InvalidState);
+    static ReturnCode _sendCallback(void *transport, const Header &header,
+                                    std::span<const std::byte> frame) {
+        auto *self = static_cast<SpiTransport *>(transport);
+        return self->_sendRawFrame(header, frame);
     }
 
     static std::expected<size_t, ReturnCode>
@@ -343,10 +344,11 @@ template <class Link> class SpiTransport : public BaseTransport {
         }
 
         auto envelope = slot.envelope;
-        detail::log_trace_packet("spi.tx.complete", envelope.header,
+        const auto header = slot.header;
+        const auto shouldAck = slot.acknowledgeOnComplete;
+        detail::log_trace_packet("spi.tx.complete", header,
                                  _instanceName.data());
-        slot.occupied = false;
-        slot.transport = nullptr;
+        slot = {};
 
         if (!result.result.ok()) {
             detail::metrics().addSpiFail();
@@ -355,17 +357,20 @@ template <class Link> class SpiTransport : public BaseTransport {
                 _log_v(SV_FMT
                        ": SPI write timed out for PubSub message %u: "
                        ERR_FMT,
-                       SV_ARG(_instanceName), envelope.header.messageId,
+                       SV_ARG(_instanceName), header.messageId,
                        ERR_ARG(result.result));
             } else {
                 _log_w(SV_FMT
                        ": SPI write failed for PubSub message %u: " ERR_FMT,
-                       SV_ARG(_instanceName), envelope.header.messageId,
+                       SV_ARG(_instanceName), header.messageId,
                        ERR_ARG(result.result));
             }
         } else {
             detail::metrics().addSpiAck();
             _statsTxAcked.fetch_add(1, std::memory_order_relaxed);
+        }
+        if (!shouldAck) {
+            return OK();
         }
         auto ackRet = _ack(envelope);
         if (!ackRet.ok()) {
@@ -379,6 +384,46 @@ template <class Link> class SpiTransport : public BaseTransport {
             }
         }
         return ackRet;
+    }
+
+    ReturnCode _sendRawFrame(const Header &header,
+                             std::span<const std::byte> frame) {
+        FAIL_IF(frame.size() > Base::bufferSize, ERR(CoreError, Overflow),
+                "Raw SPI PubSub frame exceeds transport buffer size");
+        auto *slot = _findFreeInFlight();
+        if (slot == nullptr) {
+            detail::metrics().addSpiDrop();
+            _statsTxInFlightFull.fetch_add(1, std::memory_order_relaxed);
+            return ERR(CoreError, Overflow);
+        }
+
+        std::memcpy(slot->data.data(), frame.data(), frame.size());
+        slot->header = header;
+        slot->size = frame.size();
+        slot->transport = this;
+        slot->occupied = true;
+        slot->acknowledgeOnComplete = false;
+
+        detail::log_trace_packet("spi.tx.raw.prepared", header,
+                                 _instanceName.data());
+        auto request = Wire::WriteRequest{
+            .owner = slot,
+            .payloadType = Wire::PayloadType::PubSub,
+            .data = std::span<const std::byte>{slot->data.data(), slot->size},
+            .onComplete = _onWireWriteComplete,
+        };
+        auto sendRet = _link.send(request);
+        if (!sendRet.ok()) {
+            *slot = {};
+            detail::metrics().addSpiFail();
+            _statsTxFailed.fetch_add(1, std::memory_order_relaxed);
+            return sendRet;
+        }
+        detail::metrics().addSpiTx();
+        _statsTxQueued.fetch_add(1, std::memory_order_relaxed);
+        detail::log_trace_packet("spi.tx.raw.queued", header,
+                                 _instanceName.data());
+        return OK();
     }
 
     ReturnCode _ensureRxFrameQueue() {

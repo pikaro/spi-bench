@@ -11,11 +11,11 @@ inline Totem::Wire::Rs485::MasterConfig rs485MasterConfig{
             .uartNumber = 1,
             .pins =
                 {
-                    .txPin = Pin::GPIO12,
-                    .rxPin = Pin::GPIO13,
+                    .txPin = Pin::GPIO1,
+                    .rxPin = Pin::GPIO2,
                 },
         },
-    .attentionPin = Pin::GPIO1,
+    .attentionPin = Pin::GPIO14,
 };
 
 inline Totem::Wire::Spi::MasterConfig spiMasterBusHighSpeedConfig{
@@ -55,8 +55,9 @@ inline Totem::Wire::Spi::MasterConfig spiMasterBusLowSpeedConfig{
             .pins =
                 {
                     .mosiPin = Pin::GPIO21,
-                    .misoPin = Pin::GPIO36,
-                    .sclkPin = Pin::GPIO37,
+                    // PSRAM disabled
+                    .misoPin = Pin::PsramGPIO36,
+                    .sclkPin = Pin::PsramGPIO37,
                 },
             .maxTransferSize = 4096,
         },

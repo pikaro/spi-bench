@@ -102,6 +102,22 @@ class SerDe {
         return header;
     }
 
+    static std::expected<Header, ReturnCode>
+    tryPeekHeader(std::span<const std::byte> frame) {
+        if (frame.size() < headerSize + overheadSize) {
+            return std::unexpected(ERR(CoreError, InvalidData));
+        }
+        auto headerResult = decodeHeader(frame.first(headerSize));
+        if (!headerResult) {
+            return std::unexpected(headerResult.error());
+        }
+        auto header = *headerResult;
+        if (encodedSize(header) != frame.size()) {
+            return std::unexpected(ERR(CoreError, InvalidData));
+        }
+        return header;
+    }
+
     static ReturnCode validateFrame(std::span<const std::byte> frame,
                                     const Header &header) {
         FAIL_IF(encodedSize(header) != frame.size(), ERR(CoreError, InvalidData),

@@ -28,6 +28,38 @@ Build output notes:
 - `bin/gdb master` is a wrapper which starts GDB with the correct target and
     firmware file for the `master` environment
 
+## Monitor
+
+- Monitor one environment: `bin/monitor master`
+- Monitor multiple environments with prefixed output:
+    `bin/monitor-multi master media`
+- Capture a bounded, plain-text sample:
+    `bin/monitor-multi --timeout 5s --strip-ansi master media`
+- Capture only high-signal lines:
+    `bin/monitor-multi --timeout 10s --strip-ansi --include 'WRN|ERR' master`
+- Stop after a small number of printed lines:
+    `bin/monitor-multi --strip-ansi --include RS485 --max-lines 5 master`
+- Keep a full local log while printing filtered output:
+    `bin/monitor-multi --strip-ansi --include WRN --log-file /tmp/master.log master`
+- Collapse repeated matching lines:
+    `bin/monitor-multi --strip-ansi --include 'SPI write failed' --summary master`
+
+`bin/monitor-multi` allocates a pseudo-terminal for each PlatformIO monitor so
+PlatformIO's interactive serial monitor can start in the background. The first
+instance for an environment owns the serial monitor and writes a per-environment
+spool file under `/tmp`; later instances for the same environment attach to that
+spool and apply their own filters. A single FIFO is not used for monitor output
+because multiple FIFO readers split bytes instead of each receiving the full
+stream.
+
+The timeout option accepts `ms`, `s`, and `m` suffixes. `--include` and
+`--exclude` may be repeated and match the prefixed, ANSI-stripped line.
+
+When running interactively, send a command to a specific board with
+`!<env> <command>`, for example `!master /monitor`. If the current instance is
+only attached to another instance's spool, the command is forwarded through a
+per-environment command FIFO to the owner process.
+
 ## Generated Wire Code
 
 Generate wire support code for the current PlatformIO environment:

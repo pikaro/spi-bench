@@ -1,0 +1,1 @@
+RS485 uses the project ESP32 UART wrapper in normal two-pin UART mode. It does not enable one-wire UART or ESP-IDF RS485 half-duplex mode. Configure separate MCU GPIOs for TX/DI and RX/RO. A same-pin TX/RX config can still show RX activity on the transceiver, but the MCU UART can remain effectively deaf because the TX output holds the pad idle/high.

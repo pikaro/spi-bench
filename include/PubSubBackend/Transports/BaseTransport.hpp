@@ -213,24 +213,63 @@ class BaseTransport : public HasLifecycle<BaseTransport>,
                        SV_ARG(_instanceName), *receiveResult);
                 auto frame = std::span<const std::byte>{receiveBuffer.data(),
                                                         *receiveResult};
+                auto headerResult = detail::SerDe::tryPeekHeader(frame);
+                if (!headerResult) {
+                    _log_w(SV_FMT
+                           ": dropping invalid transport ingress frame "
+                           "of %zu bytes: " ERR_FMT,
+                           SV_ARG(_instanceName), frame.size(),
+                           ERR_ARG(headerResult.error()));
+                    ++count;
+                    continue;
+                }
                 if (_ingressDispatchCallback != nullptr) {
-                    FAIL_IF_UNEXPECTED_FWD(
-                        handled,
-                        _ingressDispatchCallback(
-                            _pubSubNode, frame,
-                            detail::IngressContext{
-                                .transportId = _transportId,
-                            }),
-                        "Failed to dispatch transport ingress frame");
+                    auto dispatchResult = _ingressDispatchCallback(
+                        _pubSubNode, frame,
+                        detail::IngressContext{
+                            .transportId = _transportId,
+                        });
+                    if (!dispatchResult) {
+                        auto error = dispatchResult.error();
+                        if (_isRecoverableIngressError(error)) {
+                            _log_w(SV_FMT
+                                   ": dropping invalid transport ingress "
+                                   "frame of %zu bytes while dispatching: "
+                                   ERR_FMT,
+                                   SV_ARG(_instanceName), frame.size(),
+                                   ERR_ARG(error));
+                            ++count;
+                            continue;
+                        }
+                        FAIL(error,
+                             "Failed to dispatch transport ingress frame: "
+                             ERR_FMT,
+                             ERR_ARG(error));
+                    }
+                    auto handled = *dispatchResult;
                     if (handled) {
                         ++count;
                         continue;
                     }
                 }
-                FAIL_IF_UNEXPECTED_FWD(
-                    envelope,
-                    _ingress.storeFrame(frame),
-                    "Failed to store received frame in ingress");
+                auto storeResult = _ingress.storeFrame(frame);
+                if (!storeResult) {
+                    auto error = storeResult.error();
+                    if (_isRecoverableIngressError(error)) {
+                        _log_w(SV_FMT
+                               ": dropping invalid transport ingress frame "
+                               "of %zu bytes while storing: " ERR_FMT,
+                               SV_ARG(_instanceName), frame.size(),
+                               ERR_ARG(error));
+                        ++count;
+                        continue;
+                    }
+                    FAIL(error,
+                         "Failed to store received frame in ingress: "
+                         ERR_FMT,
+                         ERR_ARG(error));
+                }
+                auto envelope = std::move(*storeResult);
                 if (!envelope.has_value()) {
                     ++count;
                     continue;
@@ -341,6 +380,10 @@ class BaseTransport : public HasLifecycle<BaseTransport>,
             return true;
         }
         return _availableCallback(_transport);
+    }
+
+    [[nodiscard]] static bool _isRecoverableIngressError(ReturnCode error) {
+        return error == ERR(CoreError, InvalidData);
     }
 
     ReturnCode _observeAvailability() {

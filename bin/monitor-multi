@@ -1,0 +1,817 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import argparse
+import errno
+import fcntl
+import os
+import pty
+import re
+import selectors
+import signal
+import subprocess
+import sys
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import TextIO
+
+
+LOCK_DIR = Path("/tmp")
+BLUE = "\033[34m"
+RESET = "\033[0m"
+ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+STDIN = object()
+
+
+@dataclass
+class Monitor:
+    env: str
+    label: str
+    plain_label: str
+    pid: int | None = None
+    fd: int | None = None
+    spool_path: Path | None = None
+    spool_reader: TextIO | None = None
+    spool_writer: TextIO | None = None
+    command_fd: int | None = None
+    command_keepalive_fd: int | None = None
+    buffer: str = ""
+    command_buffer: str = ""
+
+
+@dataclass
+class Config:
+    envs: list[str]
+    baud: str | None
+    timeout: float | None
+    strip_ansi: bool
+    include: list[re.Pattern[str]]
+    exclude: list[re.Pattern[str]]
+    summary: bool
+    max_lines: int | None
+    log_file: Path | None
+
+
+@dataclass
+class SummaryEntry:
+    count: int
+    first: str
+    last: str
+
+
+@dataclass
+class Runtime:
+    config: Config
+    log: TextIO | None
+    printed_lines: int = 0
+    stop_reason: str | None = None
+    ignored_stdin_warned: bool = False
+    summary: dict[tuple[str, str], SummaryEntry] = field(default_factory=dict)
+
+
+def parse_duration(value: str) -> float:
+    suffixes = {
+        "ms": 0.001,
+        "s": 1.0,
+        "m": 60.0,
+    }
+    raw_value = value
+    value = value.strip().lower()
+    multiplier = 1.0
+
+    for suffix, suffix_multiplier in suffixes.items():
+        if value.endswith(suffix):
+            value = value[: -len(suffix)]
+            multiplier = suffix_multiplier
+            break
+
+    try:
+        duration = float(value) * multiplier
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"invalid duration: {raw_value!r}"
+        ) from exc
+
+    if duration <= 0:
+        raise argparse.ArgumentTypeError("duration must be greater than zero")
+
+    return duration
+
+
+def parse_regex(value: str) -> re.Pattern[str]:
+    try:
+        return re.compile(value)
+    except re.error as exc:
+        raise argparse.ArgumentTypeError(
+            f"invalid regular expression {value!r}: {exc}"
+        ) from exc
+
+
+def parse_positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"invalid integer: {value!r}") from exc
+
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("value must be greater than zero")
+
+    return parsed
+
+
+def parse_args(argv: list[str]) -> Config:
+    parser = argparse.ArgumentParser(usage="%(prog)s [options] <env...> [baud]")
+    parser.add_argument(
+        "-t",
+        "--timeout",
+        type=parse_duration,
+        help="stop after the given duration; supports ms, s, and m suffixes",
+    )
+    parser.add_argument(
+        "--strip-ansi",
+        action="store_true",
+        help="remove ANSI escape sequences from monitor output",
+    )
+    parser.add_argument(
+        "--include",
+        action="append",
+        default=[],
+        type=parse_regex,
+        metavar="REGEX",
+        help="print only monitor lines matching REGEX; may be repeated",
+    )
+    parser.add_argument(
+        "--exclude",
+        action="append",
+        default=[],
+        type=parse_regex,
+        metavar="REGEX",
+        help="suppress monitor lines matching REGEX; may be repeated",
+    )
+    parser.add_argument(
+        "--summary",
+        action="store_true",
+        help="print the first matching line and summarize repeats at exit",
+    )
+    parser.add_argument(
+        "--max-lines",
+        type=parse_positive_int,
+        help="stop after printing this many monitor lines",
+    )
+    parser.add_argument(
+        "--log-file",
+        type=Path,
+        help="append the full prefixed monitor stream to PATH before filtering",
+    )
+    parser.add_argument("args", nargs="+", metavar="env/baud")
+    parsed = parser.parse_args(argv)
+
+    baud: str | None = None
+    envs = parsed.args
+    if parsed.args[-1] in {"h", "l"} or parsed.args[-1].isdigit():
+        baud = parsed.args[-1]
+        envs = parsed.args[:-1]
+
+    if not envs:
+        parser.error("at least one environment is required")
+
+    if len(set(envs)) != len(envs):
+        parser.error("duplicate environments are not supported")
+
+    return Config(
+        envs=envs,
+        baud=baud,
+        timeout=parsed.timeout,
+        strip_ansi=parsed.strip_ansi,
+        include=parsed.include,
+        exclude=parsed.exclude,
+        summary=parsed.summary,
+        max_lines=parsed.max_lines,
+        log_file=parsed.log_file,
+    )
+
+
+def git_root() -> Path:
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return Path(result.stdout.strip())
+
+
+def plain_label_for(env: str, width: int) -> str:
+    return f"{env:<{width}}"
+
+
+def label_for(env: str, width: int, color: bool) -> str:
+    label = plain_label_for(env, width)
+    if color:
+        return f"{BLUE}{label}{RESET}"
+    return label
+
+
+def safe_env_name(env: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", env)
+
+
+def spool_path_for(env: str) -> Path:
+    return LOCK_DIR / f"monitor-multi.{safe_env_name(env)}.spool"
+
+
+def command_path_for(env: str) -> Path:
+    return LOCK_DIR / f"monitor-multi.{safe_env_name(env)}.cmd"
+
+
+def ensure_command_fifo(env: str) -> tuple[int, int]:
+    path = command_path_for(env)
+    try:
+        os.mkfifo(path, 0o600)
+    except FileExistsError:
+        pass
+
+    read_fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    keepalive_fd = os.open(path, os.O_WRONLY | os.O_NONBLOCK)
+    return read_fd, keepalive_fd
+
+
+def spawn_monitor(
+    root: Path,
+    env: str,
+    config: Config,
+    width: int,
+    spool_writer: TextIO,
+) -> Monitor:
+    command = [str(root / "bin" / "monitor"), env]
+    if config.baud is not None:
+        command.append(config.baud)
+
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.execv(command[0], command)
+
+    os.set_blocking(fd, False)
+    command_fd, command_keepalive_fd = ensure_command_fifo(env)
+    print(f"{env}: {' '.join(command)}", file=sys.stderr)
+    return Monitor(
+        env=env,
+        label=label_for(env, width, sys.stdout.isatty() and not config.strip_ansi),
+        plain_label=plain_label_for(env, width),
+        pid=pid,
+        fd=fd,
+        spool_path=spool_path_for(env),
+        spool_writer=spool_writer,
+        command_fd=command_fd,
+        command_keepalive_fd=command_keepalive_fd,
+    )
+
+
+def attach_spool(env: str, config: Config, width: int) -> Monitor:
+    path = spool_path_for(env)
+    deadline = time.monotonic() + 2
+    while not path.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+
+    if not path.exists():
+        raise RuntimeError(
+            f"Monitor for {env!r} is locked, but shared spool {path} does not exist"
+        )
+
+    spool_reader = path.open("r", encoding="utf-8", errors="replace")
+    spool_reader.seek(0, os.SEEK_END)
+    print(f"{env}: attached to {path}", file=sys.stderr)
+    return Monitor(
+        env=env,
+        label=label_for(env, width, sys.stdout.isatty() and not config.strip_ansi),
+        plain_label=plain_label_for(env, width),
+        spool_path=path,
+        spool_reader=spool_reader,
+    )
+
+
+def strip_ansi(text: str) -> str:
+    return ANSI_RE.sub("", text)
+
+
+def format_line(line: str, config: Config) -> str:
+    if config.strip_ansi:
+        return strip_ansi(line)
+    return line
+
+
+def prefixed_line(label: str, line: str) -> str:
+    return f"{label} | {line}"
+
+
+def filter_text(monitor: Monitor, line: str) -> str:
+    return prefixed_line(monitor.plain_label, strip_ansi(line))
+
+
+def matches_filters(monitor: Monitor, line: str, config: Config) -> bool:
+    text = filter_text(monitor, line)
+    if config.include and not any(pattern.search(text) for pattern in config.include):
+        return False
+
+    return not any(pattern.search(text) for pattern in config.exclude)
+
+
+def summary_key(monitor: Monitor, line: str) -> tuple[str, str]:
+    text = strip_ansi(line)
+    text = re.sub(r"\b\d+(?:\.\d+)?\b", "n", text)
+    return (monitor.env, text)
+
+
+def write_log(monitor: Monitor, line: str, runtime: Runtime) -> None:
+    if runtime.log is None:
+        return
+
+    print(
+        prefixed_line(monitor.plain_label, format_line(line, runtime.config)),
+        file=runtime.log,
+    )
+
+
+def write_spool(monitor: Monitor, line: str) -> None:
+    if monitor.spool_writer is None:
+        return
+
+    print(line, file=monitor.spool_writer)
+
+
+def emit_line(monitor: Monitor, line: str, runtime: Runtime) -> None:
+    write_spool(monitor, line)
+    write_log(monitor, line, runtime)
+
+    if not matches_filters(monitor, line, runtime.config):
+        return
+
+    output_line = format_line(line, runtime.config)
+
+    if runtime.config.summary:
+        key = summary_key(monitor, line)
+        entry = runtime.summary.get(key)
+        if entry is not None:
+            entry.count += 1
+            entry.last = output_line
+            return
+
+        runtime.summary[key] = SummaryEntry(
+            count=1,
+            first=output_line,
+            last=output_line,
+        )
+
+    print(prefixed_line(monitor.label, output_line))
+    runtime.printed_lines += 1
+
+    if (
+        runtime.config.max_lines is not None
+        and runtime.printed_lines >= runtime.config.max_lines
+    ):
+        runtime.stop_reason = "max line limit reached"
+
+
+def emit_buffered_lines(
+    monitor: Monitor,
+    runtime: Runtime,
+    final: bool = False,
+) -> None:
+    while "\n" in monitor.buffer:
+        line, monitor.buffer = monitor.buffer.split("\n", 1)
+        if line:
+            emit_line(monitor, line, runtime)
+            if runtime.stop_reason:
+                sys.stdout.flush()
+                return
+
+    if final and monitor.buffer:
+        emit_line(monitor, monitor.buffer, runtime)
+        monitor.buffer = ""
+
+    sys.stdout.flush()
+
+
+def read_monitor(monitor: Monitor, runtime: Runtime) -> bool:
+    if monitor.fd is None:
+        return False
+
+    try:
+        data = os.read(monitor.fd, 4096)
+    except BlockingIOError:
+        return True
+    except OSError as exc:
+        if exc.errno != errno.EIO:
+            raise
+        data = b""
+
+    if not data:
+        return False
+
+    text = data.decode(errors="replace")
+    monitor.buffer += text.replace("\r\n", "\n").replace("\r", "\n")
+    emit_buffered_lines(monitor, runtime)
+    return True
+
+
+def poll_spool(monitor: Monitor, runtime: Runtime) -> None:
+    if monitor.spool_reader is None:
+        return
+
+    if monitor.spool_path is not None:
+        try:
+            if monitor.spool_path.stat().st_size < monitor.spool_reader.tell():
+                monitor.spool_reader.seek(0)
+        except FileNotFoundError:
+            return
+
+    monitor.spool_reader.seek(monitor.spool_reader.tell())
+    while True:
+        line = monitor.spool_reader.readline()
+        if not line:
+            return
+
+        monitor.buffer += line.replace("\r\n", "\n").replace("\r", "\n")
+        emit_buffered_lines(monitor, runtime)
+        if runtime.stop_reason:
+            return
+
+
+def wait_status(pid: int) -> int:
+    _, status = os.waitpid(pid, 0)
+    if os.WIFEXITED(status):
+        return os.WEXITSTATUS(status)
+    if os.WIFSIGNALED(status):
+        return 128 + os.WTERMSIG(status)
+    return 1
+
+
+def terminate(monitors: list[Monitor]) -> None:
+    for monitor in monitors:
+        if monitor.pid is None:
+            continue
+        try:
+            os.killpg(monitor.pid, signal.SIGTERM)
+        except (PermissionError, ProcessLookupError):
+            try:
+                os.kill(monitor.pid, signal.SIGTERM)
+            except (PermissionError, ProcessLookupError):
+                pass
+
+
+def reap(monitors: list[Monitor]) -> None:
+    deadline = time.monotonic() + 2
+    pending = {monitor.pid for monitor in monitors if monitor.pid is not None}
+
+    while pending and time.monotonic() < deadline:
+        for pid in list(pending):
+            try:
+                waited_pid, _ = os.waitpid(pid, os.WNOHANG)
+            except ChildProcessError:
+                pending.remove(pid)
+                continue
+
+            if waited_pid:
+                pending.remove(pid)
+
+        if pending:
+            time.sleep(0.05)
+
+
+def close_fds(monitors: list[Monitor]) -> None:
+    for monitor in monitors:
+        for fd in (monitor.fd, monitor.command_fd, monitor.command_keepalive_fd):
+            if fd is None:
+                continue
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+def close_spools(monitors: list[Monitor]) -> None:
+    for monitor in monitors:
+        for spool in (monitor.spool_reader, monitor.spool_writer):
+            if spool is None:
+                continue
+            try:
+                spool.close()
+            except OSError:
+                pass
+
+
+def request_stop(_signum: int, _frame: object) -> None:
+    raise KeyboardInterrupt
+
+
+def print_summary(runtime: Runtime) -> None:
+    if not runtime.config.summary:
+        return
+
+    repeated = [
+        (env, entry)
+        for (env, _), entry in runtime.summary.items()
+        if entry.count > 1
+    ]
+    if not repeated:
+        return
+
+    width = max(len(env) for env in runtime.config.envs)
+    print("monitor-multi summary:", file=sys.stderr)
+    for env, entry in repeated:
+        label = plain_label_for(env, width)
+        print(prefixed_line(label, f"repeated {entry.count}x"))
+        print(prefixed_line(label, f"first: {entry.first}"))
+        if entry.last != entry.first:
+            print(prefixed_line(label, f"last:  {entry.last}"))
+
+
+def write_to_monitor(monitor: Monitor, command: str) -> None:
+    if monitor.fd is None:
+        raise RuntimeError(f"monitor {monitor.env!r} is not owned by this process")
+
+    os.write(monitor.fd, f"{command}\n".encode())
+
+
+def write_to_owner_fifo(env: str, command: str) -> None:
+    path = command_path_for(env)
+    fd = os.open(path, os.O_WRONLY | os.O_NONBLOCK)
+    try:
+        os.write(fd, f"{command}\n".encode())
+    finally:
+        os.close(fd)
+
+
+def route_command(line: str, by_fd: dict[int, Monitor], runtime: Runtime) -> None:
+    line = line.rstrip("\n")
+    if not line:
+        return
+
+    if not line.startswith("!"):
+        if not runtime.ignored_stdin_warned:
+            print(
+                "monitor-multi: ignoring stdin; use !<env> <command>",
+                file=sys.stderr,
+            )
+            runtime.ignored_stdin_warned = True
+        return
+
+    target, separator, command = line[1:].partition(" ")
+    command = command.lstrip()
+    if not target or not separator or not command:
+        print("monitor-multi: command syntax is !<env> <command>", file=sys.stderr)
+        return
+
+    by_env = {monitor.env: monitor for monitor in by_fd.values()}
+    monitor = by_env.get(target)
+    if monitor is not None:
+        try:
+            write_to_monitor(monitor, command)
+        except (OSError, RuntimeError) as exc:
+            print(f"monitor-multi: failed to send to {target}: {exc}", file=sys.stderr)
+            return
+        print(f"monitor-multi: sent to {target}: {command}", file=sys.stderr)
+        return
+
+    if target not in runtime.config.envs:
+        print(f"monitor-multi: no active monitor for {target!r}", file=sys.stderr)
+        return
+
+    try:
+        write_to_owner_fifo(target, command)
+    except OSError as exc:
+        print(
+            f"monitor-multi: failed to send to owner for {target}: {exc}",
+            file=sys.stderr,
+        )
+        return
+
+    print(f"monitor-multi: sent to owner for {target}: {command}", file=sys.stderr)
+
+
+def read_command_fifo(monitor: Monitor) -> None:
+    if monitor.command_fd is None:
+        return
+
+    try:
+        data = os.read(monitor.command_fd, 4096)
+    except BlockingIOError:
+        return
+
+    if not data:
+        return
+
+    monitor.command_buffer += data.decode(errors="replace")
+    while "\n" in monitor.command_buffer:
+        command, monitor.command_buffer = monitor.command_buffer.split("\n", 1)
+        command = command.strip()
+        if command:
+            try:
+                write_to_monitor(monitor, command)
+            except (OSError, RuntimeError) as exc:
+                print(
+                    f"monitor-multi: failed to route command to {monitor.env}: {exc}",
+                    file=sys.stderr,
+                )
+
+
+def read_stdin(
+    selector: selectors.BaseSelector,
+    by_fd: dict[int, Monitor],
+    runtime: Runtime,
+) -> None:
+    line = sys.stdin.readline()
+    if not line:
+        try:
+            selector.unregister(sys.stdin)
+        except KeyError:
+            pass
+        return
+
+    route_command(line, by_fd, runtime)
+
+
+def finish(monitors: list[Monitor], runtime: Runtime, code: int) -> int:
+    sys.stdout.flush()
+    if runtime.stop_reason:
+        print(f"monitor-multi: {runtime.stop_reason}", file=sys.stderr)
+
+    print_summary(runtime)
+    if runtime.log is not None:
+        runtime.log.flush()
+
+    return code
+
+
+def run(monitors: list[Monitor], runtime: Runtime) -> int:
+    selector = selectors.DefaultSelector()
+    by_fd = {
+        monitor.fd: monitor
+        for monitor in monitors
+        if monitor.fd is not None
+    }
+    by_command_fd = {
+        monitor.command_fd: monitor
+        for monitor in monitors
+        if monitor.command_fd is not None
+    }
+    followers = [monitor for monitor in monitors if monitor.spool_reader is not None]
+    exit_codes: list[int] = []
+    deadline = (
+        None
+        if runtime.config.timeout is None
+        else time.monotonic() + runtime.config.timeout
+    )
+
+    for fd, monitor in by_fd.items():
+        selector.register(fd, selectors.EVENT_READ, monitor)
+
+    for fd, monitor in by_command_fd.items():
+        selector.register(fd, selectors.EVENT_READ, monitor)
+
+    if sys.stdin.isatty():
+        selector.register(sys.stdin, selectors.EVENT_READ, STDIN)
+
+    try:
+        while by_fd or followers:
+            select_timeout = None
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    runtime.stop_reason = "timeout reached"
+                    break
+                select_timeout = remaining
+
+            if followers:
+                select_timeout = (
+                    0.1 if select_timeout is None else min(select_timeout, 0.1)
+                )
+
+            if selector.get_map():
+                events = selector.select(select_timeout)
+            else:
+                time.sleep(0.1 if select_timeout is None else select_timeout)
+                events = []
+
+            for key, _ in events:
+                if key.data is STDIN:
+                    read_stdin(selector, by_fd, runtime)
+                    continue
+
+                if key.fd in by_command_fd:
+                    read_command_fifo(by_command_fd[key.fd])
+                    continue
+
+                monitor = key.data
+                if read_monitor(monitor, runtime):
+                    if runtime.stop_reason:
+                        break
+                    continue
+
+                if monitor.fd is not None:
+                    selector.unregister(monitor.fd)
+                    os.close(monitor.fd)
+                    by_fd.pop(monitor.fd, None)
+
+                if monitor.command_fd is not None:
+                    selector.unregister(monitor.command_fd)
+                    by_command_fd.pop(monitor.command_fd, None)
+
+                emit_buffered_lines(monitor, runtime, final=True)
+                if monitor.pid is not None:
+                    exit_codes.append(wait_status(monitor.pid))
+
+            if runtime.stop_reason:
+                break
+
+            for follower in followers:
+                poll_spool(follower, runtime)
+                if runtime.stop_reason:
+                    break
+
+            if runtime.stop_reason:
+                break
+    except KeyboardInterrupt:
+        runtime.stop_reason = "interrupted"
+        terminate(list(by_fd.values()))
+        reap(list(by_fd.values()))
+        close_fds(list(by_fd.values()))
+        return finish(monitors, runtime, 130)
+
+    if runtime.stop_reason:
+        terminate(list(by_fd.values()))
+        reap(list(by_fd.values()))
+        close_fds(list(by_fd.values()))
+        return finish(monitors, runtime, 0)
+
+    return finish(monitors, runtime, next((code for code in exit_codes if code != 0), 0))
+
+
+def lock_path_for(env: str) -> Path:
+    return LOCK_DIR / f"monitor-multi.{safe_env_name(env)}.lock"
+
+
+def try_lock_instance(env: str) -> TextIO | None:
+    lock_file = lock_path_for(env).open("w")
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        lock_file.close()
+        return None
+
+    return lock_file
+
+
+def open_spool_writer(env: str) -> TextIO:
+    return spool_path_for(env).open("w", encoding="utf-8", buffering=1)
+
+
+def open_log_file(config: Config) -> TextIO | None:
+    if config.log_file is None:
+        return None
+
+    return config.log_file.open("a", buffering=1)
+
+
+def main() -> int:
+    config = parse_args(sys.argv[1:])
+    root = git_root()
+    width = max(len(env) for env in config.envs)
+    signal.signal(signal.SIGTERM, request_stop)
+
+    locks: list[TextIO] = []
+    monitors: list[Monitor] = []
+    log_file = open_log_file(config)
+    try:
+        runtime = Runtime(config=config, log=log_file)
+        for env in config.envs:
+            lock = try_lock_instance(env)
+            if lock is None:
+                monitors.append(attach_spool(env, config, width))
+                continue
+
+            locks.append(lock)
+            monitors.append(
+                spawn_monitor(
+                    root,
+                    env,
+                    config,
+                    width,
+                    open_spool_writer(env),
+                )
+            )
+
+        return run(monitors, runtime)
+    finally:
+        close_fds(monitors)
+        close_spools(monitors)
+        if log_file is not None:
+            log_file.close()
+        for lock in locks:
+            lock.close()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -12,11 +12,12 @@ enum class Esp32OrigPin : uint8_t {
 
     UART0_TX = GPIO_NUM_1,
 
-    GPIO2 = GPIO_NUM_2,
+    StrappingGPIO2 = GPIO_NUM_2,
 
     UART0_RX = GPIO_NUM_3,
 
-    GPIO4 = GPIO_NUM_4,
+    StrappingGPIO4 = GPIO_NUM_4,
+    StrappingGPIO5 = GPIO_NUM_5,
 
     // Reserved for flash
     // GPIO6 = GPIO_NUM_6,
@@ -38,7 +39,6 @@ enum class Esp32OrigPin : uint8_t {
     GPIO16 = GPIO_NUM_16,
     GPIO17 = GPIO_NUM_17,
 
-    GPIO5 = GPIO_NUM_5,
     GPIO18 = GPIO_NUM_18,
     GPIO19 = GPIO_NUM_19,
     GPIO23 = GPIO_NUM_23,
@@ -68,7 +68,7 @@ enum class Esp32OrigPin : uint8_t {
     // GPIO37 = GPIO_NUM_37,
     // GPIO38 = GPIO_NUM_38,
 
-    GPIO39 = GPIO_NUM_39,
+    InputOnlyGPIO39 = GPIO_NUM_39,
 };
 
 } // namespace platform

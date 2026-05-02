@@ -272,8 +272,21 @@ template <class Link> class SpiTransport : public BaseTransport {
         if (payload.size() > Base::bufferSize) {
             detail::metrics().addSpiDrop();
             _statsRxDropped.fetch_add(1, std::memory_order_relaxed);
-            FAIL(ERR(CoreError, Overflow),
-                 "SPI PubSub frame exceeds transport buffer size");
+            _log_w(SV_FMT
+                   ": dropping oversized SPI PubSub frame of %zu bytes",
+                   SV_ARG(_instanceName), payload.size());
+            return OK();
+        }
+        auto headerResult = detail::SerDe::tryPeekHeader(payload);
+        if (!headerResult) {
+            detail::metrics().addSpiDrop();
+            _statsRxDropped.fetch_add(1, std::memory_order_relaxed);
+            _log_w(SV_FMT
+                   ": dropping invalid SPI PubSub frame of %zu bytes: "
+                   ERR_FMT,
+                   SV_ARG(_instanceName), payload.size(),
+                   ERR_ARG(headerResult.error()));
+            return OK();
         }
         FAIL_IF_ERR_FWD(_ensureRxFrameQueue(),
                         "Failed to ensure SPI RX queue for ingress");
@@ -289,11 +302,24 @@ template <class Link> class SpiTransport : public BaseTransport {
         if (!sendRet.ok()) {
             detail::metrics().addSpiDrop();
             _statsRxDropped.fetch_add(1, std::memory_order_relaxed);
+            if (sendRet == ERR(Timeout) || sendRet == ERR(Overflow)) {
+                _log_w(SV_FMT
+                       ": dropping SPI PubSub frame after RX queue "
+                       "backpressure: " ERR_FMT,
+                       SV_ARG(_instanceName), ERR_ARG(sendRet));
+                return OK();
+            }
             FAIL(sendRet, "Failed to enqueue SPI PubSub ingress frame");
         }
         detail::metrics().addSpiRx();
         _statsRxQueued.fetch_add(1, std::memory_order_relaxed);
-        FAIL_IF_ERR_FWD(_wake(), "Failed to wake PubSub after SPI ingress");
+        auto wakeRet = _wake();
+        if (!wakeRet.ok()) {
+            _log_w(SV_FMT
+                   ": accepted SPI PubSub frame but failed to wake PubSub: "
+                   ERR_FMT,
+                   SV_ARG(_instanceName), ERR_ARG(wakeRet));
+        }
         return OK();
     }
 

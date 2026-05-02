@@ -12,6 +12,10 @@ small layers:
   transaction execution.
 - `Master.hpp` / `Slave.hpp`: role-specific handshake policy.
 
+The ESP32 UART wrapper uses normal two-pin UART routing for RS485. Configure
+separate TX/DI and RX/RO GPIOs; the RS485 transceiver does not enable one-wire
+UART mode.
+
 Frame semantics are intentionally split:
 
 - `Data` expects a link `Ack` / `Nack`. This is the path used by the PubSub

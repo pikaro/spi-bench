@@ -126,6 +126,12 @@ template <TransceiverMode Mode> class Transceiver {
         : _ownerName(ownerName), _turn(ownerName) {}
 
     ReturnCode init(UartConfig uartConfig) {
+        FAIL_IF(uartConfig.pins.txPin.has_value() &&
+                    uartConfig.pins.rxPin.has_value() &&
+                    uartConfig.pins.txPin == uartConfig.pins.rxPin,
+                ERR(CoreError, InvalidArgument),
+                "RS485 %s requires distinct UART TX and RX pins",
+                _ownerName);
         FAIL_IF_ERR_FWD(_uart.init(uartConfig),
                         "Failed to initialize UART for RS485 %s", _ownerName);
         _uartConfig = uartConfig;

@@ -123,6 +123,12 @@ transport enqueue failure after in-flight storage should release that target and
 drop the frame for that transport instead of stopping the PubSub task; later
 availability replay is responsible for control-plane recovery.
 
+Malformed transport ingress frames are recoverable. Transports should drop
+frames that fail the fixed PubSub header/size check and keep the PubSub runner
+alive. SPI PubSub ingress also treats RX queue backpressure as a local drop
+instead of NACKing the peer, because current wire write NACKs release the
+sender's PubSub frame rather than retrying it.
+
 ## Scheduling Rules
 
 PubSub tasks are event-driven. They should use task notifications for early

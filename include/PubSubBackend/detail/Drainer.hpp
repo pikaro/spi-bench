@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Macros/Facade.hpp"
+#include "Mutex/Facade.hpp"
 #include "PubSubBackend/Interfaces/Envelope.hpp"
 #include "PubSubBackend/detail/ControlPlane.hpp"
 #include "PubSubBackend/detail/Publisher.hpp"
@@ -52,26 +53,40 @@ class Drainer {
     ReturnCode ack(Spec::Transport transportId, const Envelope &envelope) {
         auto ret = OK();
         auto mask = static_cast<TransportMask>(transportId);
-        for (size_t i = 0; i < kMaxInFlightMessages; ++i) {
-            auto &frame = _inFlightFrames[i];
-            if (frame.valid() && (frame.pendingMask & mask) != 0) {
-                if (frame.envelope.header == envelope.header) {
-                    _log_d("Drainer: ack from transport " SV_FMT
-                           " for " MAGIC_PUBSUB_SV_FMT,
-                           SV_ARG(magic_enum::enum_name(transportId)),
-                           MAGIC_PUBSUB_SV_ARG(envelope.header));
-                    frame.pendingMask &= ~mask;
-                    if (--frame.pendingCount == 0) {
-                        _log_d("Drainer: final ack for " MAGIC_PUBSUB_SV_FMT,
+        Envelope releaseEnvelope{};
+        bool shouldRelease = false;
+        bool found = false;
+        {
+            Mutex::ScopedSpinlockGuard guard{_inFlightLock};
+            for (size_t i = 0; i < kMaxInFlightMessages; ++i) {
+                auto &frame = _inFlightFrames[i];
+                if (frame.valid() && (frame.pendingMask & mask) != 0) {
+                    if (frame.envelope.header == envelope.header) {
+                        _log_d("Drainer: ack from transport " SV_FMT
+                               " for " MAGIC_PUBSUB_SV_FMT,
+                               SV_ARG(magic_enum::enum_name(transportId)),
                                MAGIC_PUBSUB_SV_ARG(envelope.header));
-                        if (frame.envelope.release != nullptr) {
-                            ret.combine(frame.envelope.ack());
+                        found = true;
+                        frame.pendingMask &= ~mask;
+                        if (--frame.pendingCount == 0) {
+                            _log_d("Drainer: final ack for "
+                                   MAGIC_PUBSUB_SV_FMT,
+                                   MAGIC_PUBSUB_SV_ARG(envelope.header));
+                            releaseEnvelope = frame.envelope;
+                            shouldRelease =
+                                releaseEnvelope.release != nullptr;
+                            frame = StoredFrame{};
                         }
-                        frame = StoredFrame{};
+                        break;
                     }
-                    return ret;
                 }
             }
+        }
+        if (found) {
+            if (shouldRelease) {
+                ret.combine(releaseEnvelope.ack());
+            }
+            return ret;
         }
         FAIL(ERR(NotFound),
              "No in-flight message found for ack with messageId "
@@ -150,11 +165,14 @@ class Drainer {
         frame.pendingMask = mask;
         frame.pendingCount = pendingCount;
         int16_t stored = -1;
-        for (size_t i = 0; i < kMaxInFlightMessages; ++i) {
-            if (_inFlightFrames[i].pendingCount == 0) {
-                _inFlightFrames[i] = frame;
-                stored = static_cast<int16_t>(i);
-                break;
+        {
+            Mutex::ScopedSpinlockGuard guard{_inFlightLock};
+            for (size_t i = 0; i < kMaxInFlightMessages; ++i) {
+                if (_inFlightFrames[i].pendingCount == 0) {
+                    _inFlightFrames[i] = frame;
+                    stored = static_cast<int16_t>(i);
+                    break;
+                }
             }
         }
         FAIL_IF(stored < 0, std::unexpected(ERR(Overflow)),
@@ -267,24 +285,30 @@ class Drainer {
 
     ReturnCode _releaseTransportTarget(StoredFrame &frame,
                                        TransportId transportId) {
-        if (frame.pendingCount == 0) {
-            return OK();
-        }
         const auto mask = static_cast<TransportMask>(transportId);
-        if ((frame.pendingMask & mask) == 0) {
+        Envelope releaseEnvelope{};
+        bool shouldRelease = false;
+        {
+            Mutex::ScopedSpinlockGuard guard{_inFlightLock};
+            if (frame.pendingCount == 0) {
+                return OK();
+            }
+            if ((frame.pendingMask & mask) == 0) {
+                return OK();
+            }
+            frame.pendingMask &= ~mask;
+            --frame.pendingCount;
+            if (frame.pendingCount != 0) {
+                return OK();
+            }
+            releaseEnvelope = frame.envelope;
+            shouldRelease = releaseEnvelope.release != nullptr;
+            frame = StoredFrame{};
+        }
+        if (!shouldRelease) {
             return OK();
         }
-        frame.pendingMask &= ~mask;
-        --frame.pendingCount;
-        if (frame.pendingCount != 0) {
-            return OK();
-        }
-        auto envelope = frame.envelope;
-        frame = StoredFrame{};
-        if (envelope.release == nullptr) {
-            return OK();
-        }
-        return envelope.ack();
+        return releaseEnvelope.ack();
     }
 
     TransportDirectory &_transporters;
@@ -292,6 +316,7 @@ class Drainer {
     ControlPlane &_controlPlane;
     Totem::Queue::Handle *_publishQueue;
     std::array<StoredFrame, kMaxInFlightMessages> _inFlightFrames{};
+    ::platform::Spinlock _inFlightLock = ::platform::create_spinlock();
 };
 
 } // namespace Totem::PubSubBackend::detail

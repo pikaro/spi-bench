@@ -45,6 +45,8 @@ class Monitor:
 class Config:
     envs: list[str]
     baud: str | None
+    reset: bool
+    upload: bool
     timeout: float | None
     strip_ansi: bool
     include: list[re.Pattern[str]]
@@ -130,6 +132,16 @@ def parse_args(argv: list[str]) -> Config:
         help="stop after the given duration; supports ms, s, and m suffixes",
     )
     parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="reset owned boards before opening their monitors",
+    )
+    parser.add_argument(
+        "--upload",
+        action="store_true",
+        help="upload owned boards before opening their monitors",
+    )
+    parser.add_argument(
         "--strip-ansi",
         action="store_true",
         help="remove ANSI escape sequences from monitor output",
@@ -183,6 +195,8 @@ def parse_args(argv: list[str]) -> Config:
     return Config(
         envs=envs,
         baud=baud,
+        reset=parsed.reset,
+        upload=parsed.upload,
         timeout=parsed.timeout,
         strip_ansi=parsed.strip_ansi,
         include=parsed.include,
@@ -238,6 +252,28 @@ def ensure_command_fifo(env: str) -> tuple[int, int]:
     return read_fd, keepalive_fd
 
 
+def child_env(config: Config) -> dict[str, str]:
+    env = os.environ.copy()
+    if config.reset:
+        env["RESET"] = "true"
+
+    if config.upload:
+        env["UPLOAD"] = "true"
+        if not config.reset:
+            env.pop("RESET", None)
+
+    return env
+
+
+def monitor_command_display(command: list[str], config: Config) -> str:
+    prefix: list[str] = []
+    if config.reset:
+        prefix.append("RESET=true")
+    if config.upload:
+        prefix.append("UPLOAD=true")
+    return " ".join([*prefix, *command])
+
+
 def spawn_monitor(
     root: Path,
     env: str,
@@ -251,11 +287,11 @@ def spawn_monitor(
 
     pid, fd = pty.fork()
     if pid == 0:
-        os.execv(command[0], command)
+        os.execve(command[0], command, child_env(config))
 
     os.set_blocking(fd, False)
     command_fd, command_keepalive_fd = ensure_command_fifo(env)
-    print(f"{env}: {' '.join(command)}", file=sys.stderr)
+    print(f"{env}: {monitor_command_display(command, config)}", file=sys.stderr)
     return Monitor(
         env=env,
         label=label_for(env, width, sys.stdout.isatty() and not config.strip_ansi),
@@ -782,17 +818,30 @@ def main() -> int:
     signal.signal(signal.SIGTERM, request_stop)
 
     locks: list[TextIO] = []
+    locks_by_env: dict[str, TextIO] = {}
     monitors: list[Monitor] = []
-    log_file = open_log_file(config)
+    log_file: TextIO | None = None
     try:
-        runtime = Runtime(config=config, log=log_file)
         for env in config.envs:
             lock = try_lock_instance(env)
             if lock is None:
-                monitors.append(attach_spool(env, config, width))
+                if config.reset or config.upload:
+                    raise SystemExit(
+                        f"Cannot reset or upload {env!r}: another instance "
+                        "already owns that monitor"
+                    )
                 continue
 
             locks.append(lock)
+            locks_by_env[env] = lock
+
+        log_file = open_log_file(config)
+        runtime = Runtime(config=config, log=log_file)
+        for env in config.envs:
+            if env not in locks_by_env:
+                monitors.append(attach_spool(env, config, width))
+                continue
+
             monitors.append(
                 spawn_monitor(
                     root,

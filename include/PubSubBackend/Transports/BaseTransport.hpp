@@ -163,9 +163,30 @@ class BaseTransport : public HasLifecycle<BaseTransport>,
                 // refactoring risk if transport call ownership ever widens
                 // beyond the current single-runner model.
                 std::array<std::byte, bufferSize> sendBuffer;
-                FAIL_IF_UNEXPECTED_FWD(
-                    frameSize, _prepareFrameForSend(item, sendBuffer),
-                    "Failed to prepare queued frame for sending");
+                auto frameSizeResult = _prepareFrameForSend(item, sendBuffer);
+                if (!frameSizeResult) {
+                    _log_w(SV_FMT
+                           ": dropping unserializable PubSub message %u: "
+                           ERR_FMT,
+                           SV_ARG(_instanceName),
+                           item == nullptr ? 0
+                                           : item->envelope.header.messageId,
+                           ERR_ARG(frameSizeResult.error()));
+                    if (_canAckFrameHandle(item)) {
+                        auto ackRet = _ack(item->envelope);
+                        if (!ackRet.ok()) {
+                            _log_w(SV_FMT
+                                   ": dropped PubSub message %u was not "
+                                   "tracked for release: " ERR_FMT,
+                                   SV_ARG(_instanceName),
+                                   item->envelope.header.messageId,
+                                   ERR_ARG(ackRet));
+                        }
+                    }
+                    ++count;
+                    continue;
+                }
+                const auto frameSize = *frameSizeResult;
                 auto frame =
                     std::span<const std::byte>{sendBuffer.data(), frameSize};
                 detail::log_trace_packet("transport.send.bytes",
@@ -337,6 +358,10 @@ class BaseTransport : public HasLifecycle<BaseTransport>,
     std::expected<size_t, ReturnCode>
     _prepareFrameForSend(detail::FrameHandle frameHandle,
                          std::span<std::byte> sendBuffer) {
+        FAIL_IF(!frameHandle || frameHandle->pendingCount == 0 ||
+                    !frameHandle->envelope.valid(),
+                std::unexpected(ERR(CoreError, InvalidState)),
+                "Cannot prepare invalid queued frame handle");
         const auto frameSize =
             detail::SerDe::encodedSize(frameHandle->envelope.header);
         if (frameSize > sendBuffer.size()) {
@@ -358,6 +383,13 @@ class BaseTransport : public HasLifecycle<BaseTransport>,
             (void)encodedSize;
         }
         return frameSize;
+    }
+
+    [[nodiscard]] static bool _canAckFrameHandle(
+        detail::FrameHandle frameHandle) {
+        return frameHandle != nullptr &&
+               frameHandle->envelope.header.messageId != 0 &&
+               frameHandle->envelope.release != nullptr;
     }
 
     ReturnCode _ack(const Envelope &envelope) {

@@ -124,8 +124,13 @@ template <class Link> class Rs485Transport : public BaseTransport {
             if (!frameSizeResult) {
                 _log_w(SV_FMT
                        ": dropping unserializable PubSub message %u: " ERR_FMT,
-                       SV_ARG(_instanceName), item->envelope.header.messageId,
+                       SV_ARG(_instanceName),
+                       item == nullptr ? 0 : item->envelope.header.messageId,
                        ERR_ARG(frameSizeResult.error()));
+                if (!_canAckFrameHandle(item)) {
+                    ++count;
+                    continue;
+                }
                 auto ackRet = _ack(item->envelope);
                 if (!ackRet.ok()) {
                     _log_w(SV_FMT
@@ -271,7 +276,18 @@ template <class Link> class Rs485Transport : public BaseTransport {
                    SV_ARG(_instanceName), envelope.header.messageId,
                    ERR_ARG(result.result));
         }
-        return _ack(envelope);
+        auto ackRet = _ack(envelope);
+        if (!ackRet.ok()) {
+            _log_w(SV_FMT
+                   ": completed PubSub message %u was not tracked for "
+                   "release: " ERR_FMT,
+                   SV_ARG(_instanceName), envelope.header.messageId,
+                   ERR_ARG(ackRet));
+            if (ackRet == ERR(CoreError, NotFound)) {
+                return OK();
+            }
+        }
+        return ackRet;
     }
 
     ReturnCode _ensureRxFrameQueue() {

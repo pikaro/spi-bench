@@ -33,6 +33,9 @@ Build output notes:
 - Monitor one environment: `bin/monitor master`
 - Monitor multiple environments with prefixed output:
     `bin/monitor-multi master media`
+- Reset or upload before monitoring:
+    `bin/monitor-multi --reset master`
+    `bin/monitor-multi --upload master`
 - Capture a bounded, plain-text sample:
     `bin/monitor-multi --timeout 5s --strip-ansi master media`
 - Capture only high-signal lines:
@@ -54,6 +57,10 @@ stream.
 
 The timeout option accepts `ms`, `s`, and `m` suffixes. `--include` and
 `--exclude` may be repeated and match the prefixed, ANSI-stripped line.
+`--reset` and `--upload` pass `RESET=true` and `UPLOAD=true` respectively to
+owned `bin/monitor` subprocesses, matching the environment-variable behavior of
+`bin/monitor`. These options require owning the monitor for the requested
+environment; attached follower instances cannot reset or upload.
 
 When running interactively, send a command to a specific board with
 `!<env> <command>`, for example `!master /monitor`. If the current instance is

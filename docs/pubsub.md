@@ -129,6 +129,11 @@ alive. SPI PubSub ingress also treats RX queue backpressure as a local drop
 instead of NACKing the peer, because current wire write NACKs release the
 sender's PubSub frame rather than retrying it.
 
+Transport write completions may arrive from a transport-owned task while the
+PubSub runner is enqueueing new frames. The drainer owns the in-flight frame
+table and protects that table with a short critical section; release callbacks
+run after the slot has been removed from the table.
+
 ## Scheduling Rules
 
 PubSub tasks are event-driven. They should use task notifications for early

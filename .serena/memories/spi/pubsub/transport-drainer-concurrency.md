@@ -1,0 +1,3 @@
+# Transport drainer concurrency
+
+SPI/RS485 wire write completions can run from transport-owned tasks while the PubSub runner is draining/enqueueing frames. The PubSub `Drainer` in-flight table must therefore be treated as shared state, not PubSub-runner-local state. Protect slot lookup/mutation with a short spinlock and run envelope release callbacks after removing the slot from the table. Stale frame handles can manifest as messageId 0, unserializable envelopes, `No in-flight message found` acks, and SPI header ack task failures.

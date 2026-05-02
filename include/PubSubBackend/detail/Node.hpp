@@ -12,15 +12,15 @@
 #include "PubSubBackend/detail/Concepts.hpp"
 #include "PubSubBackend/detail/ControlPlane.hpp"
 #include "PubSubBackend/detail/Drainer.hpp"
+#include "PubSubBackend/detail/ITransport.hpp"
 #include "PubSubBackend/detail/IngressBuffer.hpp"
 #include "PubSubBackend/detail/Metrics.hpp"
 #include "PubSubBackend/detail/Publisher.hpp"
 #include "PubSubBackend/detail/SerDe.hpp"
 #include "PubSubBackend/detail/SubscriberDirectory.hpp"
 #include "PubSubBackend/detail/SubscriptionManager.hpp"
-#include "PubSubBackend/detail/TransportDirectory.hpp"
-#include "PubSubBackend/detail/ITransport.hpp"
 #include "PubSubBackend/detail/Trace.hpp"
+#include "PubSubBackend/detail/TransportDirectory.hpp"
 #include "PubSubBackend/detail/Types.hpp"
 #include "Queue/Facade.hpp"
 #include "Services/PubSub.hpp"
@@ -38,6 +38,7 @@
 #include <expected>
 #include <optional>
 #include <span>
+#include <string_view>
 
 namespace Totem::PubSubBackend::detail {
 
@@ -148,8 +149,7 @@ class Node : public HasLifecycle<Node, Config>,
 
     static std::expected<bool, ReturnCode>
     dispatchIngressFrame(void *node, std::span<const std::byte> frame,
-                         std::optional<IngressContext> ingress =
-                             std::nullopt) {
+                         std::optional<IngressContext> ingress = std::nullopt) {
         auto *self = static_cast<Node *>(node);
         return self->_dispatchIngressFrame(frame, ingress);
     }
@@ -175,7 +175,7 @@ class Node : public HasLifecycle<Node, Config>,
         return self->wake(signal);
     }
 
-    [[nodiscard]] NodeId nodeId() const { return _nodeId; }
+    [[nodiscard]] NodeId nodeId() const override { return _nodeId; }
     [[nodiscard]] static Totem::PubSubBackend::NodeId nodeIdHook(void *node) {
         auto *self = static_cast<Node *>(node);
         return static_cast<Totem::PubSubBackend::NodeId>(self->nodeId());
@@ -191,27 +191,11 @@ class Node : public HasLifecycle<Node, Config>,
 
   private:
     ReturnCode _onBegin() {
-        (void)metrics();
-
-        auto taskHooks = TaskController::TaskHooks::bind(*this);
-
-        FAIL_IF_ERR_FWD(_beginTaskController(config().task),
-                        "Failed to begin task controller for %s", name);
-
-        auto taskAddResult =
-            _taskController.addTask(config().task.name, taskHooks);
-        FAIL_IF_UNEXPECTED(task, taskAddResult, taskAddResult.error(),
-                           "Failed to bind task hooks for %s", name);
+        (void)metrics(); // Initialize metrics before any logging
+        DEFAULT_TASK();
         _taskKey = task;
-        auto publishQueueResult =
-            Totem::Queue::Platform::create(_publishQueueStorage);
-        FAIL_IF_UNEXPECTED_FWD(publishQueue, publishQueueResult,
-                               "Failed to create publish queue: " ERR_FMT,
-                               ERR_ARG(publishQueueResult.error()));
-        _publishQueue = publishQueue;
-
-        FAIL_IF_ERR_FWD(_taskController.startTask(task, config().task),
-                        "Failed to start task for %s", name);
+        INIT_QUEUE_OR_FAIL(_publishQueue);
+        START_TASK();
         return OK();
     }
 
@@ -220,10 +204,7 @@ class Node : public HasLifecycle<Node, Config>,
         _transporters.disableRegistration();
         _subscribers.disableRegistration();
         _taskKey.reset();
-        if (_publishQueue != nullptr) {
-            ret.combine(Totem::Queue::Platform::destroy(_publishQueue));
-            _publishQueue = nullptr;
-        }
+        DESTROY_QUEUE(ret, _publishQueue);
         return ret;
     }
 
@@ -290,15 +271,15 @@ class Node : public HasLifecycle<Node, Config>,
         struct DirectDispatch {
             ITransport *transporter = nullptr;
             TransportDispatch dispatch{};
-            std::string_view name{};
+            std::string_view name;
         };
 
         size_t dispatchCount = 0;
         DirectDispatch directDispatch;
         FAIL_IF_ERR_FWD_UNEXPECTED(
             _transporters.withAll(
-                [&](const TransportId &, const TransporterEntry &entry)
-                    -> ReturnCode {
+                [&](const TransportId &,
+                    const TransporterEntry &entry) -> ReturnCode {
                     auto dispatch =
                         Publisher::dispatchFor(entry, header, ingress);
                     if (!dispatch.has_value()) {
@@ -317,8 +298,8 @@ class Node : public HasLifecycle<Node, Config>,
             "Failed to scan transports for direct ingress dispatch");
 
         if (dispatchCount == 0) {
-            _log_d("%s: dropping uninterested transport ingress frame "
-                   MAGIC_PUBSUB_SV_FMT,
+            _log_d("%s: dropping uninterested transport ingress "
+                   "frame " MAGIC_PUBSUB_SV_FMT,
                    name, MAGIC_PUBSUB_SV_ARG(header));
             return true;
         }
@@ -326,12 +307,11 @@ class Node : public HasLifecycle<Node, Config>,
             return false;
         }
 
-        auto enqueueRet =
-            directDispatch.transporter->enqueueRaw(header, frame,
-                                                   directDispatch.dispatch);
+        auto enqueueRet = directDispatch.transporter->enqueueRaw(
+            header, frame, directDispatch.dispatch);
         if (enqueueRet.ok()) {
-            _log_d("%s: direct-relayed transport ingress frame "
-                   MAGIC_PUBSUB_SV_FMT " to " SV_FMT,
+            _log_d("%s: direct-relayed transport ingress "
+                   "frame " MAGIC_PUBSUB_SV_FMT " to " SV_FMT,
                    name, MAGIC_PUBSUB_SV_ARG(header),
                    SV_ARG(directDispatch.name));
             return true;
@@ -375,9 +355,7 @@ class Node : public HasLifecycle<Node, Config>,
     TransportDirectory _transporters{name};
     SubscriberDirectory _subscribers{name};
 
-    Totem::Queue::Platform::Storage<Envelope, Spec::Limits::maxMessageQueueSize>
-        _publishQueueStorage;
-    Totem::Queue::Handle _publishQueue = nullptr;
+    STANDARD_QUEUE(_publishQueue, Envelope, Spec::Limits::maxMessageQueueSize)
 
     bool _subscriptionReplayPending = false;
     uint32_t _subscriptionReplayDueMs = 0;

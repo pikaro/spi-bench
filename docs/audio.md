@@ -31,6 +31,13 @@ The first preset is `I2SDevicePreset::LegacySoundCard`, copied from
 `I2SDevicePreset::Custom` uses `I2SSourceConfig::customDevice` for hardware
 that does not match a preset.
 
+`I2SSource` starts in offline/probe mode. The source performs short bounded I2S
+reads at `I2SSourceReadinessConfig::probeIntervalMs`; once bytes arrive, the FFT
+task is allowed to copy from audio-tools. If a running source stops producing
+data, the source returns to probe mode and the FFT task skips audio copy work
+until data appears again. This avoids blocking the managed `AudioFft` task on an
+unclocked I2S peripheral when no external sound card is connected.
+
 The current `env:media` board is `custom_esp32_nodemcu` through
 `platformio.ini`. The legacy preset pins are not a safe classic ESP32 NodeMCU
 pinout, so hardware validation still needs a board decision or a custom device

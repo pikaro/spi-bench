@@ -15,6 +15,8 @@
 #include "internal/Log.hpp"
 #include "internal/Markers.hpp"
 #include "internal/Metrics.hpp"
+#include "internal/Queue.hpp"
+#include "internal/Task.hpp"
 
 #include "internal/PlatformSelect.hpp"
 

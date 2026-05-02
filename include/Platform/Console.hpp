@@ -4,13 +4,16 @@
 
 #pragma once
 
-#if defined(PLATFORM_ESP32_ORIG)
+#if defined(PLATFORM_ESP32)
 
-#include "platform/PlatformESP32/UartConsole.hpp"
+#include "sdkconfig.h"
 
-#elif defined(PLATFORM_ESP32S3) || defined(PLATFORM_ESP32C3)
-
+#if CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG ||                             \
+    CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
 #include "platform/PlatformESP32/UsbSerialConsole.hpp"
+#else
+#include "platform/PlatformESP32/UartConsole.hpp"
+#endif
 
 #else
 

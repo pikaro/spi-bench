@@ -4,9 +4,9 @@
 #include "Macros/Facade.hpp"
 #include "PubSubBackend/Interfaces/Types.hpp"
 #include "PubSubBackend/Interfaces/Wire.hpp" // IWYU pragma: export
-#include "Services/Clock.hpp"
 #include "PubSubBackend/detail/Codec.hpp"
 #include "PubSubBackend/detail/Trace.hpp"
+#include "Services/Clock.hpp"
 #include "Types/Error.hpp"
 #include <cstddef>
 #include <cstdint>
@@ -25,7 +25,7 @@ using PayloadPtrGetter = std::expected<const void *, ReturnCode> (*)(
 using PayloadGetter = ReturnCode (*)(void *owner, const Envelope &envelope,
                                      size_t offset, std::span<std::byte> buf);
 using ReleaseCallback = ReturnCode (*)(void *owner, const Envelope &envelope);
-using NextMessageIdCallback = MessageId (*)(void *owner);
+using NextMessageIdCallback = MessageId (*)();
 using PayloadEncoder = ReturnCode (*)(void *owner, const Envelope &envelope,
                                       std::span<std::byte> out);
 

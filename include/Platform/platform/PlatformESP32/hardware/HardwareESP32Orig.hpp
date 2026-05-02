@@ -26,14 +26,14 @@ enum class Esp32OrigPin : uint8_t {
     // GPIO10 = GPIO_NUM_10,
     // GPIO11 = GPIO_NUM_11,
 
-    GPIO12 = GPIO_NUM_12,
+    StrappingGPIO12 = GPIO_NUM_12,
     GPIO13 = GPIO_NUM_13,
     GPIO14 = GPIO_NUM_14,
-    GPIO15 = GPIO_NUM_15,
-    HSPI_MISO = GPIO_NUM_12,
+    StrappingGPIO15 = GPIO_NUM_15,
+    StrappingHSPI_MISO = GPIO_NUM_12,
     HSPI_MOSI = GPIO_NUM_13,
     HSPI_SCLK = GPIO_NUM_14,
-    HSPI_CS = GPIO_NUM_15,
+    StrappingHSPI_CS = GPIO_NUM_15,
 
     GPIO16 = GPIO_NUM_16,
     GPIO17 = GPIO_NUM_17,
@@ -59,9 +59,10 @@ enum class Esp32OrigPin : uint8_t {
 
     GPIO32 = GPIO_NUM_32,
     GPIO33 = GPIO_NUM_33,
-    GPIO34 = GPIO_NUM_34,
-    GPIO35 = GPIO_NUM_35,
-    GPIO36 = GPIO_NUM_36,
+
+    InputOnlyGPIO34 = GPIO_NUM_34,
+    InputOnlyGPIO35 = GPIO_NUM_35,
+    InputOnlyGPIO36 = GPIO_NUM_36,
 
     // GPIOs 37-39 are input-only
     // GPIO37 = GPIO_NUM_37,

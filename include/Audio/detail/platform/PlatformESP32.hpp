@@ -12,6 +12,7 @@
 #include "AudioTools/CoreAudio/StreamCopy.h"
 #include "Macros/Facade.hpp"
 #include "Types/Error.hpp"
+#include <cstddef>
 #include <cstdint>
 
 namespace Totem::Audio::detail::platform {
@@ -106,6 +107,18 @@ class I2SInputStream {
 
     [[nodiscard]] bool active() const { return _active; }
     [[nodiscard]] const AudioInfo &audioInfo() const { return _info; }
+
+    ReturnCode setReadTimeoutMs(uint32_t timeoutMs) {
+        _stream.driver()->setWaitTimeReadMs(timeoutMs);
+        return OK();
+    }
+
+    size_t readBytes(uint8_t *data, size_t len) {
+        if (!_active || data == nullptr || len == 0) {
+            return 0;
+        }
+        return _stream.readBytes(data, len);
+    }
 
     audio_tools::AudioStream &stream() { return _stream; }
 

@@ -70,7 +70,7 @@ class Gpio {
         return OK();
     }
 
-    std::expected<bool, ReturnCode> level() const {
+    [[nodiscard]] std::expected<bool, ReturnCode> level() const {
         FAIL_IF(!_pin.has_value(),
                 std::unexpected(ERR(CoreError, InvalidState)),
                 "Cannot read unconfigured GPIO");

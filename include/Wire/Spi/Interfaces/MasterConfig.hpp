@@ -49,6 +49,8 @@ struct MasterConfig {
     uint32_t interTurnDelayMs = 0;
     uint32_t maxOutboundSlotBytes = 512;
     uint32_t attentionReceiveWindowBytes = 512;
+    uint32_t localWriteCoalesceUs = 0;
+    uint32_t noSlotBackoffUs = 0;
     bool heartbeatEnabled = false;
     std::optional<Pin> attentionPin = std::nullopt;
 

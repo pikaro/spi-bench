@@ -41,6 +41,35 @@ sdkconfig_name = parser.get(
     fallback=pioenv,
 )
 
+
+def env_sdkconfig_name(env_section: str) -> str:
+    env_name = env_section.removeprefix("env:")
+    return parser.get(env_section, "custom_sdkconfig", fallback=env_name)
+
+
+def sdkconfig_envs_for(defaults_name: str) -> list[str]:
+    envs = []
+    for candidate in parser.sections():
+        if (
+            candidate.startswith("env:")
+            and env_sdkconfig_name(candidate) == defaults_name
+        ):
+            envs.append(candidate.removeprefix("env:"))
+    return envs
+
+
+def delete_generated_sdkconfigs(defaults_name: str) -> None:
+    stale_configs = {
+        Path(f"sdkconfig.{env_name}")
+        for env_name in sdkconfig_envs_for(defaults_name)
+    }
+    stale_configs.add(Path(f"sdkconfig.{defaults_name}"))
+
+    for stale_config in sorted(stale_configs):
+        if stale_config.exists():
+            stale_config.unlink()
+            log.info("Deleted stale generated %s", stale_config)
+
 while section:
     if not parser.has_section(section):
         _error = f"Section {section} not found in platformio.ini"
@@ -76,8 +105,7 @@ else:
 
     if md5_old != md5_new:
         Path(sdkconfig_tmp).rename(sdkconfig)
-        if Path(f"sdkconfig.{sdkconfig_name}").exists():
-            Path(f"sdkconfig.{sdkconfig_name}").unlink()
+        delete_generated_sdkconfigs(sdkconfig_name)
         log.info(f"Updated {sdkconfig} with new content")
     else:
         Path(sdkconfig_tmp).unlink()

@@ -29,7 +29,7 @@ template <class Link> struct PubSubSpiTestSetup {
     using Transport = NodeData::PubSub::Transport;
     using NodeId = NodeData::PubSub::NodeId;
     using Topic = NodeData::PubSub::Topic;
-    using TestPool = Totem::PubSubBackend::Pool<PubSubTest::Message, 8>;
+    using TestPool = Totem::PubSubBackend::Pool<PubSubTest::Message, 32>;
     using SpiTransport = Totem::PubSubBackend::Transports::SpiTransport<Link>;
     using SpiDeps =
         Totem::PubSubBackend::Transports::SpiTransportDependencies<Link>;
@@ -39,6 +39,8 @@ template <class Link> struct PubSubSpiTestSetup {
     struct Config {
         uint32_t masterPublishIntervalMs = 10;
         uint32_t slavePublishIntervalMs = 10;
+        uint32_t masterPublishesPerInterval = 1;
+        uint32_t slavePublishesPerInterval = 1;
         uint32_t reportIntervalMs = 1000;
         bool masterPublishes = true;
         bool slavePublishes = true;
@@ -100,8 +102,7 @@ template <class Link> struct PubSubSpiTestSetup {
                      static_cast<NodeId>(NodeData::PubSub::nodeId)),
           role(role), config(config),
           transport(makeSpiDeps(pubSubNode, link, "PubSub-SPI")),
-          messagePool(static_cast<void *>(&pubSubNode),
-                      PubSubNode::nextMessageId),
+          messagePool(PubSubService::nextMessageId),
           consumer{role == Role::Master ? "SPI-master-consumer"
                                         : "SPI-slave-consumer",
                    &stats} {}
@@ -147,12 +148,15 @@ template <class Link> struct PubSubSpiTestSetup {
             return OK();
         }
 
-        ++stats.publishAttempts;
-        auto publishResult = publishTestMessage();
-        if (!publishResult.ok()) {
-            ++stats.publishFailures;
-            if (publishResult == ERR(CoreError, Overflow)) {
-                ++stats.publishPoolFull;
+        const auto count = publishesPerInterval();
+        for (uint32_t i = 0; i < count; i++) {
+            ++stats.publishAttempts;
+            auto publishResult = publishTestMessage();
+            if (!publishResult.ok()) {
+                ++stats.publishFailures;
+                if (publishResult == ERR(CoreError, Overflow)) {
+                    ++stats.publishPoolFull;
+                }
             }
         }
         return OK();
@@ -167,6 +171,11 @@ template <class Link> struct PubSubSpiTestSetup {
     [[nodiscard]] uint32_t publishIntervalMs() const {
         return role == Role::Master ? config.masterPublishIntervalMs
                                     : config.slavePublishIntervalMs;
+    }
+
+    [[nodiscard]] uint32_t publishesPerInterval() const {
+        return role == Role::Master ? config.masterPublishesPerInterval
+                                    : config.slavePublishesPerInterval;
     }
 
     [[nodiscard]] Topic publishedTopic() const {
@@ -247,20 +256,19 @@ template <class Link> struct PubSubSpiTestSetup {
             return elapsedMs == 0 ? 0 : (value * 1000U) / elapsedMs;
         };
 
-        _log_i("%s app: pub=%" PRIu32 "/s pubFail=%" PRIu32
-               " poolFull=%" PRIu32 " rx=%" PRIu32 "/s rxBytes=%" PRIu32
+        _log_i("%s app: pub=%" PRIu32 "/s pubFail=%" PRIu32 " poolFull=%" PRIu32
+               " rx=%" PRIu32 "/s rxBytes=%" PRIu32
                "/s latencyUs[min/avg/max]=%" PRId64 "/%" PRId64 "/%" PRId64,
                consumer.name, txPerSecond, period.publishFailures,
                period.publishPoolFull, rxPerSecond, rxBytesPerSecond,
                minLatencyUs, avgLatencyUs, maxLatencyUs);
-        _log_i("%s spi: txQ=%" PRIu32 "/s txAck=%" PRIu32
-               "/s txFail=%" PRIu32 " inFlightFull=%" PRIu32
-               " txSerDrop=%" PRIu32 " rxQ=%" PRIu32
+        _log_i("%s spi: txQ=%" PRIu32 "/s txAck=%" PRIu32 "/s txFail=%" PRIu32
+               " inFlightFull=%" PRIu32 " txSerDrop=%" PRIu32 " rxQ=%" PRIu32
                "/s rxDrop=%" PRIu32,
-               consumer.name, rate(spiPeriod.txQueued),
-               rate(spiPeriod.txAcked), spiPeriod.txFailed,
-               spiPeriod.txInFlightFull, spiPeriod.txSerializeDropped,
-               rate(spiPeriod.rxQueued), spiPeriod.rxDropped);
+               consumer.name, rate(spiPeriod.txQueued), rate(spiPeriod.txAcked),
+               spiPeriod.txFailed, spiPeriod.txInFlightFull,
+               spiPeriod.txSerializeDropped, rate(spiPeriod.rxQueued),
+               spiPeriod.rxDropped);
     }
 
     [[nodiscard]] static Totem::PubSubBackend::Config
@@ -271,10 +279,10 @@ template <class Link> struct PubSubSpiTestSetup {
                     .name = taskName,
                     .priority = 3,
                     .stackSize = 8192,
-                    .intervalMs = 10,
+                    .intervalMs = 5,
                     .noCatchup = true,
                     .useNotify = true,
-                    .notifyTimeoutMs = 10,
+                    .notifyTimeoutMs = 5,
                     .autoRestart = false,
                 },
             .subscriptionReplayIntervalMs = 1000,

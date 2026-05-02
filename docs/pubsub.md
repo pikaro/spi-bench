@@ -43,6 +43,7 @@ Each `PubSubBackend::detail::Node` owns:
 - a subscription manager
 - an ingress buffer
 - a drainer that publishes local and transport ingress
+- its own message ID counter
 
 A task step receives from transports, replays due subscriptions, drains queued
 messages, then lets transports send pending egress. Transport and subscriber
@@ -51,6 +52,11 @@ Subscription replay is normally triggered by transport availability. A config
 may also enable periodic replay for hardware bring-up or transports where a
 missed availability-era control frame should be repaired as soft state rather
 than leaving later application publishes unrouted.
+
+Payload pools are storage helpers, not PubSub node owners. Application pools may
+use the facade-level no-argument message ID callback, while node-owned
+control-plane publishers pass explicit IDs from their owning `Node` so the
+single-device simulator can keep multiple nodes independent.
 
 Transport ingress may keep the serialized wire image in the ingress buffer.
 Forwarding paths can reuse those bytes without decoding and reserializing. Full

@@ -17,6 +17,11 @@ struct CommandDesc {
     using Token = std::string_view;
     using Tokens = std::span<const Token>;
 
+    enum class ArgRequirement : uint8_t {
+        Required,
+        Optional,
+    };
+
     struct ParseResult {
         bool ok;
     };
@@ -25,7 +30,7 @@ struct CommandDesc {
 
     struct Argument {
         Token name;
-        bool optional;
+        ArgRequirement requirement = ArgRequirement::Required;
         const void *type;
         ParseFn parse;
     };
@@ -37,8 +42,9 @@ struct CommandDesc {
                      "Command description cannot be null");
         for (const auto &subcommand : subcommands) {
             FAIL_IF_ERR_FWD(subcommand.validate(),
-                            "Invalid subcommand for command %s: %s", name,
-                            subcommand.name);
+                            "Invalid subcommand for command " SV_FMT ": "
+                            SV_FMT,
+                            SV_ARG(name), SV_ARG(subcommand.name));
         }
         return OK();
     }
@@ -73,7 +79,7 @@ struct CommandDesc {
             }
 
             if (index >= tokens.size()) {
-                if (meta.optional) {
+                if (meta.requirement == ArgRequirement::Optional) {
                     return {false, {}, ArgError::Missing};
                 }
                 return {false, {}, ArgError::Missing};

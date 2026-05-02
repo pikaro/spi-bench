@@ -7,7 +7,7 @@
 
 namespace platform {
 
-enum class Pin : uint8_t {
+enum class Esp32C3SuperMiniPin : uint8_t {
     GPIO0 = GPIO_NUM_0,
     GPIO1 = GPIO_NUM_1,
     GPIO3 = GPIO_NUM_3,
@@ -16,8 +16,9 @@ enum class Pin : uint8_t {
     GPIO6 = GPIO_NUM_6,
     GPIO7 = GPIO_NUM_7,
     GPIO10 = GPIO_NUM_10,
-    GPIO20 = GPIO_NUM_20,
-    GPIO21 = GPIO_NUM_21,
+
+    RX = GPIO_NUM_20,
+    TX = GPIO_NUM_21,
 
     A0 = GPIO_NUM_0,
     A1 = GPIO_NUM_1,

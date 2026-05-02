@@ -43,8 +43,9 @@ template <typename Owner> struct Commands {
         .description = "Set log level for output",
         .args =
             {
-                CommandBackend::arg<LogLevel>("level", false),
-                CommandBackend::arg<LogComponent>("component", true),
+                CommandBackend::arg<LogLevel>("level"),
+                CommandBackend::arg<LogComponent>(
+                    "component", CommandDesc::ArgRequirement::Optional),
             },
         .handler = handle_set_log_level,
         .subcommands = {},

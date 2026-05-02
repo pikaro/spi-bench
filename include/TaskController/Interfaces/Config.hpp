@@ -19,7 +19,7 @@ struct Config {
     const char *name = "UNDEFINED";
     uint8_t priority = 1;
     CorePreference core = CorePreference::any();
-    uint32_t stackSize = 512;
+    uint32_t stackSize = 4096;
     uint32_t intervalMs = 1000;
     bool noCatchup = false;
     bool useWdt = true;

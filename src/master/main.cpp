@@ -18,7 +18,13 @@ Totem::Wire::Spi::Master spiMasterLowSpeed{core.taskRegistry};
 Totem::Clock::Clock clockMaster{Totem::Clock::Clock::Role::Master};
 PubSubSpiTestSetup<Totem::Wire::Spi::Master> pubSubSpi{
     core.taskRegistry, spiMasterLowSpeed,
-    PubSubSpiTestSetup<Totem::Wire::Spi::Master>::Role::Master};
+    PubSubSpiTestSetup<Totem::Wire::Spi::Master>::Role::Master,
+    {
+        .masterPublishIntervalMs = 5,
+        .slavePublishIntervalMs = 5,
+        .masterPublishesPerInterval = 2,
+        .slavePublishesPerInterval = 2,
+    }};
 // PubSubRs485TestSetup<Totem::Wire::Rs485::Master> pubSubRs485{
 //     core.taskRegistry, rs485master,
 //     PubSubRs485TestSetup<Totem::Wire::Rs485::Master>::Role::Master};

@@ -8,7 +8,9 @@
 #include "Services/Clock.hpp"
 #include "StaticConfig/Logging.hpp"
 #include "Types/Error.hpp"
+#include <magic_enum/magic_enum.hpp>
 #include <atomic>
+#include <array>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
@@ -51,32 +53,41 @@ static inline NullLogger nullLogger{};
 
 } // namespace Totem::LoggingBackend::detail
 
+template <typename... Levels>
+consteval auto make_logging_minimum_levels(Levels... levels) {
+    static_assert(sizeof...(levels) == magic_enum::enum_count<LogComponent>(),
+                  "LogComponent changed; update minimum log level mapping");
+    return std::array<LogLevel, sizeof...(levels)>{levels...};
+}
+
+template <size_t... Indices>
+consteval bool
+minimum_log_component_values_are_dense(
+    std::index_sequence<Indices...> /*unused*/) {
+    constexpr auto values = magic_enum::enum_values<LogComponent>();
+    return ((static_cast<size_t>(values[Indices]) == Indices) && ...);
+}
+
+static_assert(minimum_log_component_values_are_dense(
+                  std::make_index_sequence<
+                      magic_enum::enum_count<LogComponent>()>{}),
+              "LogComponent values must remain contiguous from zero");
+
+inline constexpr auto loggingMinimumLevels = make_logging_minimum_levels(
+    LoggingMinimumLevel::defaultMinimum, LoggingMinimumLevel::system,
+    LoggingMinimumLevel::monitoring, LoggingMinimumLevel::metrics,
+    LoggingMinimumLevel::pubSub, LoggingMinimumLevel::command,
+    LoggingMinimumLevel::taskControllerRegistry, LoggingMinimumLevel::output,
+    LoggingMinimumLevel::rs485, LoggingMinimumLevel::spi,
+    LoggingMinimumLevel::clock, LoggingMinimumLevel::ledPwm,
+    LoggingMinimumLevel::input);
+
 static constexpr LogLevel logging_minimum_for(LogComponent component) {
-    switch (component) {
-    case LogComponent::System:
-        return LoggingMinimumLevel::system;
-    case LogComponent::Monitoring:
-        return LoggingMinimumLevel::monitoring;
-    case LogComponent::Metrics:
-        return LoggingMinimumLevel::metrics;
-    case LogComponent::PubSub:
-        return LoggingMinimumLevel::pubSub;
-    case LogComponent::Command:
-        return LoggingMinimumLevel::command;
-    case LogComponent::TaskControllerRegistry:
-        return LoggingMinimumLevel::taskControllerRegistry;
-    case LogComponent::Output:
-        return LoggingMinimumLevel::output;
-    case LogComponent::Rs485:
-        return LoggingMinimumLevel::rs485;
-    case LogComponent::Spi:
-        return LoggingMinimumLevel::spi;
-    case LogComponent::Clock:
-        return LoggingMinimumLevel::clock;
-    case LogComponent::Unknown:
-    default:
-        std::unreachable();
+    auto index = static_cast<size_t>(component);
+    if (index >= loggingMinimumLevels.size()) {
+        return LoggingMinimumLevel::defaultMinimum;
     }
+    return loggingMinimumLevels[index];
 }
 
 static constexpr bool static_logging_for(LogLevel level,

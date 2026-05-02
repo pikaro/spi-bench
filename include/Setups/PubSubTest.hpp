@@ -3,6 +3,7 @@
 #include "Base/HasMutex.hpp"
 #include "Data.hpp"
 #include "Macros/Facade.hpp"
+#include "Platform/PlatformSelect.hpp"
 #include "PubSubBackend/Facade.hpp"
 #include "PubSubBackend/Interfaces/Config.hpp"
 #include "PubSubBackend/Interfaces/Envelope.hpp"
@@ -616,10 +617,8 @@ struct PubSubTestSetup {
                                      rs485BridgeCReadyAfterMs)),
           rs485NodeD(makeLocalDeps(pubSubNodeD, "RS485-D", Transport::RS485,
                                    rs485NodeDReadyAfterMs)),
-          a1MessagePool(static_cast<void *>(&pubSubNodeA1),
-                        PubSubNode::nextMessageId),
-          cMessagePool(static_cast<void *>(&pubSubBridgeC),
-                       PubSubNode::nextMessageId),
+          a1MessagePool(PubSubService::nextMessageId),
+          cMessagePool(PubSubService::nextMessageId),
           consumerMasterSensor("MasterSensor", NodeId::Master, pubSubHarness),
           consumerA1Sensor("A1Sensor", NodeId::GPUNode0, pubSubHarness),
           consumerA2Sensor("A2Sensor", NodeId::GPUNode1, pubSubHarness),

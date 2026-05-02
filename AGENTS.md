@@ -17,6 +17,63 @@ Priorities, in no particular order:
 - Least Surprise and Clean Code principles
 - Memory and CPU performance efficiency
 
+## Refusals
+
+Before refusing or implementing, classify any unclear or false assumptions as
+either **blocking** or **non-blocking**.
+
+### Blocking assumptions
+
+Refuse to implement only when an assumption materially affects feasibility,
+correctness, or scope. This includes cases where the request:
+
+- depends on functionality that does not exist in the current environment,
+    framework, API, or system design
+- requires guarantees the system cannot provide
+- would require a major refactor, new architecture, new dependency, or
+    cross-system redesign not explicitly requested
+- is underspecified in a way that makes multiple incompatible implementations
+    likely
+- would produce misleading, fragile, or non-functional code if implemented as
+    requested
+
+When refusing, do **not** implement a speculative workaround. Instead:
+
+1. State the specific assumption that appears false, incomplete, or blocking.
+2. Explain why it prevents a correct or reasonably scoped implementation.
+3. Ask for the minimum clarification needed to proceed.
+
+### Non-blocking assumptions
+
+Do not refuse when the issue only affects implementation details. This includes
+cases where:
+
+- multiple reasonable implementations exist
+- naming, file placement, or minor structure is unclear
+- the requested approach is suboptimal but still valid
+- a simple, local implementation can satisfy the request
+- the ambiguity does not materially affect feasibility or correctness
+
+In these cases, proceed with implementation, but first state the assumptions
+being made. Keep the implementation limited to those assumptions.
+
+### Scope control
+
+Prefer the simplest viable interpretation that satisfies the request. Do not
+expand scope, introduce new abstractions, add dependencies, rename unrelated
+code, or perform broad refactors unless explicitly requested or strictly
+necessary.
+
+If a larger change appears necessary, treat that as a blocking assumption and
+ask for clarification before implementing.
+
+### Refusal threshold
+
+Refusal is appropriate only when proceeding would require guessing about core
+behavior, architecture, feasibility, or system guarantees. Do not refuse merely
+because the request is imperfect, inefficient, or could be implemented more
+elegantly another way.
+
 ## Project Overview
 
 See: /docs/overview.md

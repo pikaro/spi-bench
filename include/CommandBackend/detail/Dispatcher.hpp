@@ -14,7 +14,8 @@ class Dispatcher {
                                CommandDesc::Tokens args) {
         size_t requiredArgs = 0;
         for (const auto &arg : command.args) {
-            if (arg.name.empty() || arg.optional) {
+            if (arg.name.empty() ||
+                arg.requirement == CommandDesc::ArgRequirement::Optional) {
                 break;
             }
             ++requiredArgs;
@@ -22,8 +23,9 @@ class Dispatcher {
 
         if (args.size() < requiredArgs) {
             FAIL(ERR(CommandError, BadArgumentCount),
-                 "Command %s requires at least %zu arguments, but got %zu",
-                 command.name, requiredArgs, args.size());
+                 "Command " SV_FMT
+                 " requires at least %zu arguments, but got %zu",
+                 SV_ARG(command.name), requiredArgs, args.size());
         }
 
         for (const auto &subcommand : command.subcommands) {

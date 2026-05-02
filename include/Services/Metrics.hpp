@@ -5,6 +5,8 @@
 #include "MetricsBackend/Interfaces/Types.hpp"
 #include "StaticConfig/Metrics.hpp"
 #include "Types/Error.hpp"
+#include <magic_enum/magic_enum.hpp>
+#include <array>
 #include <cstdint>
 #include <expected>
 #include <functional>
@@ -47,28 +49,44 @@ struct IMetrics {
 
 } // namespace Totem::MetricsBackend::detail
 
+template <typename... Levels>
+consteval auto make_metric_collection_levels(Levels... levels) {
+    using MetricLevel = Totem::MetricsBackend::MetricLevel;
+    using MetricComponent = Totem::MetricsBackend::MetricComponent;
+
+    static_assert(sizeof...(levels) == magic_enum::enum_count<MetricComponent>(),
+                  "MetricComponent changed; update metric collection mapping");
+    return std::array<std::optional<MetricLevel>, sizeof...(levels)>{
+        std::optional<MetricLevel>{levels}...};
+}
+
+template <size_t... Indices>
+consteval bool
+metric_component_values_are_dense(std::index_sequence<Indices...> /*unused*/) {
+    using MetricComponent = Totem::MetricsBackend::MetricComponent;
+
+    constexpr auto values = magic_enum::enum_values<MetricComponent>();
+    return ((static_cast<size_t>(values[Indices]) == Indices) && ...);
+}
+
+static_assert(metric_component_values_are_dense(
+                  std::make_index_sequence<magic_enum::enum_count<
+                      Totem::MetricsBackend::MetricComponent>()>{}),
+              "MetricComponent values must remain contiguous from zero");
+
+inline constexpr auto metricCollectionLevels = make_metric_collection_levels(
+    MetricCollection::pubSub, MetricCollection::taskControllerRegistry,
+    MetricCollection::taskController, MetricCollection::rs485,
+    MetricCollection::spi, MetricCollection::mutex, MetricCollection::logging);
+
 constexpr std::optional<Totem::MetricsBackend::MetricLevel>
 level_for_metric_component_opt(
     Totem::MetricsBackend::MetricComponent metricComponent) {
-    using MetricComponent = Totem::MetricsBackend::MetricComponent;
-    switch (metricComponent) {
-    case MetricComponent::PubSub:
-        return MetricCollection::pubSub;
-    case MetricComponent::Rs485:
-        return MetricCollection::rs485;
-    case MetricComponent::Spi:
-        return MetricCollection::spi;
-    case MetricComponent::TaskController:
-        return MetricCollection::taskController;
-    case MetricComponent::TaskControllerRegistry:
-        return MetricCollection::taskControllerRegistry;
-    case MetricComponent::Logging:
-        return MetricCollection::logging;
-    case MetricComponent::Mutex:
-        return MetricCollection::mutex;
-    default:
-        std::unreachable();
+    auto index = static_cast<size_t>(metricComponent);
+    if (index >= metricCollectionLevels.size()) {
+        return std::nullopt;
     }
+    return metricCollectionLevels[index];
 }
 
 constexpr Totem::MetricsBackend::MetricLevel level_for_metric_component(

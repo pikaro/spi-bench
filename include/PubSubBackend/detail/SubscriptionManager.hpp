@@ -4,8 +4,8 @@
 #include "PubSubBackend/Interfaces/Envelope.hpp"
 #include "PubSubBackend/Interfaces/Types.hpp"
 #include "PubSubBackend/detail/Pool.hpp"
-#include "PubSubBackend/detail/TransportDirectory.hpp"
 #include "PubSubBackend/detail/Trace.hpp"
+#include "PubSubBackend/detail/TransportDirectory.hpp"
 #include "PubSubBackend/detail/Types.hpp"
 #include "PubSubBackend/detail/Wire.hpp"
 #include "Types/Error.hpp"
@@ -23,7 +23,7 @@ struct SubscriptionManagerDependencies {
     void *pubSubNode;
     TransportDirectory &transporters;
     PublishCallback publishCallback;
-    NextMessageIdCallback nextMessageIdCallback;
+    MessageId (*nextMessageIdCallback)(void *owner);
     NodeId (*nodeIdCallback)(void *owner);
 
     [[nodiscard]] bool validate() const {
@@ -45,7 +45,7 @@ class SubscriptionManager {
   public:
     explicit SubscriptionManager(const SubscriptionManagerDependencies &deps)
         : _pubSubNode(deps.pubSubNode), _publishCallback(deps.publishCallback),
-          _eventPool(deps.pubSubNode, deps.nextMessageIdCallback),
+          _nextMessageIdCallback(deps.nextMessageIdCallback),
           _transporters(deps.transporters),
           _nodeIdCallback(deps.nodeIdCallback) {
         ABORT_IF_NOT(deps.validate(),
@@ -196,7 +196,10 @@ class SubscriptionManager {
             "SubscriptionManager: emitting control event %u for topic " SV_FMT,
             static_cast<unsigned>(event.type),
             SV_ARG(magic_enum::enum_name(static_cast<Topic>(event.topic))));
-        FAIL_IF_UNEXPECTED_FWD(messageId, _eventPool.store(event),
+        FAIL_IF_UNEXPECTED_FWD(messageId,
+                               _eventPool.store(
+                                   event,
+                                   _nextMessageIdCallback(_pubSubNode)),
                                "Failed to store subscription event");
         auto envelopeResult = Envelope::make<PubSubEvent>({
             .owner = &_eventPool,
@@ -271,6 +274,7 @@ class SubscriptionManager {
     TopicMask _subscribedTopics = 0;
     std::array<SubscriptionSlot, Limits::maxTopics> _subscriptionSlots{};
     PublishCallback _publishCallback;
+    MessageId (*_nextMessageIdCallback)(void *owner);
     EventPool _eventPool;
     TransportDirectory &_transporters;
     NodeId (*_nodeIdCallback)(void *owner);

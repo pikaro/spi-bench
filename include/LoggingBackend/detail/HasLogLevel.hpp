@@ -5,6 +5,7 @@
 #include "Macros/Facade.hpp"
 #include "StaticConfig/Logging.hpp"
 #include "Types/Error.hpp"
+#include <magic_enum/magic_enum.hpp>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -13,34 +14,42 @@
 
 namespace Totem::LoggingBackend::detail {
 
+template <typename... Levels>
+consteval auto make_default_log_levels(Levels... levels) {
+    static_assert(sizeof...(levels) == magic_enum::enum_count<LogComponent>(),
+                  "LogComponent changed; update default log level mapping");
+    return std::array<std::optional<LogLevel>, sizeof...(levels)>{
+        std::optional<LogLevel>{levels}...};
+}
+
+template <size_t... Indices>
+consteval bool
+log_component_values_are_dense(std::index_sequence<Indices...> /*unused*/) {
+    constexpr auto values = magic_enum::enum_values<LogComponent>();
+    return ((static_cast<size_t>(values[Indices]) == Indices) && ...);
+}
+
+static_assert(log_component_values_are_dense(
+                  std::make_index_sequence<
+                      magic_enum::enum_count<LogComponent>()>{}),
+              "LogComponent values must remain contiguous from zero");
+
+inline constexpr auto componentDefaultLogLevels = make_default_log_levels(
+    LoggingDefaultLevel::defaultLevel, LoggingDefaultLevel::system,
+    LoggingDefaultLevel::monitoring, LoggingDefaultLevel::metrics,
+    LoggingDefaultLevel::pubSub, LoggingDefaultLevel::command,
+    LoggingDefaultLevel::taskControllerRegistry, LoggingDefaultLevel::output,
+    LoggingDefaultLevel::rs485, LoggingDefaultLevel::spi,
+    LoggingDefaultLevel::clock, LoggingDefaultLevel::ledPwm,
+    LoggingDefaultLevel::input);
+
 static constexpr std::optional<LogLevel>
 default_level_for(LogComponent component) {
-    switch (component) {
-    case LogComponent::System:
-        return LoggingDefaultLevel::system;
-    case LogComponent::Monitoring:
-        return LoggingDefaultLevel::monitoring;
-    case LogComponent::Metrics:
-        return LoggingDefaultLevel::metrics;
-    case LogComponent::PubSub:
-        return LoggingDefaultLevel::pubSub;
-    case LogComponent::Command:
-        return LoggingDefaultLevel::command;
-    case LogComponent::TaskControllerRegistry:
-        return LoggingDefaultLevel::taskControllerRegistry;
-    case LogComponent::Output:
-        return LoggingDefaultLevel::output;
-    case LogComponent::Rs485:
-        return LoggingDefaultLevel::rs485;
-    case LogComponent::Spi:
-        return LoggingDefaultLevel::spi;
-    case LogComponent::Clock:
-        return LoggingDefaultLevel::clock;
-    case LogComponent::Unknown:
+    auto index = static_cast<size_t>(component);
+    if (index >= componentDefaultLogLevels.size()) {
         return LoggingDefaultLevel::defaultLevel;
-    default:
-        std::unreachable();
     }
+    return componentDefaultLogLevels[index];
 }
 
 class HasLogLevel : public IHasLogLevel {

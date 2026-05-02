@@ -133,9 +133,10 @@ inline CommandDesc::ParseResult parse_adapter(std::string_view input,
 
 template <typename T>
 constexpr CommandDesc::Argument arg(std::string_view name,
-                                    bool optional = false) {
+                                    CommandDesc::ArgRequirement requirement =
+                                        CommandDesc::ArgRequirement::Required) {
     return CommandDesc::Argument{.name = name,
-                                 .optional = optional,
+                                 .requirement = requirement,
                                  .type = arg_type_tag<T>(),
                                  .parse = &parse_adapter<T>};
 }

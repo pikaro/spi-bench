@@ -37,6 +37,13 @@
 #define FAIL_IF_ACTIVE_VOID(msg, ...)                                          \
     FAIL_IF_ACTIVE_THEN(return, msg, ##__VA_ARGS__)
 
+// Common shorthands for lifecycle active state checks
+#define FAIL_IF_ACTIVE_ERR(msg, ...)                                           \
+    FAIL_IF_ACTIVE_THEN(return ERR(LifecycleError, Active), msg, ##__VA_ARGS__)
+#define FAIL_IF_ACTIVE_UNEXPECTED(msg, ...)                                    \
+    FAIL_IF_ACTIVE_THEN(return std::unexpected(ERR(LifecycleError, Active)),   \
+                               msg, ##__VA_ARGS__)
+
 // Fail if self active
 #define FAIL_IF_SELF_ACTIVE_THEN(action, msg, ...)                             \
     INTERNAL_FAIL_IF_IMPL(self->_life.active(), "self active", action, msg,    \
@@ -47,6 +54,15 @@
     FAIL_IF_SELF_ACTIVE_THEN(return (ret), msg, ##__VA_ARGS__)
 #define FAIL_IF_SELF_ACTIVE_VOID(msg, ...)                                     \
     FAIL_IF_SELF_ACTIVE_THEN(return, msg, ##__VA_ARGS__)
+
+// Common shorthands for self lifecycle active state checks
+#define FAIL_IF_SELF_ACTIVE_ERR(msg, ...)                                      \
+    FAIL_IF_SELF_ACTIVE_THEN(return ERR(LifecycleError, Active), msg,          \
+                                    ##__VA_ARGS__)
+#define FAIL_IF_SELF_ACTIVE_UNEXPECTED(msg, ...)                               \
+    FAIL_IF_SELF_ACTIVE_THEN(                                                  \
+        return std::unexpected(ERR(LifecycleError, Active)), msg,              \
+               ##__VA_ARGS__)
 
 // Fail if not active
 #define FAIL_IF_INACTIVE_THEN(action, msg, ...)                                \
@@ -172,6 +188,18 @@
     FAIL_IF_ERR_THEN(expr, return, msg, ##__VA_ARGS__)
 #define FAIL_IF_ERR_FWD(expr, msg, ...)                                        \
     FAIL_IF_ERR_THEN(expr, return _rc_, msg, ##__VA_ARGS__)
+#define FAIL_ERR(err, msg, ...)                                                \
+    INTERNAL_FAIL_IF_IMPL_ERR(true, "Error", return ERR(err), msg, ERR(err),   \
+                              ##__VA_ARGS__)
+#define FAIL_ERR_UNEXPECTED(err, msg, ...)                                     \
+    INTERNAL_FAIL_IF_IMPL_ERR(true, "Error", return std::unexpected(ERR(err)), \
+                              msg, ERR(err), ##__VA_ARGS__)
+#define FAIL_ERR_FWD(err, msg, ...)                                            \
+    INTERNAL_FAIL_IF_IMPL_ERR(true, "Error", return err, msg, err,             \
+                              ##__VA_ARGS__)
+#define FAIL_ERR_FWD_UNEXPECTED(err, msg, ...)                                 \
+    INTERNAL_FAIL_IF_IMPL_ERR(true, "Error", return std::unexpected(err), msg, \
+                              ERR(err), ##__VA_ARGS__)
 #define FAIL_IF_ERR_FWD_UNEXPECTED(expr, msg, ...)                             \
     FAIL_IF_ERR_THEN(expr, return std::unexpected(_rc_), msg, ##__VA_ARGS__)
 #define ABORT_IF_ERR_BEGIN(expr) ABORT_IF_ERR(expr, "Failed to begin: " #expr)

@@ -12,10 +12,10 @@
 #include "LoggingBackend/detail/Types.hpp"
 #include "Macros/Facade.hpp"
 #include "Macros/internal/Markers.hpp"
+#include "Platform/PlatformSelect.hpp"
 #include "RingBuffer/Facade.hpp"
 #include "Services/Logging.hpp"
 #include "StaticConfig/Logging.hpp"
-#include "TaskController/Facade.hpp"
 #include "TaskController/Interfaces/IRegistry.hpp"
 #include "TaskController/Interfaces/TaskHooks.hpp"
 #include "Types/Error.hpp"
@@ -95,15 +95,7 @@ class BINDING Aggregator : public HasLifecycle<Aggregator, AggregatorConfig>,
         FAIL_IF_ERR_FWD(_registerCommands(),
                         "Failed to register commands for %s", name);
 
-        auto taskHooks = TaskController::TaskHooks::bind(*this);
-
-        FAIL_IF_ERR_FWD(_beginTaskController(config().task),
-                        "Failed to begin task controller for %s", name);
-
-        auto taskAddResult =
-            _taskController.addTask("AggregatorTask", taskHooks);
-        FAIL_IF_UNEXPECTED(task, taskAddResult, taskAddResult.error(),
-                           "Failed to bind task hooks for %s", name);
+        DEFAULT_TASK();
 
         auto ringBufferResult = RingBuffer::Buffer::create(
             config().ringBufferSize * sizeof(LogRecord));
@@ -112,8 +104,7 @@ class BINDING Aggregator : public HasLifecycle<Aggregator, AggregatorConfig>,
                            "Failed to create ring buffer for %s", name);
         _ringBuffer = ringBuffer;
 
-        FAIL_IF_ERR_FWD(_taskController.startTask(task, config().task),
-                        "Failed to start task for %s", name);
+        START_TASK();
 
         return OK();
     }

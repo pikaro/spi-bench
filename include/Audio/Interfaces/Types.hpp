@@ -12,6 +12,7 @@ namespace Totem::Audio {
 inline constexpr size_t fftBandCount = 8;
 inline constexpr size_t fftMaxFrameHandlers = 4;
 inline constexpr size_t fftMaxBeatHandlers = 4;
+inline constexpr size_t i2sMaxProbeBytes = 256;
 
 enum class I2SDevicePreset : uint8_t {
     LegacySoundCard,
@@ -83,6 +84,19 @@ struct I2SDeviceConfig {
     }
 };
 
+struct I2SSourceReadinessConfig {
+    uint16_t probeBytes = 64;
+    uint16_t probeIntervalMs = 250;
+    uint16_t readTimeoutMs = 1;
+    uint8_t emptyReadsBeforeOffline = 4;
+
+    [[nodiscard]] bool validate() const {
+        return probeBytes > 0 && probeBytes <= i2sMaxProbeBytes &&
+               probeIntervalMs > 0 && readTimeoutMs <= 100 &&
+               emptyReadsBeforeOffline > 0;
+    }
+};
+
 inline constexpr I2SDeviceConfig legacySoundCardI2SDeviceConfig() {
     return I2SDeviceConfig{
         .audio =
@@ -110,6 +124,7 @@ inline constexpr I2SDeviceConfig legacySoundCardI2SDeviceConfig() {
 struct I2SSourceConfig {
     I2SDevicePreset device = I2SDevicePreset::LegacySoundCard;
     I2SDeviceConfig customDevice{};
+    I2SSourceReadinessConfig readiness{};
 
     [[nodiscard]] constexpr I2SDeviceConfig resolvedDevice() const {
         switch (device) {
@@ -122,7 +137,17 @@ struct I2SSourceConfig {
         }
     }
 
-    [[nodiscard]] bool validate() const { return resolvedDevice().validate(); }
+    [[nodiscard]] bool validate() const {
+        return resolvedDevice().validate() && readiness.validate();
+    }
+};
+
+struct I2SSourceStatus {
+    bool ready = false;
+    uint32_t probes = 0;
+    uint32_t emptyReads = 0;
+    uint32_t observedBytes = 0;
+    uint32_t lastDataMs = 0;
 };
 
 enum class FftBand : uint8_t {
@@ -311,6 +336,7 @@ struct BeatEvent {
 struct FftRuntimeStats {
     uint32_t copiedBytes = 0;
     uint32_t emptyCopies = 0;
+    uint32_t sourceUnavailableSkips = 0;
     uint32_t frames = 0;
     uint32_t droppedFrames = 0;
     uint32_t beats = 0;

@@ -18,8 +18,10 @@
 struct CoreSetup {
     CoreSetup()
         : metricsBinding(metricsBackend), aggregator(taskRegistry),
-          commandController(taskRegistry), systemTaskSource(taskRegistry),
-          monitoring(taskRegistry) {}
+          consoleOutput(), commandController(taskRegistry),
+          consoleSource(commandController.store(), &commandController,
+                        Totem::CommandBackend::Controller::wake),
+          systemTaskSource(taskRegistry), monitoring(taskRegistry) {}
 
     void setup() {
         ::platform::wait_for_ready();
@@ -29,8 +31,8 @@ struct CoreSetup {
         ABORT_IF_ERR_BEGIN(taskRegistry.begin());
 
         ABORT_IF_ERR_BEGIN(consoleOutput.begin());
+        ABORT_IF_ERR_BEGIN(consoleSource.begin());
 
-        ABORT_IF_ERR_BEGIN(commandController.begin());
         ABORT_IF_ERR(commandController.addTransport(consoleSource),
                      "Failed to add console transport to command controller");
         CommandRegistrarService::set(commandController.registrar());
@@ -48,6 +50,7 @@ struct CoreSetup {
         LoggingService::set(aggregator);
 
         ABORT_IF_ERR_BEGIN(monitoring.begin());
+        ABORT_IF_ERR_BEGIN(commandController.begin());
 
         _log_i("Core setup complete");
     }

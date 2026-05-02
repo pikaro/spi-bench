@@ -77,6 +77,8 @@ class FftAnalyzer : public HasLifecycle<FftAnalyzer, FftAnalyzerConfig>,
         return FftRuntimeStats{
             .copiedBytes = _copiedBytes.load(std::memory_order_acquire),
             .emptyCopies = _emptyCopies.load(std::memory_order_acquire),
+            .sourceUnavailableSkips =
+                _sourceUnavailableSkips.load(std::memory_order_acquire),
             .frames = _frames.load(std::memory_order_acquire),
             .droppedFrames = _droppedFrames.load(std::memory_order_acquire),
             .beats = _beats.load(std::memory_order_acquire),
@@ -123,24 +125,16 @@ class FftAnalyzer : public HasLifecycle<FftAnalyzer, FftAnalyzerConfig>,
                 "Failed to begin audio-tools FFT sink");
 
         _copier.resize(config().copyBufferSizeBytes);
-        _copier.setDelayOnNoData(1);
+        _copier.setDelayOnNoData(0);
         _copier.setCheckAvailable(true);
         _copier.setCheckAvailableForWrite(false);
         _copier.setSynchAudioInfo(false);
         _copier.setLogName("AudioFft");
         _copier.begin(_fft, _source.input().stream());
 
-        auto taskHooks = TaskController::TaskHooks::bind(*this);
-        FAIL_IF_ERR_FWD(this->_beginTaskController(this->config().task),
-                        "Failed to begin task controller for %s", name);
-        auto taskAddResult =
-            this->_taskController.addTask(this->config().task.name, taskHooks);
-        FAIL_IF_UNEXPECTED(task, taskAddResult, taskAddResult.error(),
-                           "Failed to bind task hooks for %s", name);
+        DEFAULT_TASK();
         _task = task;
-        FAIL_IF_ERR_FWD(
-            this->_taskController.startTask(_task, this->config().task),
-            "Failed to start task for %s", name);
+        START_TASK();
 
         _log_i("FFT analyzer started: %u samples, stride %u, %lu Hz",
                config().length, config().stride,
@@ -158,7 +152,18 @@ class FftAnalyzer : public HasLifecycle<FftAnalyzer, FftAnalyzerConfig>,
 
     ReturnCode _onTaskStep() {
         const auto startedUs = ::platform::get_time_us();
+        const auto nowMs = ::platform::get_time();
+        if (!_source.ready()) {
+            _sourceUnavailableSkips.fetch_add(1, std::memory_order_acq_rel);
+            (void)_source.pollReadiness(nowMs);
+            const auto elapsedUs =
+                static_cast<uint32_t>(::platform::get_time_us() - startedUs);
+            _recordMax(_maxCopyUs, elapsedUs);
+            return OK();
+        }
+
         const auto copied = _copier.copy();
+        _source.observeReadResult(copied, nowMs);
         const auto elapsedUs =
             static_cast<uint32_t>(::platform::get_time_us() - startedUs);
         _recordMax(_maxCopyUs, elapsedUs);
@@ -198,10 +203,9 @@ class FftAnalyzer : public HasLifecycle<FftAnalyzer, FftAnalyzerConfig>,
                 upper = lower;
             }
 
-            const auto centerHz =
-                (static_cast<float>(band.lowerHz) +
-                 static_cast<float>(band.upperHz)) *
-                0.5F;
+            const auto centerHz = (static_cast<float>(band.lowerHz) +
+                                   static_cast<float>(band.upperHz)) *
+                                  0.5F;
             _bandPlan[i] = BandPlan{
                 .band = static_cast<FftBand>(i),
                 .lowerHz = band.lowerHz,
@@ -234,13 +238,12 @@ class FftAnalyzer : public HasLifecycle<FftAnalyzer, FftAnalyzerConfig>,
             return 0.0F;
         }
 
-        const auto f2 = static_cast<double>(frequencyHz) *
-                        static_cast<double>(frequencyHz);
+        const auto f2 =
+            static_cast<double>(frequencyHz) * static_cast<double>(frequencyHz);
         const auto numerator = (12200.0 * 12200.0) * f2 * f2;
         const auto denominator =
             (f2 + (20.6 * 20.6)) *
-            std::sqrt((f2 + (107.7 * 107.7)) *
-                      (f2 + (737.9 * 737.9))) *
+            std::sqrt((f2 + (107.7 * 107.7)) * (f2 + (737.9 * 737.9))) *
             (f2 + (12200.0 * 12200.0));
         const auto ratio = numerator / denominator;
         const auto db = 2.0 + (20.0 * std::log10(ratio));
@@ -355,16 +358,16 @@ class FftAnalyzer : public HasLifecycle<FftAnalyzer, FftAnalyzerConfig>,
 
     static void _recordMax(std::atomic<uint32_t> &target, uint32_t value) {
         auto current = target.load(std::memory_order_acquire);
-        while (value > current &&
-               !target.compare_exchange_weak(current, value,
-                                             std::memory_order_acq_rel,
-                                             std::memory_order_acquire)) {
+        while (value > current && !target.compare_exchange_weak(
+                                      current, value, std::memory_order_acq_rel,
+                                      std::memory_order_acquire)) {
         }
     }
 
     void _resetStats() {
         _copiedBytes.store(0, std::memory_order_release);
         _emptyCopies.store(0, std::memory_order_release);
+        _sourceUnavailableSkips.store(0, std::memory_order_release);
         _frames.store(0, std::memory_order_release);
         _droppedFrames.store(0, std::memory_order_release);
         _beats.store(0, std::memory_order_release);
@@ -390,6 +393,7 @@ class FftAnalyzer : public HasLifecycle<FftAnalyzer, FftAnalyzerConfig>,
     std::atomic<bool> _handlingFrame{false};
     std::atomic<uint32_t> _copiedBytes{0};
     std::atomic<uint32_t> _emptyCopies{0};
+    std::atomic<uint32_t> _sourceUnavailableSkips{0};
     std::atomic<uint32_t> _frames{0};
     std::atomic<uint32_t> _droppedFrames{0};
     std::atomic<uint32_t> _beats{0};

@@ -1,34 +1,40 @@
 #pragma once
 
+#include "Buttons/Interfaces/Config.hpp"
+#include "Data/Facade.hpp"
+#include "LedPwm/Interfaces/Config.hpp"
 #include "Platform/Hardware.hpp"
+#include "Types/Gpio.hpp"
 #include "Wire/Rs485/Interfaces/SlaveConfig.hpp"
-#include "Wire/Spi/Interfaces/SlaveConfig.hpp"
-#include "Wire/Spi/Interfaces/Types.hpp"
 
-inline Totem::Wire::Rs485::SlaveConfig rs485SlaveConfig{
+constexpr Totem::Wire::Rs485::SlaveConfig rs485SlaveConfig{
     .uartConfig =
         {
             .uartNumber = 1,
             .pins =
                 {
-                    .txPin = Pin::GPIO6,
-                    .rxPin = Pin::GPIO5,
+                    .txPin = Pin::GPIO1,
+                    .rxPin = Pin::GPIO0,
                 },
         },
-    .attentionPin = Pin::GPIO10,
+    .attentionPin = Pin::GPIO5,
 };
 
-inline Totem::Wire::Spi::SlaveConfig spiSlaveConfig{
-    .busId = Totem::Wire::Spi::BusId::Bus2,
-    .pins =
+constexpr Totem::LedPwm::Config ledPwmConfig{
+    .leds = {{
+        {.led = PeripheralLed::Bulb1, .pin = Pin::GPIO6},
+        {.led = PeripheralLed::Bulb2, .pin = Pin::GPIO7},
+        {.led = PeripheralLed::Onboard, .pin = Pin::GPIO10},
+    }},
+};
+
+constexpr Totem::Buttons::Config buttonsConfig{
+    .buttons = {{
         {
-            .mosiPin = Pin::GPIO3,
-            .misoPin = Pin::GPIO7,
-            .sclkPin = Pin::GPIO4,
+            .pin = Pin::GPIO4,
+            .button = PeripheralButton::Bell,
+            .pull = GpioPull::None,
+            .activeLow = false,
         },
-    .csPin = Pin::GPIO1,
-    .maxTransferSize = 4096,
-    .mode = Totem::Wire::Spi::Mode::Mode0,
-    .bitOrder = Totem::Wire::Spi::BitOrder::MsbFirst,
-    .queueSize = 1,
+    }},
 };

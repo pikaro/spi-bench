@@ -13,6 +13,8 @@ namespace Totem::CommandBackend::detail {
 
 class Store {
   public:
+    using CommandKeySnapshot = Directory::EntryKeySnapshot;
+
     Store() { _enableRegistration(); }
     ~Store() { _disableRegistration(); }
 
@@ -35,6 +37,16 @@ class Store {
             "Failed to get command from directory for command name " SV_FMT,
             SV_ARG(commandNameKey.view()));
         return std::make_pair(command.ctx, *command.desc);
+    }
+
+    [[nodiscard]] std::expected<bool, ReturnCode>
+    contains(const CommandNameKey &commandNameKey) const {
+        return _directory.contains(commandNameKey);
+    }
+
+    [[nodiscard]] std::expected<CommandKeySnapshot, ReturnCode>
+    snapshotCommandKeys() const {
+        return _directory.snapshotKeys();
     }
 
   private:

@@ -62,6 +62,15 @@ struct Platform {
         return OK();
     }
 
+    static bool sendFromIsr(QueueHandle handle, const void *item) {
+        BaseType_t woke = pdFALSE;
+        const auto result = xQueueSendToBackFromISR(handle, item, &woke);
+        if (woke == pdTRUE) {
+            portYIELD_FROM_ISR();
+        }
+        return result == pdTRUE;
+    }
+
     static ReturnCode receive(QueueHandle handle, void *item,
                               Tick timeout = TICK_MAX_DELAY) {
         auto result = xQueueReceive(handle, item, timeout);

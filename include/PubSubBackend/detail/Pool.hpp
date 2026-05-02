@@ -25,9 +25,10 @@ class Pool : public HasMutex<Pool<T, Capacity>> {
     };
 
   public:
-    explicit Pool(void *pubSubNode, NextMessageIdCallback nextMessageIdCallback)
-        : _pubSubNode(pubSubNode),
-          _nextMessageIdCallback(nextMessageIdCallback) {}
+    Pool() = default;
+
+    explicit Pool(NextMessageIdCallback nextMessageIdCallback)
+        : _nextMessageIdCallback(nextMessageIdCallback) {}
 
     DELETE_COPY(Pool)
     DELETE_MOVE(Pool)
@@ -35,12 +36,28 @@ class Pool : public HasMutex<Pool<T, Capacity>> {
     static constexpr const char *name = "PubSub::Pool";
 
     std::expected<MessageId, ReturnCode> store(const T &value) {
+        FAIL_IF_NULL(_nextMessageIdCallback,
+                     std::unexpected(ERR(InvalidState)),
+                     "PubSub pool has no next message ID callback");
+        return store(value, _nextMessageIdCallback());
+    }
+
+    /**
+     * Store a value with a caller-owned message ID.
+     *
+     * This keeps Pool independent of owners that need contextual message ID
+     * sources, such as node-local PubSub control-plane publishers.
+     */
+    std::expected<MessageId, ReturnCode> store(const T &value,
+                                               MessageId messageId) {
+        FAIL_IF(messageId == 0, std::unexpected(ERR(InvalidArgument)),
+                "Cannot store PubSub pool message with ID 0");
         FAIL_IF_MUTEX_TIMEOUT(mutexTimeoutMs, std::unexpected(ERR(Timeout)),
                               "Timed out locking PubSub pool for store");
         for (auto &slot : _storage) {
             if (!slot.value) {
                 slot.value.emplace(value);
-                slot.messageId = _nextMessageIdCallback(_pubSubNode);
+                slot.messageId = messageId;
                 _log_d("%s: stored messageId %u", name, slot.messageId);
                 return slot.messageId;
             }
@@ -149,9 +166,8 @@ class Pool : public HasMutex<Pool<T, Capacity>> {
     }
 
   private:
-    void *_pubSubNode;
     std::array<Slot, Capacity> _storage;
-    NextMessageIdCallback _nextMessageIdCallback;
+    NextMessageIdCallback _nextMessageIdCallback = nullptr;
 
     static constexpr uint32_t mutexTimeoutMs = 10;
 };

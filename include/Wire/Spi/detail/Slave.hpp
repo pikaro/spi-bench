@@ -14,8 +14,8 @@
 #include "Wire/Spi/detail/Transceiver.hpp"
 #include "Wire/Spi/detail/Types.hpp"
 #include "Wire/detail/AttentionLine.hpp"
-#include <atomic>
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstring>
 #include <optional>
@@ -106,7 +106,8 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
         (void)metrics();
 
         _log_i("SPI slave initializing device");
-        FAIL_IF_ERR_FWD(_device.init(config()), "Failed to initialize SPI slave");
+        FAIL_IF_ERR_FWD(_device.init(config()),
+                        "Failed to initialize SPI slave");
         _log_i("SPI slave device initialized");
         _device.registerCompletionCallback(this, _onTransferComplete);
         _transceiver.reset();
@@ -124,17 +125,9 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
         FAIL_IF_ERR_FWD(_updateAttentionLine(),
                         "Failed to update SPI slave attention output");
 
-        auto taskHooks = TaskController::TaskHooks::bind(*this);
-        FAIL_IF_ERR_FWD(this->_beginTaskController(this->config().task),
-                        "Failed to begin task controller for %s", name);
-        auto taskAddResult =
-            this->_taskController.addTask(this->config().task.name, taskHooks);
-        FAIL_IF_UNEXPECTED(task, taskAddResult, taskAddResult.error(),
-                           "Failed to bind task hooks for %s", name);
+        DEFAULT_TASK();
         _task = task;
-        FAIL_IF_ERR_FWD(
-            this->_taskController.startTask(_task, this->config().task),
-            "Failed to start task for %s", name);
+        START_TASK();
         return OK();
     }
 
@@ -212,8 +205,8 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
                 return callbackRet;
             }
         }
-        const auto flags = useAttentionMarker ? FrameFlags::AttentionSync
-                                              : FrameFlags::None;
+        const auto flags =
+            useAttentionMarker ? FrameFlags::AttentionSync : FrameFlags::None;
         clockSyncMarkerPrepared = useAttentionMarker;
         auto ret = _transceiver.queueRequest(request.payloadType,
                                              request.request, flags);
@@ -236,12 +229,10 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
     ReturnCode _onTaskNotify(Signal) { return OK(); }
 
     ReturnCode _updateAttentionLine() {
-        const bool asserted = !_transceiver.ready() ||
-                              _transceiver.hasPendingTx() ||
-                              _pendingExchange.has_value() ||
-                              _exchangeInFlight ||
-                              _hasPendingWrites() ||
-                              _hasQueuedWrites();
+        const bool asserted =
+            !_transceiver.ready() || _transceiver.hasPendingTx() ||
+            _pendingExchange.has_value() || _exchangeInFlight ||
+            _hasPendingWrites() || _hasQueuedWrites();
         if (asserted != _attentionAsserted) {
             if (asserted) {
                 metrics().addAttentionAssert();
@@ -263,8 +254,7 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
         const auto transferSize =
             static_cast<size_t>(this->config().transferWindowBytes);
         FAIL_IF(tx.size() > transferSize || transferSize > _rxBuffer.size(),
-                ERR(CoreError, Overflow),
-                "SPI slave RX buffer too small");
+                ERR(CoreError, Overflow), "SPI slave RX buffer too small");
         auto txWindow = std::span<const std::byte>(tx.data(), transferSize);
         auto rx = std::span<std::byte>(_rxBuffer.data(), transferSize);
         if (!_transceiver.ready() && _queueCount < 5) {
@@ -302,13 +292,14 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
             _log_v("SPI slave unmatched response payload=%u seq=%u "
                    "exchangeInFlight=%u activePayload=%u",
                    static_cast<unsigned>(frame.header.payloadType),
-                   frame.header.sequence, static_cast<unsigned>(_exchangeInFlight),
+                   frame.header.sequence,
+                   static_cast<unsigned>(_exchangeInFlight),
                    static_cast<unsigned>(_activeExchange.payloadType));
             return OK();
         }
         if (frame.payload.size() > _activeExchange.response.size()) {
-            auto ret = _activeExchange.nack(exchangeHandle,
-                                           ERR(CoreError, Overflow));
+            auto ret =
+                _activeExchange.nack(exchangeHandle, ERR(CoreError, Overflow));
             _clearActiveExchange();
             return ret;
         }
@@ -363,11 +354,11 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
             FAIL_IF_ERR_FWD(Totem::Queue::Platform::receive(_txQueue, &item, 0),
                             "Failed to receive SPI slave write request");
         }
-        if (!_transceiver.canFitNextFrame(item.request.data.size(),
-                                          this->config().maxOutboundSlotBytes)) {
+        if (!_transceiver.canFitNextFrame(
+                item.request.data.size(),
+                this->config().maxOutboundSlotBytes)) {
             if (!_transceiver.hasQueuedFrames()) {
-                return item.request.nack(item.handle,
-                                         ERR(CoreError, Overflow));
+                return item.request.nack(item.handle, ERR(CoreError, Overflow));
             }
             _deferredWrite = item;
             deferred = true;
@@ -464,8 +455,8 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
             _log_v("SPI slave write seq=%u timed out after %u ms",
                    pending.sequence,
                    static_cast<unsigned>(nowMs - pending.sentAtMs));
-            ret.combine(pending.request.nack(pending.handle,
-                                             ERR(CoreError, Timeout)));
+            ret.combine(
+                pending.request.nack(pending.handle, ERR(CoreError, Timeout)));
             pending = {};
         }
         return ret;
@@ -522,8 +513,8 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
         _log_v("SPI slave exchange payload=%u timed out after %u ms",
                static_cast<unsigned>(_activeExchange.payloadType),
                static_cast<unsigned>(nowMs - _exchangeStartedAtMs));
-        auto ret = _activeExchange.nack(exchangeHandle,
-                                        ERR(CoreError, Timeout));
+        auto ret =
+            _activeExchange.nack(exchangeHandle, ERR(CoreError, Timeout));
         _clearActiveExchange();
         return ret;
     }
@@ -560,7 +551,8 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
         }
         auto result = _device.waitTransfer(0);
         if (!result) {
-            if (!_transceiver.ready() && result.error() == ERR(CoreError, Timeout)) {
+            if (!_transceiver.ready() &&
+                result.error() == ERR(CoreError, Timeout)) {
                 _waitTimeouts++;
                 if (_waitTimeouts <= 5) {
                     _log_v("SPI slave debug wait timeout=%lu transferQueued=%u",
@@ -601,8 +593,8 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
                    static_cast<unsigned>(bytes),
                    bytes > 0 ? std::to_integer<unsigned>(_rxBuffer[0]) : 0,
                    bytes > 1 ? std::to_integer<unsigned>(_rxBuffer[1]) : 0,
-                   static_cast<unsigned long>(_completionCount.load(
-                       std::memory_order_acquire)));
+                   static_cast<unsigned long>(
+                       _completionCount.load(std::memory_order_acquire)));
         }
         FAIL_IF(bytes > _rxBuffer.size(), ERR(CoreError, Overflow),
                 "SPI slave transfer exceeded RX buffer");
@@ -682,7 +674,8 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
     Transceiver<4096> _transceiver{};
     alignas(4) std::array<std::byte, 4096> _rxBuffer{};
     Totem::Queue::Handle _txQueue{};
-    Totem::Queue::Platform::Storage<TxQueueItem, txQueueDepth> _txQueueStorage{};
+    Totem::Queue::Platform::Storage<TxQueueItem, txQueueDepth>
+        _txQueueStorage{};
     std::optional<TxQueueItem> _deferredWrite = std::nullopt;
     std::array<PendingWrite, pendingWriteDepth> _pendingWrites{};
     Totem::Wire::detail::AttentionLine _attention{};
@@ -695,8 +688,7 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
     uint32_t _completedTransfers = 0;
     uint32_t _queueCount = 0;
     std::atomic<uint32_t> _completionCount{0};
-    std::optional<Totem::Wire::ExchangeRequest> _pendingExchange =
-        std::nullopt;
+    std::optional<Totem::Wire::ExchangeRequest> _pendingExchange = std::nullopt;
     Totem::Wire::ExchangeRequest _activeExchange{};
     bool _exchangeInFlight = false;
     int64_t _exchangeSentAtUs = 0;

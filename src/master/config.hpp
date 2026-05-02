@@ -83,7 +83,9 @@ inline Totem::Wire::Spi::MasterConfig spiMasterBusLowSpeedConfig{
     .serviceBudgetMs = 5,
     .maxTurnsPerStep = 1,
     .interTurnDelayMs = 0,
-    .maxOutboundSlotBytes = 512,
-    .attentionReceiveWindowBytes = 512,
+    .maxOutboundSlotBytes = 256,
+    .attentionReceiveWindowBytes = 256,
+    .localWriteCoalesceUs = 1000,
+    .noSlotBackoffUs = 1000,
     .attentionPin = Pin::GPIO39,
 };

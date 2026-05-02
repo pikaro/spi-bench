@@ -22,16 +22,15 @@
 #include <expected>
 #include <memory>
 #include <string_view>
-#include <utility>
 
 namespace Totem::TaskController::detail {
 
 static constexpr ::platform::Tick defaultEndKillDelayMs = 100;
 
-class Controller : public HasLifecycle<Controller, Config>,
+class Controller : public HasLifecycle<Controller>,
                    public TaskControllerRegistry::ITaskSource {
-    friend class HasLifecycle<Controller, Config>;
-    friend struct LifecycleContract<Controller, Config>;
+    friend class HasLifecycle<Controller>;
+    friend struct LifecycleContract<Controller>;
 
     using RunnerKeySnapshot = Directory::EntryKeySnapshot;
 
@@ -129,7 +128,7 @@ class Controller : public HasLifecycle<Controller, Config>,
             });
     }
 
-    void signalTaskFromIsr(RunnerKey ref, Signal signal = Signal::Ping) {
+    static void signalTaskFromIsr(RunnerKey ref, Signal signal = Signal::Ping) {
         if (ref == 0) {
             return;
         }
@@ -398,6 +397,6 @@ class Controller : public HasLifecycle<Controller, Config>,
     const char *const _ownerName;
 };
 
-inline constexpr LifecycleContract<Controller, Config> _controller_lifecycle;
+inline constexpr LifecycleContract<Controller> _controller_lifecycle;
 
 } // namespace Totem::TaskController::detail

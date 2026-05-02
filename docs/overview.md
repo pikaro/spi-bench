@@ -60,12 +60,45 @@ organized as follows:
 - `src/master/`, `src/media/`, `src/gpu/`, and `src/io/`:
     environment-specific execution roots selected by build configuration.
     Both GPU PlatformIO environments currently map to `src/gpu/`.
+- `env:io` targets the ESP32-C3 SuperMini board variant in this repository and
+    uses the 4 MiB flash layout under `partitions/esp32_4mib.csv`.
+    Its runtime command console is the USB Serial/JTAG console; native UART0
+    remains configured at 921600 baud for ESP-IDF early boot and panic output.
 - `bin/`: project helper scripts used during build and code generation
 
 Component header boundaries are described in [structure.md](structure.md):
 `Facade.hpp` is the curated public entry point, `Interfaces/` is only for
 lightweight public types that external code needs to name directly, and
 `detail/` owns implementation internals.
+
+### IO Lighting
+
+The current `env:io` board is an ESP32-C3 side node intended to sit inside the
+treasure chest, separate from the main controller board. Its local `LedPwm`
+setup exposes configured LED contexts for two external E27 bulbs and one
+onboard gold LED. Public LED commands still require a returned `LedContext`, so
+callers can only address LEDs present in the node configuration.
+The same node owns the ship's bell input as an active-high GPIO button with an
+external pulldown. Button ISR events are queued and published locally through
+PubSub before higher-level lighting code reacts to them; the button task also
+polls configured GPIO levels and deduplicates transitions so missed ISR wakeups
+do not leave a changed level invisible.
+
+`LedPwm` separates direct electrical duty from human-oriented brightness:
+`setDuty()` writes linear PWM duty and clears any active brightness animation
+state, while `setBrightness()` establishes a persistent gamma-corrected base
+brightness. Fire-and-forget animations are started with `startAnimation()` or
+the convenience `pulse()` command. The handler owns a fixed set of static
+animation slots per LED (`LedPwmConfig::animationSlots`, currently 10), steps
+them from the `LedPwm` task, and applies the brightest value among the base
+brightness and all active animation slots. `clearAnimations()` removes overlays;
+send an explicit brightness or duty command afterward when a stop command
+should also force the LED output off.
+
+`Pulse` is the first animation payload. Additional effects such as chest
+twinkle, beat flicker, and bell/drop flares should be added as new `Animation`
+variant payloads with small self-contained parameter structs, keeping command
+objects queue-copyable and allocation-free.
 
 ## Build Model
 
@@ -84,15 +117,37 @@ lightweight public types that external code needs to name directly, and
 The `sdkconfig.<env>` files are generated from `sdkconfig.stack.*` templates. A
 `build_script` assembles all sections with an `extends` in `platformio.ini` if
 `sdkconfig.stack.<group>` exists. I.e. if `env:master` extends `esp32s3`, which
-extends `esp32`, the build script will add to `sdkconfig.defaults.master` in
+extends `esp32`, the build script will add to `sdkconfig.master.defaults` in
 order:
 
 - `sdkconfig.stack.esp32`
 - `sdkconfig.stack.esp32s3`
 - `sdkconfig.stack.master`
 
-If options have changed, it deletes the existing `sdkconfig.master` to force
-regeneration.
+If options have changed, it deletes the generated `sdkconfig.<env>` file for
+every environment using that defaults file to force regeneration.
+
+Flash size entries must set both the Kconfig choice symbol and the string
+value, for example `CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y` plus
+`CONFIG_ESPTOOLPY_FLASHSIZE="4MB"`. Setting only the string leaves ESP-IDF free
+to regenerate the ignored `sdkconfig.<env>` file with its default 2 MiB choice.
+The shared ESP32 stack provides the 4 MiB default; board stacks only override it
+for larger flash variants such as ESP32-S3-N16R8.
+
+Hardware UART console baud changes require `CONFIG_ESP_CONSOLE_UART_CUSTOM=y`;
+`CONFIG_ESP_CONSOLE_UART_DEFAULT=y` keeps ESP-IDF's default 115200 baud even if
+`CONFIG_ESP_CONSOLE_UART_BAUDRATE` is present in the defaults file. USB
+Serial/JTAG targets keep the runtime command console on USB and leave UART0 as
+the early boot and panic-output path. PlatformIO's host-side `monitor_speed`
+must match the active console transport.
+
+The command console is a small line editor over the same runtime console:
+slash-prefixed commands can be edited with Backspace/DEL, Tab completes
+registered commands and subcommands, Up/Down navigate the last five accepted
+commands, and each input byte redraws the current command buffer so log output
+does not permanently hide in-progress input. Console input events wake the
+command task directly; the periodic task interval is only a slow liveness
+fallback.
 
 The current master board wiring uses GPIO36/GPIO37 for the low-speed SPI bus.
 Those pins overlap the ESP32-S3 OPI PSRAM signal set on the devkit-style board,
@@ -167,6 +222,9 @@ system task source skips those tasks instead of reporting duplicates.
 Task-controller auto-restart reuses the existing managed runner entry and its
 metric handles; restart counts therefore remain attached to the same metric
 group instead of registering a new group for every failed task instance.
+Task-controller lifecycle begin/end is controller-scoped and has no task config;
+each managed runner receives and retains its own `TaskController::Config` when
+started.
 
 Meaningful verification currently means:
 

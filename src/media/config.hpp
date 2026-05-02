@@ -19,9 +19,20 @@ inline Totem::Wire::Spi::SlaveConfig spiSlaveConfig{
         },
     .csPin = Pin::VSPI_CS,
     .maxTransferSize = 4096,
-    .transferWindowBytes = 512,
-    .maxOutboundSlotBytes = 512,
+    .transferWindowBytes = 256,
+    .maxOutboundSlotBytes = 256,
     .mode = Totem::Wire::Spi::Mode::Mode0,
     .queueSize = 1,
+    .task =
+        {
+            .name = "SpiSlaveTask",
+            .priority = 2,
+            .stackSize = 8192,
+            .intervalMs = 10,
+            .noCatchup = true,
+            .useNotify = true,
+            .notifyExpectTimeout = false,
+            .notifyTimeoutMs = 10,
+        },
     .attentionPin = Pin::GPIO17,
 };

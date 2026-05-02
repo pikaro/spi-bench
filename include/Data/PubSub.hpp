@@ -28,6 +28,7 @@ enum class Topic : uint32_t {
     Power = 1U << 5,
     Logs = 1U << 6,
     Metrics = 1U << 7,
+    Button = 1U << 8,
 };
 
 enum class SPIOnlyTransport : uint8_t {

@@ -15,7 +15,9 @@
 #include "TaskController/Interfaces/IRegistry.hpp"
 #include "TaskController/Interfaces/TaskHooks.hpp"
 #include "Types/Error.hpp"
+#include "Types/Signal.hpp"
 #include <array>
+#include <optional>
 
 namespace Totem::CommandBackend::detail {
 
@@ -39,6 +41,18 @@ class Controller : public HasLifecycle<Controller, Config>,
         : HasTaskController(registry), _registrar(_store) {}
 
     Registrar &registrar() { return _registrar; }
+    [[nodiscard]] const Store &store() const { return _store; }
+
+    ReturnCode wake(Signal signal = Signal::Ping) {
+        FAIL_IF(!_taskKey.has_value(), ERR(InvalidState),
+                "Cannot wake command task before task registration");
+        return _taskController.signalTask(*_taskKey, signal);
+    }
+
+    static ReturnCode wake(void *controller, Signal signal = Signal::Ping) {
+        auto *self = static_cast<Controller *>(controller);
+        return self->wake(signal);
+    }
 
     ReturnCode addTransport(ITransport &transport) {
         for (auto &slot : _transports) {
@@ -53,18 +67,9 @@ class Controller : public HasLifecycle<Controller, Config>,
 
   private:
     ReturnCode _onBegin() {
-        auto taskHooks = TaskController::TaskHooks::bind(*this);
-
-        FAIL_IF_ERR_FWD(_beginTaskController(config().task),
-                        "Failed to begin task controller for %s", name);
-
-        auto taskAddResult = _taskController.addTask("CommandTask", taskHooks);
-        FAIL_IF_UNEXPECTED(task, taskAddResult, taskAddResult.error(),
-                           "Failed to add task to task controller for %s",
-                           name);
-
-        FAIL_IF_ERR_FWD(_taskController.startTask(task, config().task),
-                        "Failed to start task in task controller for %s", name);
+        DEFAULT_TASK();
+        _taskKey = task;
+        START_TASK();
 
         return OK();
     }
@@ -112,6 +117,13 @@ class Controller : public HasLifecycle<Controller, Config>,
                        SV_ARG(transport->displayName()));
                 continue;
             }
+            if (dispatchResult.domain == ErrorDomain::Command) {
+                _log_w("Command dispatch error from transport " SV_FMT
+                       ": " ERR_FMT,
+                       SV_ARG(transport->displayName()),
+                       ERR_ARG(dispatchResult));
+                continue;
+            }
             FAIL_IF_ERR_FWD(dispatchResult,
                             "Failed to dispatch command from transport " SV_FMT,
                             SV_ARG(transport->displayName()));
@@ -120,14 +132,18 @@ class Controller : public HasLifecycle<Controller, Config>,
     }
 
     ReturnCode _onEnd() {
+        _taskKey.reset();
         FAIL_IF_ERR_FWD(_taskController.end(),
                         "Failed to end task controller for %s", name);
         return OK();
     }
 
+    static ReturnCode _onTaskNotify(Signal /*signal*/) { return OK(); }
+
     Store _store;
     Registrar _registrar;
     std::array<ITransport *, CommandConfig::maxTransports> _transports{nullptr};
+    std::optional<TaskController::RunnerKey> _taskKey;
 
     static constexpr LogComponent logComponent =
         Totem::CommandBackend::detail::logComponent;

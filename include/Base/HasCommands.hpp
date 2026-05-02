@@ -29,8 +29,9 @@ template <class Derived, typename CommandSet> class HasCommands {
                          Derived::name);
             FAIL_IF_UNEXPECTED_FWD(nameKey,
                                    registrar.registerCommand(*cmd, self),
-                                   "Failed to register command %s for %s",
-                                   cmd->name, Derived::name);
+                                   "Failed to register command " SV_FMT
+                                   " for %s",
+                                   SV_ARG(cmd->name), Derived::name);
             _registeredCommandKeys[_registeredCommandCount++] = nameKey;
         }
         return OK();
@@ -43,8 +44,9 @@ template <class Derived, typename CommandSet> class HasCommands {
                 continue;
             }
             FAIL_IF_ERR_FWD(registrar.deregisterCommand(nameKey),
-                            "Failed to deregister command with key %s for %s",
-                            nameKey, Derived::name);
+                            "Failed to deregister command with key " SV_FMT
+                            " for %s",
+                            SV_ARG(nameKey.view()), Derived::name);
         }
         return OK();
     }

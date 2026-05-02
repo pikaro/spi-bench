@@ -11,13 +11,31 @@
 #include "PubSubBackend/Transports/Rs485Transport.hpp"
 #include "Services/Clock.hpp"
 #include "Services/PubSub.hpp"
-#include "Setups/PubSubTest.hpp"
 #include "Setups/PubSubTestMessage.hpp"
 #include "TaskController/Interfaces/IRegistry.hpp"
 #include "Types/Error.hpp"
 #include <cinttypes>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
+
+inline PubSubTest::Message makeTestMessage() {
+    static uint32_t sequence = 0;
+    const auto value = ++sequence;
+
+    PubSubTest::Message msg{};
+    msg.flag = (value & 1U) == 0;
+    msg.intVal = static_cast<int>(value % 1000U);
+    msg.uint32Val = value * 2654435761UL;
+    msg.uint16Val = static_cast<uint16_t>(value);
+    msg.uint8Val = static_cast<uint8_t>(value);
+    std::strncpy(msg.strVal.data(), "Hello, PubSub!", msg.strVal.size() - 1);
+    msg.strVal[msg.strVal.size() - 1] = '\0';
+    for (size_t i = 0; i < msg.byteArrayVal.size(); ++i) {
+        msg.byteArrayVal[i] = static_cast<std::byte>(value + i);
+    }
+    return msg;
+}
 
 template <class Link> struct PubSubRs485TestSetup {
     enum class Role : uint8_t {
@@ -82,6 +100,7 @@ template <class Link> struct PubSubRs485TestSetup {
             FAIL_IF_UNEXPECTED_FWD(message,
                                    envelope.getPayloadAs<PubSubTest::Message>(),
                                    "Failed to decode RS485 PubSub message");
+            (void)message;
             const auto nowUs = ClockService::get().nowUs();
             const auto latencyUs =
                 envelope.header.timestampUs == 0
@@ -100,8 +119,7 @@ template <class Link> struct PubSubRs485TestSetup {
                      static_cast<NodeId>(NodeData::PubSub::nodeId)),
           role(role), config(config),
           transport(makeRs485Deps(pubSubNode, link, "PubSub-RS485")),
-          messagePool(static_cast<void *>(&pubSubNode),
-                      PubSubNode::nextMessageId),
+          messagePool(PubSubService::nextMessageId),
           consumer{role == Role::Master ? "RS485-master-consumer"
                                         : "RS485-slave-consumer",
                    &stats} {}
@@ -178,7 +196,7 @@ template <class Link> struct PubSubRs485TestSetup {
     }
 
     ReturnCode publishTestMessage() {
-        auto message = PubSubTest::makeTestMessage();
+        auto message = makeTestMessage();
         const auto *label = role == Role::Master ? "RS485 beat from master"
                                                  : "RS485 sensor from slave";
         std::strncpy(message.strVal.data(), label, message.strVal.size() - 1);

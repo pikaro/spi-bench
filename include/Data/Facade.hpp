@@ -3,6 +3,7 @@
 // IWYU pragma: begin_exports
 
 #include "Data/Nodes.hpp"
+#include "Data/Peripherals.hpp"
 #include "Data/PubSub.hpp"
 
 // IWYU pragma: end_exports

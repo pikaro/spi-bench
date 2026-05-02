@@ -19,10 +19,11 @@ class Registrar : public IRegistrar {
     registerCommand(CommandDesc &cmd, void *ctx = nullptr) override {
         FAIL_IF_ERR_FWD_UNEXPECTED(
             cmd.validate(),
-            "Invalid command description for command %s:", cmd.name);
+            "Invalid command description for command " SV_FMT ":",
+            SV_ARG(cmd.name));
         FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
             nameKey, _store.add(ctx, cmd),
-            "Failed to add command %s to store:", cmd.name);
+            "Failed to add command " SV_FMT " to store:", SV_ARG(cmd.name));
         return nameKey;
     }
 

@@ -34,6 +34,11 @@ struct Console {
         return UartConsole.read(buffer, timeoutMs);
     }
 
+    static ReturnCode registerCallback(void *owner,
+                                       UartEventCallback callback) {
+        return UartConsole.registerCallback(owner, callback);
+    }
+
     static ReturnCode deinit() { return UartConsole.deinit(); }
 };
 

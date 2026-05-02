@@ -20,8 +20,8 @@ using Pin = platform::Esp32S3Pin;
 using Pin = platform::Esp32S3ZeroPin;
 
 #elif defined(PLATFORM_ESP32C3_SUPERMINI)
-#include "hardware/HardwareESP32SC3SuperMini.hpp"
-using Pin = platform::Esp32SC3SuperMiniPin;
+#include "hardware/HardwareESP32C3SuperMini.hpp"
+using Pin = platform::Esp32C3SuperMiniPin;
 
 #else
 #error "No supported platform selected"

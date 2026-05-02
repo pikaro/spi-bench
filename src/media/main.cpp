@@ -13,8 +13,15 @@ Totem::Clock::Clock clockSlave{Totem::Clock::Clock::Role::Slave};
 // Totem::Audio::FftAnalyzer fftAnalyzer{core.taskRegistry, i2sSource};
 Totem::Wire::Spi::Slave spiSlave{core.taskRegistry};
 PubSubSpiTestSetup<Totem::Wire::Spi::Slave> pubSubSpi{
-    core.taskRegistry, spiSlave,
-    PubSubSpiTestSetup<Totem::Wire::Spi::Slave>::Role::Slave};
+    core.taskRegistry,
+    spiSlave,
+    PubSubSpiTestSetup<Totem::Wire::Spi::Slave>::Role::Slave,
+    {
+        .masterPublishIntervalMs = 5,
+        .slavePublishIntervalMs = 5,
+        .masterPublishesPerInterval = 2,
+        .slavePublishesPerInterval = 2,
+    }};
 
 void setup() {
     ::platform::delay(::platform::ms_to_ticks(3000));

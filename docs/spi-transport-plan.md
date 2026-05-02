@@ -38,12 +38,12 @@ RS485 transport. The design bias is therefore:
 - attention-driven scheduling so idle slaves are not polled at high rate
 - small metadata checks in SPI, with payload integrity owned by the L7 protocol
 
-At the current PubSub test rate, a 60-byte PubSub payload serializes to about an
-88-byte PubSub frame. A single SPI `Data` frame adds a 19-byte slot header and a
-10-byte frame header, so one test message is roughly 117 protocol bytes before
-bucket padding. A 10 MHz SPI bus should not be close to saturated by 6 kB/s of
-payload traffic; if it is, the cause is scheduling, acknowledgement, copy,
-logging, or clocking overhead rather than raw bus bandwidth.
+A 60-byte PubSub test payload serializes to about an 88-byte PubSub frame. A
+single SPI `Data` frame adds a 19-byte slot header and a 10-byte frame header,
+so one test message is roughly 117 protocol bytes before bucket padding. A
+10 MHz SPI bus should not be close to saturated by tens of kB/s of payload
+traffic; if it is, the cause is scheduling, acknowledgement, copy, logging, or
+clocking overhead rather than raw bus bandwidth.
 
 ## Slot Protocol
 
@@ -119,6 +119,12 @@ Master behavior:
 - batches queued writes into the current slot up to `maxOutboundSlotBytes`;
   writes that would exceed the current slot are deferred, and writes that cannot
   fit an empty configured window are nacked with overflow
+- coalesces master-originated local writes for a small bounded window before
+  clocking when the attention line is quiet; this gives the slave a chance to
+  arm a matching slot and reduces extra empty turns
+- backs off briefly after no-slot observations; no-slot means the slave was not
+  armed, so immediate retries mostly burn CPU and can repeat the same stale
+  attention edge
 - uses one turn per task step for the current master/media loop; multi-turn
   bursts can over-clock stale attention while the single-queued slave is still
   completing and requeueing DMA
@@ -134,13 +140,13 @@ Slave behavior:
 - processes queued PubSub writes even while a Clock exchange is in flight
 - reports transfer start/completion timestamps from ESP-IDF slave callbacks
 
-The active master/media config uses 512-byte active windows in both directions.
-This still fits several current PubSub test frames per turn while avoiding
-1024-byte DMA windows for 60-byte payloads and ACK-heavy turns. The master's
-receive window must be at least as large as the
-slave's largest outbound slot, and the slave's transfer window must be at least
-as large as the master's largest outbound slot. Otherwise the master can clock a
-short transaction while the peer has a larger slot prepared.
+The active master/media PubSub test config uses 256-byte active windows in both
+directions. This fits two current PubSub test frames per turn while avoiding
+512-byte DMA windows for one-frame and ACK-heavy turns. The master's receive
+window must be at least as large as the slave's largest outbound slot, and the
+slave's transfer window must be at least as large as the master's largest
+outbound slot. Otherwise the master can clock a short transaction while the peer
+has a larger slot prepared.
 
 ## Clock Sync
 
@@ -207,6 +213,12 @@ control-plane soft state, not benchmark traffic. It prevents one missed
 subscription advertisement during link bring-up from permanently black-holing
 application data until reboot.
 
+The hardware PubSub SPI harness currently drives stress traffic at two publishes
+every 5 ms in each direction. With the 60-byte test payload this is about
+24 kB/s of application payload per direction before PubSub and SPI framing. The
+larger harness message pool is intentional: the test should expose transport
+and scheduling pressure before failing from a small local payload pool.
+
 ## Known Limitations
 
 - The implementation is still point-to-point. A real shared-bus SPI design
@@ -235,7 +247,7 @@ application data until reboot.
 After protocol changes, measure on hardware before adding more workarounds:
 
 - PubSub app publish failures, pool-full counts, and SPI `txQ`/`txAck`/`rxQ`
-  rates during bidirectional 100 Hz traffic
+  rates during the bidirectional 400 Hz stress harness traffic
 - SPI task CPU, PubSub task CPU, and total turn rate
 - Clock resync delta distribution and timeout rate
 - SPI bad slot, CRC, missed sequence, stale sequence, and no-slot counters with

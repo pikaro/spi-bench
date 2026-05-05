@@ -13,6 +13,7 @@ namespace Totem::LedPwm {
 struct PeripheralLedConfig {
     PeripheralLed led;
     Pin pin;
+    bool configured = false;
 
     [[nodiscard]] static bool validate() { return true; }
 };

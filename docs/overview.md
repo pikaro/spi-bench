@@ -16,25 +16,25 @@ events and render their own LED segment locally.
 
 ## Current Scope
 
-- `env:master`, `env:media`, `env:gpu0`, and `env:io` are active targets for
-    the current hardware PubSub star test. The master owns a low-speed SPI bus
-    currently wired to media, a high-speed SPI bus currently wired to GPU0, and
-    one RS485 link to IO.
+- `env:master`, `env:media`, `env:gpu0`, `env:gpu1`, and `env:io` are active
+    targets for the current hardware PubSub star test. The master owns a
+    low-speed SPI bus currently wired to media, a high-speed SPI bus shared by
+    GPU0 and GPU1, and one RS485 link to IO.
 - The active proof routes synthetic IO power events over RS485 through the
-    master to media and GPU0 while media publishes synthetic beat events back
-    through the master to IO.
-- The current SPI driver is still point-to-point, so each active SPI bus has
-    one attached slave during this stage. The final bus topology requires
-    multi-peer SPI support: four GPU nodes on the high-speed bus, and media,
-    LoRA radio, and GPS on the low-speed bus.
-- `env:gpu1` exists for the shared GPU source root but is not part of the
-    active hardware topology yet.
+    master to media, GPU0, and GPU1 while media publishes synthetic beat events
+    back through the master to IO, GPU0, and GPU1.
+- Hardware SPI now supports multiple logical master links sharing the same
+    ESP32 SPI bus. The active high-speed bus uses one PubSub SPI router
+    transport with GPU0 and GPU1 peers. The low-speed bus remains a
+    point-to-point media link for this prototype stage; the target topology
+    still needs four GPU peers on high-speed SPI and media, LoRA radio, and GPS
+    on the low-speed bus.
 - There is no `env:slave` in this checkout. Historical RS485 slave
     documentation may refer to that environment, but `platformio.ini` no
     longer defines it.
 - When a task touches shared wire, PubSub, Clock, or platform abstractions,
-    build `master`, `media`, `gpu0`, and `io` unless the task is explicitly
-    scoped to one environment.
+    build `master`, `media`, `gpu0`, `gpu1`, and `io` unless the task is
+    explicitly scoped to one environment.
 
 ## Design Intent
 
@@ -58,11 +58,20 @@ organized as follows:
 - `include/StaticConfig/`: compile-time configuration surfaces
 - `include/Platform/` and `include/*/detail/platform/`: platform selection and
     platform-specific implementations
-- `include/Audio/`: media-node I2S input, FFT analysis, magnitude scaling, and
-    beat detection; see [audio.md](audio.md)
+- `include/FileSystem/`: static-memory filesystem wrapper selected through the
+    component detail layer; the current backend is ESP-IDF LittleFS mounted at
+    `/littlefs`
+- `include/Audio/`: media-node selectable I2S, LittleFS WAV, or A2DP audio
+    input, FFT analysis, magnitude scaling, and beat detection; see
+    [audio.md](audio.md)
+- `include/LedTopology/` and `include/LedDisplay/`: GPU-node logical LED
+    topology, compile-time ownership, FastLED-backed output, and local
+    animation playback; see [animation-pipeline-port-plan.md](animation-pipeline-port-plan.md)
 - `include/Generated/Wire/`: generated wire-format support code
 - `include/Wire/Rs485/`: point-to-point RS485 wire layer; see
     [wire-rs485.md](wire-rs485.md)
+- `include/Wire/I2C/`: ESP32 I2C master bus, fixed-capacity device registry,
+    and low-speed peripheral drivers; see [wire-i2c.md](wire-i2c.md)
 - `include/Wire/Spi/`: in-progress DMA-oriented SPI wire layer with a
     component-owned ESP32 platform abstraction; see
     [spi-transport-plan.md](spi-transport-plan.md)
@@ -87,11 +96,17 @@ treasure chest, separate from the main controller board. Its local `LedPwm`
 setup exposes configured LED contexts for two external E27 bulbs and one
 onboard gold LED. Public LED commands still require a returned `LedContext`, so
 callers can only address LEDs present in the node configuration.
+`PeripheralLedConfig::configured` marks populated static slots; unconfigured
+slots are ignored so nodes can own fewer LEDs than `LedPwmConfig::maxLeds`
+without creating dummy GPIO outputs. The media node uses the same `LedPwm`
+component for the active-high GPIO26 FFT beat indicator.
 The same node owns the ship's bell input as an active-high GPIO button with an
 external pulldown. Button ISR events are queued and published locally through
 PubSub before higher-level lighting code reacts to them; the button task also
 polls configured GPIO levels and deduplicates transitions so missed ISR wakeups
-do not leave a changed level invisible.
+do not leave a changed level invisible. Button metrics are split between
+`btnCore` for ISR drops and publish failures, `buttons` for published events,
+and `btnDiag` for ISR/poll/deduplication diagnostics.
 
 `LedPwm` separates direct electrical duty from human-oriented brightness:
 `setDuty()` writes linear PWM duty and clears any active brightness animation
@@ -108,10 +123,26 @@ should also force the LED output off.
 twinkle, beat flicker, and bell/drop flares should be added as new `Animation`
 variant payloads with small self-contained parameter structs, keeping command
 objects queue-copyable and allocation-free.
+LED PWM command metrics live in `ledCore`, `ledPwm`, and `ledProf` for command
+failures, queued/handled command counts, and opt-in task-step profiling.
 
 ## Build Model
 
 - `platformio.ini` defines PlatformIO environments and board-specific flags
+- LittleFS images are built from `data/<env>/littlefs` for each device
+    environment and mounted during `CoreSetup`; boot logs recursively list the
+    mounted contents for validation. The same listing is available at runtime
+    through `/ls` with an optional path argument. First boot after changing an
+    old flash partition to LittleFS may format the partition if stale contents
+    cannot be mounted; a later mount/listing failure is logged without blocking
+    the command console.
+- Development builds control the LittleFS-backed logging error journal through
+    constexpr knobs in `StaticConfig/Logging.hpp`, especially
+    `LoggingConfig::errorJournalEnabled` and
+    `LoggingConfig::errorJournalSlots`. The journal records first-seen error
+    sites to `/errors.log` with fixed slots, recent context lines, and
+    trailing lines queued directly to its writer task. It stays quiet during
+    expected storage failures and disables itself if the filesystem is full.
 - PlatformIO environment-specific `board_build.cmake_extra_args` must include
     parent environment arguments when overriding the field; otherwise ESP-IDF
     component flags such as `ENABLE_SPI` are silently dropped for that
@@ -214,6 +245,12 @@ frame in the local ingress buffer. If the direct handoff backpressures or
 routing is more complex, the existing buffered ingress path remains the
 fallback.
 
+PubSub message owner pools are bounded hot-path structures. They use short
+critical sections around slot bookkeeping instead of blocking task mutexes, and
+payload encoding snapshots the stored value before serializing it outside the
+lock. This keeps transport completion and owner-release paths independent of
+task-priority scheduling while preserving deterministic pool capacity.
+
 PubSub task configurations use notify wakeups so local publishes and transport
 ingress can run before the next periodic poll. Catch-up polling is disabled for
 PubSub tasks because missed periodic ticks should not create extra zero-delay
@@ -249,6 +286,18 @@ Logging egress over UART now uses the ESP-IDF TX software buffer configured via
 UART drain after every record by default. This keeps logger callers decoupled
 through the aggregator ring buffer while letting the UART driver absorb bursty
 output without stalling the emitter task on each line.
+USB Serial/JTAG console builds skip console-sink formatting and writes while no
+USB host is attached. This is based on ESP-IDF's USB Serial/JTAG connection
+status, which detects host SOF packets rather than whether a terminal program
+has opened the serial port. Hardware UART console builds remain always writable
+because the UART has no reliable connection signal.
+ESP-IDF native logs are routed into the same aggregator after `CoreSetup`
+installs the logging backend, through `LoggingBackend/detail/NativeLogBridge`.
+Early or constrained ESP-ROM logs stay on ESP-IDF's original output path so the
+null logger cannot recursively call back into the native log hook.
+The bridge also lowers ESP-IDF's runtime default level to the configured `<esp>`
+startup threshold when needed, so below-threshold native records are rejected
+before ESP-IDF calls the vprintf sink.
 
 If stronger verification is required for a task, that should be requested
 explicitly.

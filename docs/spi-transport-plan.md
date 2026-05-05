@@ -6,10 +6,11 @@ this document once they stop describing the active protocol.
 
 ## Current Status
 
-The current implementation is a point-to-point SPI link. The active hardware
-star instantiates that link once for the low-speed SPI bus and once for the
-high-speed SPI bus. Each bus currently has one attached slave, so this is not
-yet a shared-bus implementation:
+The wire protocol remains a point-to-point link between one master device handle
+and one slave, but the ESP32 master platform layer can now share one physical
+SPI bus across multiple logical master links. The active hardware star uses a
+point-to-point low-speed media link and a shared high-speed physical bus with
+GPU0 and GPU1 attached as separate peer links:
 
 - public facade: `include/Wire/Spi/Facade.hpp`
 - configuration: `include/Wire/Spi/Interfaces/MasterConfig.hpp` and
@@ -18,24 +19,28 @@ yet a shared-bus implementation:
   `SlotBuffer.hpp`, and `Transceiver.hpp`
 - link runners: `include/Wire/Spi/detail/Master.hpp` and `Slave.hpp`
 - ESP-IDF binding: `include/Wire/Spi/detail/platform/PlatformESP32.hpp`
-- PubSub bridge: `include/PubSubBackend/Transports/SpiTransport.hpp`
+- PubSub bridge: `include/PubSubBackend/Transports/SpiTransport.hpp` for
+  point-to-point links and
+  `include/PubSubBackend/Transports/SpiRouterTransport.hpp` for shared-bus
+  master fanout
 - focused point-to-point hardware test harness:
   `include/Setups/PubSubSpiTest.hpp`
 - current multi-board PubSub star harness:
   `include/Setups/PubSubStarTest.hpp`
 
 The active PubSub star has `env:master` linked to `env:media` on the low-speed
-SPI bus and `env:gpu0` on the high-speed SPI bus. The master owns both SPI
-clocks; each current slave keeps a DMA transfer queued and asserts its own
-attention GPIO when the master should clock that link. `env:io` joins the same
-PubSub graph through RS485.
+SPI bus and to `env:gpu0` plus `env:gpu1` on the high-speed SPI bus. The master
+owns both SPI clocks; each current slave keeps a DMA transfer queued and asserts
+its own attention GPIO when the master should clock that link. `env:io` joins
+the same PubSub graph through RS485.
 
-The shared-bus SPI router and multi-slave scheduler are not implemented. Do not
-describe the current SPI transport as a shared-bus design; the current
-multi-node proof works by registering two bus-scoped point-to-point transports
-on the master PubSub node. The target is still multi-peer per bus: four GPU
-nodes on the high-speed bus, and media, LoRA radio, and GPS on the low-speed
-bus.
+Shared-bus hardware support is intentionally layered: each SPI slave still has
+a logical `Wire::Spi::Master` link with its own CS, attention pin, task, and
+in-flight table, while the ESP32 platform wrapper reuses the physical bus when
+the bus ID and pins match. PubSub sees the high-speed side as one
+`SpiRouterTransport` with per-peer topic interest and per-peer metrics. This is
+the prototype shape for the future four-GPU high-speed bus; the low-speed bus
+will need the same router shape when media, LoRA, and GPS are wired together.
 
 ## Target Shape
 
@@ -118,6 +123,11 @@ delivered, because the peer may not have received MOSI for that transaction.
 This is especially important with the current single-queued ESP32 slave DMA
 wrapper.
 
+When the peer does provide a protocol slot, the just-clocked TX slot is
+consumed before RX frames are dispatched. RX dispatch can append ACK, NACK, and
+control responses, so those responses must be built in a fresh next slot rather
+than mixed into the slot that has already gone out on MOSI.
+
 ## Scheduling And Flow Control
 
 Master behavior:
@@ -195,9 +205,17 @@ noise seen when using SPI transaction boundaries alone.
 Keep these properties intact unless measurement proves a better replacement:
 
 - SPI profiling metrics are opt-in via `include/StaticConfig/Metrics.hpp`.
-  Enabling profiling counters in the hot path can materially affect CPU use.
+  The hot-path `spi` group holds turns, task steps, byte/frame counters, and
+  max turn duration. Enabling these counters can materially affect CPU use.
   Metric recording is expected to stay on the backend's atomic fast path;
   avoid reintroducing per-sample `Directory` mutex lookups for SPI counters.
+- SPI slot-quality counters such as CRC errors, no-slot observations, sequence
+  misses, and hello resyncs live in the Diagnostic-level `spiDiag` group.
+- Rare SPI link recovery diagnostics live in the Core-level `spiCore` metric
+  group. The counters split resets and recovery causes (`lrCorr`, `lrCrc`,
+  `lrSeq`, `lrTmo`, `lrHello`, `lrOther`) and matching recovery reasons are
+  logged at warning level so long-run not-ready windows can be filtered from
+  combined monitor logs without enabling profiling.
 - Do not zero the full 4096-byte slot buffer on every slot reset.
 - Do not parse a slot twice to discover whether it contains `Hello`; use the
   slot flag.
@@ -225,17 +243,17 @@ subscription advertisement during link bring-up from permanently black-holing
 application data until reboot.
 
 The hardware PubSub star harness currently drives synthetic traffic from IO to
-the SPI peers and from media back to IO. The larger harness message pools are
-intentional: the test should expose transport and scheduling pressure before
-failing from a small local payload pool.
+media/GPU0/GPU1 and from media back to IO/GPU0/GPU1. The larger harness message
+pools are intentional: the test should expose transport and scheduling pressure
+before failing from a small local payload pool.
 
 ## Known Limitations
 
-- The SPI implementation is still point-to-point. The current multi-node
-  topology uses separate master SPI buses with one slave on each bus. A real
-  shared-bus SPI design still needs a master peer table, per-peer attention
-  inputs, scheduling fairness, per-peer availability, and per-target PubSub ACK
-  accounting.
+- The active shared-bus implementation is per-peer logical links sharing one
+  ESP32 bus, not a monolithic SPI scheduler. This keeps the existing
+  point-to-point wire ownership simple and gives PubSub per-peer routing, but
+  fairness and task overhead should be remeasured before expanding beyond the
+  current two high-speed peers.
 - The slave queues one DMA transaction at a time. This keeps ownership simple
   but limits maximum transaction cadence and makes queue starvation visible as
   no-slot observations if the master clocks too early. Higher throughput should
@@ -245,8 +263,10 @@ failing from a small local payload pool.
   telemetry and eventually a pending write timeout/nack. For SPI this is
   acceptable only if the physical link is clean; persistent CRC or sequence
   errors should be fixed electrically or with an explicit retransmit design.
-- ACKs are cumulative per point-to-point peer. They are not delivery receipts
-  for a future multi-peer PubSub router.
+- ACKs are cumulative per point-to-point peer. The PubSub SPI router waits for
+  all targeted peer link writes to complete before releasing the original
+  PubSub drainer frame, but that is still wire-handler acceptance rather than
+  subscriber delivery.
 - The master still uses a blocking SPI transfer call. That is acceptable for
   the current bus-owner task, but high-rate multi-slave scheduling may need an
   async master path.
@@ -260,6 +280,10 @@ After protocol changes, measure on hardware before adding more workarounds:
 
 - PubSub app publish failures, pool-full counts, and SPI `txQ`/`txAck`/`rxQ`
   rates during the bidirectional 400 Hz stress harness traffic
+- Use the `*-cross-stress`, `*-spi-stress`, and `*-spi-fast-stress`
+  PlatformIO environments for repeatable cross-bus, SPI-only, and high-speed
+  SPI pressure runs. The fast SPI profile raises only the master high-speed SPI
+  clock so the low-speed ESP32 media leg keeps its normal clock constraint.
 - SPI task CPU, PubSub task CPU, and total turn rate
 - Clock resync delta distribution and timeout rate
 - SPI bad slot, CRC, missed sequence, stale sequence, and no-slot counters with

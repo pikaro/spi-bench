@@ -19,6 +19,8 @@ static inline Uart UartConsole;
 struct Console {
     static ReturnCode init() { return UartConsole.init(UartConsoleConfig); }
 
+    [[nodiscard]] static bool connected() { return true; }
+
     static ReturnCode write(std::span<const std::byte> data, bool drain = false,
                             std::optional<uint32_t> timeoutMs = std::nullopt) {
         return UartConsole.write(data, drain, timeoutMs);

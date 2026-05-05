@@ -15,6 +15,30 @@
 
 namespace Totem::LoggerBackend::detail {
 
+constexpr uint32_t logSiteHashByte(uint32_t hash, uint8_t value) {
+    return (hash ^ value) * 16777619U;
+}
+
+constexpr uint32_t logSiteHashString(uint32_t hash, const char *value) {
+    if (value == nullptr) {
+        return logSiteHashByte(hash, 0);
+    }
+    while (*value != '\0') {
+        hash = logSiteHashByte(hash, static_cast<uint8_t>(*value));
+        ++value;
+    }
+    return logSiteHashByte(hash, 0);
+}
+
+consteval LogSiteId logSiteId(const char *format, LogComponent component,
+                              LogLevel level) {
+    uint32_t hash = 2166136261U;
+    hash = logSiteHashByte(hash, static_cast<uint8_t>(component));
+    hash = logSiteHashByte(hash, static_cast<uint8_t>(level));
+    hash = logSiteHashString(hash, format);
+    return hash == logUnknownSiteId ? 1U : hash;
+}
+
 constexpr std::string_view logFileName(std::string_view path) {
     auto pos = path.find_last_of("/\\");
     return pos == std::string_view::npos ? path : path.substr(pos + 1);
@@ -57,8 +81,12 @@ constexpr std::string_view logFunctionName(std::string_view function) {
                 Totem::LoggerBackend::detail::logFileName(loc.file_name());    \
             auto _logFunction = Totem::LoggerBackend::detail::logFunctionName( \
                 loc.function_name());                                          \
-            (void)LoggingService::logf(                                        \
-                LogLevel::Error, logComponent, "[%.*s:%d:%.*s] " msg,          \
+            static constexpr LogSiteId _logSiteId =                            \
+                Totem::LoggerBackend::detail::logSiteId(                       \
+                    msg, logComponent, LogLevel::Error);                       \
+            (void)LoggingService::logfSite(                                    \
+                LogLevel::Error, logComponent, _logSiteId,                     \
+                "[%.*s:%d:%.*s] " msg,                                         \
                 static_cast<int>(_logFile.size()), _logFile.data(),            \
                 loc.line(), static_cast<int>(_logFunction.size()),             \
                 _logFunction.data(), ##__VA_ARGS__);                           \
@@ -69,8 +97,11 @@ constexpr std::string_view logFunctionName(std::string_view function) {
     do {                                                                       \
         if constexpr (static_logging_for(logLevel, logTag)) {                  \
             if (LoggingService::loggingFor(logLevel, logTag)) {                \
-                (void)LoggingService::logf(logLevel, logTag, logFormat,        \
-                                           ##__VA_ARGS__);                     \
+                static constexpr LogSiteId _logSiteId =                        \
+                    Totem::LoggerBackend::detail::logSiteId(                   \
+                        logFormat, logTag, logLevel);                          \
+                (void)LoggingService::logfSite(                                \
+                    logLevel, logTag, _logSiteId, logFormat, ##__VA_ARGS__);   \
             }                                                                  \
         }                                                                      \
     } while (0)

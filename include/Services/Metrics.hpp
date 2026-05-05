@@ -77,7 +77,9 @@ static_assert(metric_component_values_are_dense(
 inline constexpr auto metricCollectionLevels = make_metric_collection_levels(
     MetricCollection::pubSub, MetricCollection::taskControllerRegistry,
     MetricCollection::taskController, MetricCollection::rs485,
-    MetricCollection::spi, MetricCollection::mutex, MetricCollection::logging);
+    MetricCollection::spi, MetricCollection::mutex, MetricCollection::logging,
+    MetricCollection::audio, MetricCollection::i2c, MetricCollection::ledPwm,
+    MetricCollection::buttons);
 
 constexpr std::optional<Totem::MetricsBackend::MetricLevel>
 level_for_metric_component_opt(

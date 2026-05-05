@@ -8,13 +8,13 @@
 #include "Services/Clock.hpp"
 #include "StaticConfig/Logging.hpp"
 #include "Types/Error.hpp"
-#include <magic_enum/magic_enum.hpp>
-#include <atomic>
 #include <array>
+#include <atomic>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <magic_enum/magic_enum.hpp>
 #include <optional>
 #include <utility>
 
@@ -61,17 +61,16 @@ consteval auto make_logging_minimum_levels(Levels... levels) {
 }
 
 template <size_t... Indices>
-consteval bool
-minimum_log_component_values_are_dense(
+consteval bool minimum_log_component_values_are_dense(
     std::index_sequence<Indices...> /*unused*/) {
     constexpr auto values = magic_enum::enum_values<LogComponent>();
     return ((static_cast<size_t>(values[Indices]) == Indices) && ...);
 }
 
-static_assert(minimum_log_component_values_are_dense(
-                  std::make_index_sequence<
-                      magic_enum::enum_count<LogComponent>()>{}),
-              "LogComponent values must remain contiguous from zero");
+static_assert(
+    minimum_log_component_values_are_dense(
+        std::make_index_sequence<magic_enum::enum_count<LogComponent>()>{}),
+    "LogComponent values must remain contiguous from zero");
 
 inline constexpr auto loggingMinimumLevels = make_logging_minimum_levels(
     LoggingMinimumLevel::defaultMinimum, LoggingMinimumLevel::system,
@@ -80,7 +79,8 @@ inline constexpr auto loggingMinimumLevels = make_logging_minimum_levels(
     LoggingMinimumLevel::taskControllerRegistry, LoggingMinimumLevel::output,
     LoggingMinimumLevel::rs485, LoggingMinimumLevel::spi,
     LoggingMinimumLevel::clock, LoggingMinimumLevel::ledPwm,
-    LoggingMinimumLevel::input);
+    LoggingMinimumLevel::input, LoggingMinimumLevel::esp,
+    LoggingMinimumLevel::audio);
 
 static constexpr LogLevel logging_minimum_for(LogComponent component) {
     auto index = static_cast<size_t>(component);
@@ -109,6 +109,11 @@ class LoggingService {
 
     static ILogger &get() { return *_backend.load(std::memory_order_acquire); }
 
+    [[nodiscard]] static bool backendConfigured() {
+        return _backend.load(std::memory_order_acquire) !=
+               &Totem::LoggingBackend::detail::nullLogger;
+    }
+
     [[nodiscard]] static bool
     loggingFor(LogLevel level,
                std::optional<LogComponent> component = std::nullopt) {
@@ -125,7 +130,8 @@ class LoggingService {
         }
         va_list args;
         va_start(args, format);
-        auto result = vlogf(level, component, format, args);
+        auto result =
+            vlogfSite(level, component, logUnknownSiteId, format, args);
         va_end(args);
         return result;
     }
@@ -133,13 +139,33 @@ class LoggingService {
     __attribute__((__format__(__printf__, 3, 0))) static ReturnCode
     vlogf(LogLevel level, LogComponent component, const char *format,
           va_list args) {
+        return vlogfSite(level, component, logUnknownSiteId, format, args);
+    }
+
+    __attribute__((__format__(__printf__, 4, 0))) static ReturnCode
+    logfSite(LogLevel level, LogComponent component, LogSiteId siteId,
+             const char *format, ...) {
+        if (!loggingFor(level, component)) {
+            return OK();
+        }
+        va_list args;
+        va_start(args, format);
+        auto result = vlogfSite(level, component, siteId, format, args);
+        va_end(args);
+        return result;
+    }
+
+    __attribute__((__format__(__printf__, 4, 0))) static ReturnCode
+    vlogfSite(LogLevel level, LogComponent component, LogSiteId siteId,
+              const char *format, va_list args) {
         if (!loggingFor(level, component)) {
             return OK();
         }
         if (!_recordBusy.test_and_set(std::memory_order_acquire)) {
             auto &record = _scratchRecord;
             if (auto ret =
-                    _formatRecord(record, level, component, format, args);
+                    _formatRecord(record, level, component, siteId, format,
+                                  args);
                 !ret.ok()) {
                 _recordBusy.clear(std::memory_order_release);
                 return ret;
@@ -150,7 +176,8 @@ class LoggingService {
         }
 
         LogRecord record{};
-        if (auto ret = _formatRecord(record, level, component, format, args);
+        if (auto ret =
+                _formatRecord(record, level, component, siteId, format, args);
             !ret.ok()) {
             return ret;
         }
@@ -158,9 +185,9 @@ class LoggingService {
     }
 
   private:
-    __attribute__((__format__(__printf__, 4, 0))) static ReturnCode
+    __attribute__((__format__(__printf__, 5, 0))) static ReturnCode
     _formatRecord(LogRecord &record, LogLevel level, LogComponent component,
-                  const char *format, va_list args) {
+                  LogSiteId siteId, const char *format, va_list args) {
         if (format == nullptr) {
             return ERR(InvalidArgument);
         }
@@ -168,6 +195,7 @@ class LoggingService {
         record = LogRecord{};
         record.ts = ::platform::get_time();
         record.tsSynced = ClockService::get().nowMs();
+        record.siteId = siteId;
         record.component = component;
         record.level = level;
 

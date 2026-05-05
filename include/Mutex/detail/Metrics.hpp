@@ -9,7 +9,7 @@ namespace Totem::Mutex::detail {
 struct Metrics {
     static constexpr MetricsBackend::MetricGroupDesc groupDef = {
         .name = "mutex",
-        .level = MetricsBackend::MetricLevel::Baseline,
+        .level = MetricsBackend::MetricLevel::Core,
     };
 
     static constexpr MetricsBackend::MetricDesc timeoutsCounterDef = {

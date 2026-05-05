@@ -63,6 +63,7 @@ template <class Link> class Rs485Transport : public BaseTransport {
         Header header{};
         std::array<std::byte, Base::bufferSize> data{};
         size_t size = 0;
+        int64_t queuedAtUs = 0;
         bool occupied = false;
         bool acknowledgeOnComplete = false;
     };
@@ -76,6 +77,16 @@ template <class Link> class Rs485Transport : public BaseTransport {
         uint32_t txSerializeDropped = 0;
         uint32_t rxQueued = 0;
         uint32_t rxDropped = 0;
+        uint32_t txTimingSamples = 0;
+        uint32_t txQueueWaitMinUs = 0;
+        uint32_t txQueueWaitAvgUs = 0;
+        uint32_t txQueueWaitMaxUs = 0;
+        uint32_t txWireMinUs = 0;
+        uint32_t txWireAvgUs = 0;
+        uint32_t txWireMaxUs = 0;
+        uint32_t txTotalMinUs = 0;
+        uint32_t txTotalAvgUs = 0;
+        uint32_t txTotalMaxUs = 0;
     };
 
     explicit Rs485Transport(Rs485TransportDependencies<Link> deps)
@@ -108,6 +119,16 @@ template <class Link> class Rs485Transport : public BaseTransport {
         auto take = [](std::atomic<uint32_t> &value) {
             return value.exchange(0, std::memory_order_relaxed);
         };
+        auto takeMin = [](std::atomic<uint32_t> &value) {
+            const auto min = value.exchange(
+                std::numeric_limits<uint32_t>::max(),
+                std::memory_order_relaxed);
+            return min == std::numeric_limits<uint32_t>::max() ? 0 : min;
+        };
+        const auto timingSamples = take(_statsTxTimingSamples);
+        const auto queueWaitSum = take(_statsTxQueueWaitSumUs);
+        const auto wireSum = take(_statsTxWireSumUs);
+        const auto totalSum = take(_statsTxTotalSumUs);
         return Stats{
             .txQueued = take(_statsTxQueued),
             .txAcked = take(_statsTxAcked),
@@ -116,6 +137,17 @@ template <class Link> class Rs485Transport : public BaseTransport {
             .txSerializeDropped = take(_statsTxSerializeDropped),
             .rxQueued = take(_statsRxQueued),
             .rxDropped = take(_statsRxDropped),
+            .txTimingSamples = timingSamples,
+            .txQueueWaitMinUs = takeMin(_statsTxQueueWaitMinUs),
+            .txQueueWaitAvgUs =
+                timingSamples == 0 ? 0 : queueWaitSum / timingSamples,
+            .txQueueWaitMaxUs = take(_statsTxQueueWaitMaxUs),
+            .txWireMinUs = takeMin(_statsTxWireMinUs),
+            .txWireAvgUs = timingSamples == 0 ? 0 : wireSum / timingSamples,
+            .txWireMaxUs = take(_statsTxWireMaxUs),
+            .txTotalMinUs = takeMin(_statsTxTotalMinUs),
+            .txTotalAvgUs = timingSamples == 0 ? 0 : totalSum / timingSamples,
+            .txTotalMaxUs = take(_statsTxTotalMaxUs),
         };
     }
 
@@ -182,6 +214,7 @@ template <class Link> class Rs485Transport : public BaseTransport {
             slot->header = item->envelope.header;
             slot->size = frameSize;
             slot->transport = this;
+            slot->queuedAtUs = ::platform::get_time_us();
             slot->occupied = true;
             slot->acknowledgeOnComplete = true;
 
@@ -320,6 +353,7 @@ template <class Link> class Rs485Transport : public BaseTransport {
         auto envelope = slot.envelope;
         const auto header = slot.header;
         const auto shouldAck = slot.acknowledgeOnComplete;
+        _recordTxTiming(slot, result);
         detail::log_trace_packet("rs485.tx.complete", header,
                                  _instanceName.data());
         slot = {};
@@ -363,6 +397,7 @@ template <class Link> class Rs485Transport : public BaseTransport {
         slot->header = header;
         slot->size = frame.size();
         slot->transport = this;
+        slot->queuedAtUs = ::platform::get_time_us();
         slot->occupied = true;
         slot->acknowledgeOnComplete = false;
 
@@ -415,6 +450,52 @@ template <class Link> class Rs485Transport : public BaseTransport {
         return nullptr;
     }
 
+    void _recordTxTiming(const InFlightFrame &slot,
+                         const Wire::WriteResult &result) {
+        if (!result.result.ok() || slot.queuedAtUs <= 0 ||
+            result.sentAtUs <= 0 || result.completedAtUs <= 0 ||
+            result.sentAtUs < slot.queuedAtUs ||
+            result.completedAtUs < result.sentAtUs) {
+            return;
+        }
+
+        const auto queueWaitUs =
+            static_cast<uint32_t>(result.sentAtUs - slot.queuedAtUs);
+        const auto wireUs =
+            static_cast<uint32_t>(result.completedAtUs - result.sentAtUs);
+        const auto totalUs =
+            static_cast<uint32_t>(result.completedAtUs - slot.queuedAtUs);
+
+        _statsTxTimingSamples.fetch_add(1, std::memory_order_relaxed);
+        _recordTimingValue(_statsTxQueueWaitSumUs, _statsTxQueueWaitMinUs,
+                           _statsTxQueueWaitMaxUs, queueWaitUs);
+        _recordTimingValue(_statsTxWireSumUs, _statsTxWireMinUs,
+                           _statsTxWireMaxUs, wireUs);
+        _recordTimingValue(_statsTxTotalSumUs, _statsTxTotalMinUs,
+                           _statsTxTotalMaxUs, totalUs);
+    }
+
+    static void _recordTimingValue(std::atomic<uint32_t> &sum,
+                                   std::atomic<uint32_t> &min,
+                                   std::atomic<uint32_t> &max,
+                                   uint32_t value) {
+        sum.fetch_add(value, std::memory_order_relaxed);
+
+        auto currentMin = min.load(std::memory_order_relaxed);
+        while (value < currentMin &&
+               !min.compare_exchange_weak(currentMin, value,
+                                          std::memory_order_relaxed,
+                                          std::memory_order_relaxed)) {
+        }
+
+        auto currentMax = max.load(std::memory_order_relaxed);
+        while (value > currentMax &&
+               !max.compare_exchange_weak(currentMax, value,
+                                          std::memory_order_relaxed,
+                                          std::memory_order_relaxed)) {
+        }
+    }
+
     Link &_link;
 
     Totem::Queue::Handle _rxFrameQueue{};
@@ -430,6 +511,19 @@ template <class Link> class Rs485Transport : public BaseTransport {
     std::atomic<uint32_t> _statsTxSerializeDropped{0};
     std::atomic<uint32_t> _statsRxQueued{0};
     std::atomic<uint32_t> _statsRxDropped{0};
+    std::atomic<uint32_t> _statsTxTimingSamples{0};
+    std::atomic<uint32_t> _statsTxQueueWaitSumUs{0};
+    std::atomic<uint32_t> _statsTxQueueWaitMinUs{
+        std::numeric_limits<uint32_t>::max()};
+    std::atomic<uint32_t> _statsTxQueueWaitMaxUs{0};
+    std::atomic<uint32_t> _statsTxWireSumUs{0};
+    std::atomic<uint32_t> _statsTxWireMinUs{
+        std::numeric_limits<uint32_t>::max()};
+    std::atomic<uint32_t> _statsTxWireMaxUs{0};
+    std::atomic<uint32_t> _statsTxTotalSumUs{0};
+    std::atomic<uint32_t> _statsTxTotalMinUs{
+        std::numeric_limits<uint32_t>::max()};
+    std::atomic<uint32_t> _statsTxTotalMaxUs{0};
 
     static constexpr ::platform::Tick queueSendTimeoutTicks = 1;
 };

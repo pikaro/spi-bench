@@ -43,6 +43,7 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
         Totem::Wire::WriteRequest request{};
         size_t length = 0;
         uint32_t sentAtMs = 0;
+        int64_t sentAtUs = 0;
         bool occupied = false;
     };
 
@@ -379,6 +380,7 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
             .request = item.request,
             .length = item.request.data.size(),
             .sentAtMs = ::platform::get_time(),
+            .sentAtUs = ::platform::get_time_us(),
             .occupied = true,
         };
         return OK();
@@ -437,9 +439,10 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
             auto request = pending.request;
             const auto handle = pending.handle;
             const auto length = pending.length;
+            const auto sentAtUs = pending.sentAtUs;
             pending = {};
             ret.combine(request.ack(handle, static_cast<uint16_t>(length),
-                                    receivedAtUs));
+                                    receivedAtUs, sentAtUs));
         }
         return ret;
     }
@@ -534,6 +537,10 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
 
     ReturnCode _resetLink(ReturnCode error) {
         metrics().addReset();
+        const auto reason = link_recovery_reason_from_error(error);
+        metrics().addLinkRecovery(reason);
+        _log_w("SPI slave link reset reason=%s error=" ERR_FMT,
+               link_recovery_reason_name(reason), ERR_ARG(error));
         auto ret = OK();
         ret.combine(_failExchange(error));
         ret.combine(_failQueuedWrites(error));
@@ -614,7 +621,7 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
             if (ret == ERR(WireError, Corrupted) ||
                 ret == ERR(WireError, CrcError) ||
                 ret == ERR(WireError, SequenceError)) {
-                _log_v("SPI slave RX invalid bytes=%u "
+                _log_w("SPI slave RX invalid; resetting link bytes=%u "
                        "first=%02x second=%02x: " ERR_FMT,
                        static_cast<unsigned>(bytes),
                        std::to_integer<unsigned>(_rxBuffer[0]),
@@ -626,8 +633,11 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
             return ret;
         }
         if (helloResynced) {
-            _log_v("SPI slave accepted peer hello resync; dropping stale "
-                   "pending operations");
+            metrics().addLinkRecovery(LinkRecoveryReason::HelloResync);
+            _log_w("SPI slave link recovery reason=%s; dropping stale "
+                   "pending operations",
+                   link_recovery_reason_name(
+                       LinkRecoveryReason::HelloResync));
             FAIL_IF_ERR_FWD(_failExchange(ERR(WireError, SequenceError)),
                             "Failed to fail stale SPI slave exchange");
             FAIL_IF_ERR_FWD(_failQueuedWrites(ERR(WireError, SequenceError)),

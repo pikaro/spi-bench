@@ -4,6 +4,7 @@
 #include "MetricsBackend/Interfaces/Types.hpp"
 #include "Services/Metrics.hpp" // IWYU pragma: keep
 #include <cstddef>
+#include <cstdint>
 
 namespace Totem::TaskControllerRegistry::detail {
 
@@ -15,7 +16,7 @@ struct Metrics {
 
     static constexpr MetricsBackend::MetricDesc controllerCountDef = {
         .name = "ctrlCont",
-        .type = MetricsBackend::MetricType::Counter,
+        .type = MetricsBackend::MetricType::Gauge,
         .unit = MetricsBackend::MetricUnit::None,
     };
 
@@ -27,7 +28,7 @@ struct Metrics {
 
     static Metrics create() {
         REGISTER_METRICS_GROUP("TaskControllerRegistry", group);
-        REGISTER_METRIC("TaskControllerRegistry", controllerCount, Counter,
+        REGISTER_METRIC("TaskControllerRegistry", controllerCount, Gauge,
                         group);
         REGISTER_METRIC("TaskControllerRegistry", reapedCount, Counter, group);
 
@@ -38,15 +39,24 @@ struct Metrics {
         };
     }
 
-    void addTask() const { METRIC_INCR(group, controllerCount, 1); }
-    void removeTask() const { METRIC_DECR(group, controllerCount, 1); }
+    void addTask() {
+        ++controllerCountValue;
+        METRIC_SET(group, controllerCount, controllerCountValue);
+    }
+    void removeTask() {
+        if (controllerCountValue > 0) {
+            --controllerCountValue;
+        }
+        METRIC_SET(group, controllerCount, controllerCountValue);
+    }
     void addReaped(size_t count) const {
         METRIC_INCR(group, reapedCount, count);
     }
 
     Totem::MetricsBackend::GroupHandle group;
-    Totem::MetricsBackend::CounterHandle controllerCount;
+    Totem::MetricsBackend::GaugeHandle controllerCount;
     Totem::MetricsBackend::CounterHandle reapedCount;
+    uint32_t controllerCountValue = 0;
 
     static constexpr auto component =
         MetricsBackend::MetricComponent::TaskControllerRegistry;

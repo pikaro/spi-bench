@@ -15,7 +15,30 @@ endif()
 message(STATUS "Using defined SRC_ROOT='${SRC_ROOT}'")
 set(SRC_ROOT "${SRC_ROOT}" CACHE STRING "Which src/<name> subtree to build" FORCE)
 
-set(SDKCONFIG_DEFAULTS "sdkconfig.${SRC_ROOT}.defaults")
+if(DEFINED SDKCONFIG_NAME AND NOT SDKCONFIG_NAME STREQUAL "")
+  set(SDKCONFIG_DEFAULTS "sdkconfig.${SDKCONFIG_NAME}.defaults")
+else()
+  set(SDKCONFIG_DEFAULTS "sdkconfig.${SRC_ROOT}.defaults")
+endif()
+
+if(ENABLE_BTSTACK)
+  if(DEFINED BTSTACK_ROOT AND IS_DIRECTORY "${BTSTACK_ROOT}")
+    # explicit path supplied by the build environment
+  elseif(DEFINED ENV{BTSTACK_ROOT} AND IS_DIRECTORY "$ENV{BTSTACK_ROOT}")
+    set(BTSTACK_ROOT "$ENV{BTSTACK_ROOT}")
+  elseif(IS_DIRECTORY "${CMAKE_SOURCE_DIR}/.pio/libdeps/media-btstack/btstack")
+    set(BTSTACK_ROOT "${CMAKE_SOURCE_DIR}/.pio/libdeps/media-btstack/btstack")
+  elseif(IS_DIRECTORY "${CMAKE_SOURCE_DIR}/.pio/libdeps/media-btstack/BTstack")
+    set(BTSTACK_ROOT "${CMAKE_SOURCE_DIR}/.pio/libdeps/media-btstack/BTstack")
+  elseif(IS_DIRECTORY "${CMAKE_SOURCE_DIR}/.pio/libdeps/media-btstack/btstack-eval")
+    set(BTSTACK_ROOT "${CMAKE_SOURCE_DIR}/.pio/libdeps/media-btstack/btstack-eval")
+  else()
+    message(FATAL_ERROR "ENABLE_BTSTACK is ON but BTSTACK_ROOT was not found")
+  endif()
+
+  set(BTSTACK_ROOT "${BTSTACK_ROOT}" CACHE PATH "BTstack source root" FORCE)
+  list(APPEND CMAKE_MODULE_PATH "${BTSTACK_ROOT}/tool/cmake")
+endif()
 
 # Not covered:
 
@@ -174,6 +197,14 @@ if (ENABLE_BLUETOOTH)
         bt
         esp_phy
         esp_coex
+        lwip
+    )
+endif()
+
+if (ENABLE_BTSTACK)
+    list(APPEND COMPONENTS
+        btstack
+        btstack_config
     )
 endif()
 

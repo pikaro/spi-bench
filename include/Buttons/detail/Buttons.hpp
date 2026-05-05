@@ -4,6 +4,7 @@
 #include "Base/HasTaskController.hpp"
 #include "Buttons/Interfaces/Config.hpp"
 #include "Buttons/Interfaces/Wire.hpp"
+#include "Buttons/detail/Metrics.hpp"
 #include "Buttons/detail/Types.hpp"
 #include "Data.hpp"
 #include "Macros/Facade.hpp"
@@ -50,6 +51,7 @@ class Buttons : public HasLifecycle<Buttons, Config>,
 
   private:
     ReturnCode _onBegin() {
+        (void)metrics();
         DEFAULT_TASK();
         _task = task;
         INIT_QUEUE_OR_FAIL(_eventQueue);
@@ -130,6 +132,7 @@ class Buttons : public HasLifecycle<Buttons, Config>,
         const auto &btnCfg = config().buttons[index];
 
         if (_levelsKnown[index] && _lastLevels[index] == event.level) {
+            metrics().addDuplicate();
             return OK();
         }
 
@@ -139,6 +142,7 @@ class Buttons : public HasLifecycle<Buttons, Config>,
         const bool pressed = event.level != btnCfg.activeLow;
         if ((pressed && !btnCfg.notifyPressed) ||
             (!pressed && !btnCfg.notifyReleased)) {
+            metrics().addIgnored();
             return OK();
         }
 
@@ -147,8 +151,13 @@ class Buttons : public HasLifecycle<Buttons, Config>,
                             : ButtonEventType::Released,
             .button = btnCfg.button,
         };
-        FAIL_IF_UNEXPECTED_FWD(messageId, _messagePool.store(pubSubEvent),
-                               "Failed to store button event in PubSub pool");
+        auto messageIdResult = _messagePool.store(pubSubEvent);
+        if (!messageIdResult) {
+            metrics().addPublishFailure();
+            FAIL_ERR_FWD(messageIdResult.error(),
+                         "Failed to store button event in PubSub pool");
+        }
+        const auto messageId = *messageIdResult;
         _log_i("Button event: button=%u type=%s messageId=%u",
                pubSubEvent.button,
                pubSubEvent.type == ButtonEventType::Pressed ? "Pressed"
@@ -170,6 +179,7 @@ class Buttons : public HasLifecycle<Buttons, Config>,
         auto envelopeResult =
             Totem::PubSubBackend::Envelope::make<ButtonEvent>(envelopeDef);
         if (!envelopeResult) {
+            metrics().addPublishFailure();
             if (!_messagePool.release({.header = {.messageId = messageId}})
                      .ok()) {
                 _log_e("Failed to release button event from PubSub pool after "
@@ -181,6 +191,7 @@ class Buttons : public HasLifecycle<Buttons, Config>,
 
         auto publishResult = PubSubService::get().publish(*envelopeResult);
         if (!publishResult) {
+            metrics().addPublishFailure();
             if (!_messagePool.release({.header = {.messageId = messageId}})) {
                 _log_e("Failed to release button event from PubSub pool after "
                        "publish failure");
@@ -189,6 +200,7 @@ class Buttons : public HasLifecycle<Buttons, Config>,
                          "Failed to publish button event envelope to PubSub");
         }
 
+        metrics().addPublished();
         return OK();
     }
 
@@ -219,6 +231,7 @@ class Buttons : public HasLifecycle<Buttons, Config>,
                    ": level=%u",
                    MAGIC_SV_ARG(config().buttons[i].button),
                    MAGIC_SV_ARG(config().buttons[i].pin), level ? 1 : 0);
+            metrics().addPollChange();
 
             ret.combine(_publishGpioEvent(
                 {.pin = config().buttons[i].pin,
@@ -249,7 +262,9 @@ class Buttons : public HasLifecycle<Buttons, Config>,
         if (_eventQueue == nullptr) {
             return;
         }
+        metrics().addIsrEvent();
         if (!Totem::Queue::Platform::sendFromIsr(_eventQueue, &event)) {
+            metrics().addIsrDrop();
             return;
         }
         Totem::TaskController::Controller::signalTaskFromIsr(_task,

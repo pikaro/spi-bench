@@ -6,9 +6,11 @@
 #include <cstdint>
 #include <cstring>
 
-inline constexpr size_t logMaxLength = 256;
+inline constexpr size_t logMaxLength = 128;
 inline constexpr size_t logTagLength = 3;
 static constexpr size_t logLevelLength = 3;
+using LogSiteId = uint32_t;
+inline constexpr LogSiteId logUnknownSiteId = 0;
 
 enum class LogLevel : uint8_t {
     Verbose = 0,
@@ -52,6 +54,8 @@ enum class LogComponent : uint8_t {
     Clock,
     LedPwm,
     Input,
+    Esp,
+    Audio,
 };
 
 constexpr const char *log_component_to_string(LogComponent component) {
@@ -80,6 +84,10 @@ constexpr const char *log_component_to_string(LogComponent component) {
         return "led";
     case LogComponent::Input:
         return "inp";
+    case LogComponent::Esp:
+        return "esp";
+    case LogComponent::Audio:
+        return "aud";
     case LogComponent::Unknown:
     default:
         return "???";
@@ -116,6 +124,12 @@ constexpr Color log_component_to_color(LogComponent component) {
     case LogComponent::Input:
         return Color::BrightBlue;
 
+    case LogComponent::Esp:
+        return Color::BrightRed;
+
+    case LogComponent::Audio:
+        return Color::BrightGreen;
+
     case LogComponent::Unknown:
     default:
         return Color::White;
@@ -127,6 +141,7 @@ inline constexpr LogComponent logComponent = LogComponent::System;
 struct LogRecord {
     uint32_t ts;
     uint32_t tsSynced;
+    LogSiteId siteId = logUnknownSiteId;
     LogComponent component;
     LogLevel level;
     std::array<char, logMaxLength> msg;

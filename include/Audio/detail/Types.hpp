@@ -4,6 +4,6 @@
 
 namespace Totem::Audio::detail {
 
-static constexpr LogComponent logComponent = LogComponent::Output;
+static constexpr LogComponent logComponent = LogComponent::Audio;
 
 } // namespace Totem::Audio::detail

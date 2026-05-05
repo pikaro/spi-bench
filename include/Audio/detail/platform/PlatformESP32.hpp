@@ -5,16 +5,28 @@
 #include "Audio/Interfaces/SourceConfig.hpp"
 #include "AudioTools/AudioLibs/AudioFFT.h"
 #include "AudioTools/CoreAudio/AudioI2S/I2SConfigESP32V1.h"
+#include "AudioTools/CoreAudio/AudioI2S/I2SESP32V1.h"
 #include "AudioTools/CoreAudio/AudioTypes.h"
 
 #include "Audio/Interfaces/Types.hpp"
+#include "AudioTools/AudioLibs/AudioEspressifFFT.h"
 #include "AudioTools/AudioLibs/AudioRealFFT.h"
 #include "AudioTools/AudioLibs/FFT/FFTWindows.h"
-#include "AudioTools/CoreAudio/AudioI2S/I2SStream.h"
+#include "AudioTools/CoreAudio/AudioI2S/I2SConfig.h"
+#include "AudioTools/CoreAudio/AudioStreams.h"
 #include "AudioTools/CoreAudio/BaseStream.h"
 #include "AudioTools/CoreAudio/StreamCopy.h"
+#ifndef TOTEM_AUDIO_ENABLE_BLUEDROID_A2DP
+#define TOTEM_AUDIO_ENABLE_BLUEDROID_A2DP 1
+#endif
+#if TOTEM_AUDIO_ENABLE_BLUEDROID_A2DP
+#include "BluetoothA2DPSink.h"
+#endif
 #include "Macros/Facade.hpp"
 #include "Types/Error.hpp"
+#include "driver/i2s_std.h"
+#include "esp_err.h"
+#include "freertos/FreeRTOS.h"
 #include <cstddef>
 #include <cstdint>
 
@@ -63,6 +75,99 @@ inline audio_tools::AudioInfo toPlatformAudioInfo(AudioInfo info) {
     };
 }
 
+class I2SDriverWithReadStatus : public audio_tools::I2SDriverESP32V1 {
+  public:
+    esp_err_t readBytesWithStatus(void *dest, size_t sizeBytes,
+                                  size_t &bytesRead) {
+        bytesRead = 0;
+        if (dest == nullptr || sizeBytes == 0) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        if (rx_chan == nullptr) {
+            return ESP_ERR_INVALID_STATE;
+        }
+        return i2s_channel_read(rx_chan, dest, sizeBytes, &bytesRead,
+                                ticks_to_wait_read);
+    }
+};
+
+class I2SAudioStream : public audio_tools::AudioStream {
+  public:
+    audio_tools::I2SConfig defaultConfig(audio_tools::RxTxMode mode) {
+        return _driver.defaultConfig(mode);
+    }
+
+    bool begin(audio_tools::I2SConfig config) {
+        if (!config) {
+            return false;
+        }
+        audio_tools::AudioStream::setAudioInfo(config);
+        _lastReadStatus = ESP_OK;
+        _lastReadBytes = 0;
+        _active = _driver.begin(config);
+        return _active;
+    }
+
+    void end() {
+        if (!_active) {
+            return;
+        }
+        _active = false;
+        _driver.end();
+    }
+
+    void setAudioInfo(audio_tools::AudioInfo info) override {
+        audio_tools::AudioStream::setAudioInfo(info);
+        if (_active) {
+            auto config = _driver.config();
+            config.copyFrom(info);
+            (void)_driver.setAudioInfo(config);
+        }
+    }
+
+    size_t write(const uint8_t *data, size_t len) override {
+        if (!_active || data == nullptr || len == 0) {
+            return 0;
+        }
+        return _driver.writeBytes(data, len);
+    }
+
+    size_t readBytes(uint8_t *data, size_t len) override {
+        if (!_active || data == nullptr || len == 0) {
+            _lastReadStatus = ESP_ERR_INVALID_STATE;
+            _lastReadBytes = 0;
+            return 0;
+        }
+        _lastReadStatus =
+            _driver.readBytesWithStatus(data, len, _lastReadBytes);
+        return _lastReadBytes;
+    }
+
+    int available() override {
+        return _active ? I2S_BUFFER_COUNT * I2S_BUFFER_SIZE : 0;
+    }
+
+    int availableForWrite() override {
+        return _active ? I2S_BUFFER_COUNT * I2S_BUFFER_SIZE : 0;
+    }
+
+    void flush() override {}
+
+    I2SDriverWithReadStatus *driver() { return &_driver; }
+
+    operator bool() override { return _active; }
+
+    [[nodiscard]] bool isActive() const { return _active; }
+    [[nodiscard]] esp_err_t lastReadStatus() const { return _lastReadStatus; }
+    [[nodiscard]] size_t lastReadBytes() const { return _lastReadBytes; }
+
+  private:
+    I2SDriverWithReadStatus _driver{};
+    esp_err_t _lastReadStatus = ESP_OK;
+    size_t _lastReadBytes = 0;
+    bool _active = false;
+};
+
 class I2SInputStream {
   public:
     DELETE_COPY(I2SInputStream)
@@ -70,7 +175,7 @@ class I2SInputStream {
 
     I2SInputStream() = default;
 
-    ReturnCode begin(const I2SPins &pins, const I2SDeviceConfig &config) {
+    ReturnCode begin(const I2SPins &pins, const I2SLinkConfig &config) {
         FAIL_IF(_active, ERR(CoreError, InvalidState),
                 "I2S input stream already active");
         FAIL_IF(!config.validate(), ERR(CoreError, InvalidArgument),
@@ -81,7 +186,8 @@ class I2SInputStream {
         platformConfig.channels = config.audio.channels;
         platformConfig.bits_per_sample = config.audio.bitsPerSample;
         platformConfig.port_no = config.port;
-        platformConfig.is_master = config.role == I2SRole::Master;
+        platformConfig.is_master =
+            config.hostClockRole == I2SHostClockRole::ProvidesClock;
         platformConfig.i2s_format = toPlatformFormat(config.format);
         platformConfig.channel_format = toPlatformChannel(config.channel);
         platformConfig.pin_bck = static_cast<int>(pins.bitClock);
@@ -121,23 +227,55 @@ class I2SInputStream {
         return _stream.readBytes(data, len);
     }
 
+    [[nodiscard]] bool lastReadOk() const {
+        return _stream.lastReadStatus() == ESP_OK;
+    }
+
+    [[nodiscard]] bool lastReadTimedOut() const {
+        return _stream.lastReadStatus() == ESP_ERR_TIMEOUT;
+    }
+
+    [[nodiscard]] int32_t lastReadStatusCode() const {
+        return static_cast<int32_t>(_stream.lastReadStatus());
+    }
+
+    [[nodiscard]] const char *lastReadStatusName() const {
+        return esp_err_to_name(_stream.lastReadStatus());
+    }
+
     audio_tools::AudioStream &stream() { return _stream; }
 
   private:
-    audio_tools::I2SStream _stream;
+    I2SAudioStream _stream{};
     AudioInfo _info{};
     bool _active = false;
 };
 
 struct Platform {
+    using AudioStream = audio_tools::AudioStream;
     using I2SInputStream = Totem::Audio::detail::platform::I2SInputStream;
-    using FftSink = audio_tools::AudioRealFFT;
+    using RealFftSink = audio_tools::AudioRealFFT;
+    using EspressifFftSink = audio_tools::AudioEspressifFFT;
     using StreamCopier = audio_tools::StreamCopy;
     using AudioFftBase = audio_tools::AudioFFTBase;
     using AudioFftConfig = audio_tools::AudioFFTConfig;
     using WindowFunction = audio_tools::WindowFunction;
     using HammingWindow = audio_tools::Hamming;
     using HannWindow = audio_tools::Hann;
+#if TOTEM_AUDIO_ENABLE_BLUEDROID_A2DP
+    using A2DPSink = BluetoothA2DPSink;
+    using A2DPAudioState = esp_a2d_audio_state_t;
+    using A2DPConnectionState = esp_a2d_connection_state_t;
+
+    static constexpr A2DPAudioState a2dpAudioStarted =
+        ESP_A2D_AUDIO_STATE_STARTED;
+    static constexpr A2DPConnectionState a2dpConnected =
+        ESP_A2D_CONNECTION_STATE_CONNECTED;
+#endif
+
+    static void setAudioInfo(AudioStream &stream, AudioInfo info) {
+        stream.setAudioInfo(toPlatformAudioInfo(info));
+    }
 };
 
 } // namespace Totem::Audio::detail::platform

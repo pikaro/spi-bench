@@ -1,4 +1,5 @@
 #include "Clock/Facade.hpp"
+#include "LedDisplay/Facade.hpp"
 #include "Macros/Facade.hpp"
 #include "Platform/PlatformSelect.hpp"
 #include "Setups/Core.hpp"
@@ -8,11 +9,18 @@
 #include <cstdint>
 
 CoreSetup core{};
+Totem::LedDisplay::Display ledDisplay{core.taskRegistry};
 Totem::Wire::Spi::Slave spiSlave{core.taskRegistry};
 Totem::Clock::Clock clockSlave{Totem::Clock::Clock::Role::Slave};
+constexpr auto gpuStarRole() {
+    using Role = PubSubStarSpiEdgeSetup<Totem::Wire::Spi::Slave>::Role;
+    if constexpr (gpuNodeName == Totem::Data::NodeName::GPUNode1) {
+        return Role::GPU1;
+    }
+    return Role::GPU0;
+}
 PubSubStarSpiEdgeSetup<Totem::Wire::Spi::Slave> pubSubStar{
-    core.taskRegistry, spiSlave,
-    PubSubStarSpiEdgeSetup<Totem::Wire::Spi::Slave>::Role::GPU0};
+    core.taskRegistry, spiSlave, gpuStarRole()};
 
 void setup() {
     ::platform::delay(::platform::ms_to_ticks(3000));
@@ -21,6 +29,7 @@ void setup() {
 
     ABORT_IF_ERR_BEGIN(spiSlave.begin(spiSlaveConfig));
     pubSubStar.setup();
+    ABORT_IF_ERR_BEGIN(ledDisplay.begin());
 
     _log_i("Setup complete");
 }

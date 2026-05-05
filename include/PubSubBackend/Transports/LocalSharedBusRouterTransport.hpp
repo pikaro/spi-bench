@@ -335,6 +335,7 @@ class LocalSharedBusRouterTransport
             if (!deliverRet.ok()) {
                 if (deliverRet == ERR(Timeout) &&
                     pending.header.trafficClass == TrafficClass::Noncritical) {
+                    detail::metrics().addEgressDroppedNoncritical();
                     _log_w("%s: dropped noncritical shared-bus router frame "
                            "with message ID %lu for peer %u under peer queue "
                            "pressure",

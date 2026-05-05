@@ -26,8 +26,8 @@ areas.
 
 - `src/master/`: current master execution target
 - `src/media/`: current media SPI slave execution target on the low-speed bus
-- `src/gpu/`: shared source root for `gpu0` and `gpu1`; GPU0 is active on the
-    high-speed bus in the current hardware PubSub star, GPU1 is not
+- `src/gpu/`: shared source root for `gpu0` and `gpu1`; both are active peers
+    on the high-speed bus in the current hardware PubSub star
 - `src/io/`: input/output side-node execution target over RS485
 
 The source root used in a build is selected by `src/CMakeLists.txt` from the
@@ -71,9 +71,18 @@ owned by `Wire/Spi/detail/platform/`. Do not move SPI into top-level
 `Platform/` unless a second component starts using the same abstraction
 directly.
 
+`include/Wire/I2C/` follows the same boundary for low-speed I2C peripherals.
+The master owns one ESP-IDF I2C bus and a fixed-capacity table of registered
+devices. Concrete device drivers such as SSD1306, PCF8574, and MCP4661 build on
+the reusable `Wire/I2C/detail/Device.hpp` handle instead of adding singleton
+registries or heap-backed maps.
+
 `include/Audio/` follows the same boundary for media-node audio. Public config
-and callback payloads live in `Audio/Interfaces/`, while the arduino-audio-tools
-I2S/FFT integration is hidden behind `Audio/detail/platform/PlatformSelect.hpp`.
+and callback payloads live in `Audio/Interfaces/`, while selectable source
+implementations live in `Audio/detail/Sources/`. Platform integration for
+arduino-audio-tools I2S/FFT and ESP32-A2DP is hidden behind
+`Audio/detail/platform/PlatformSelect.hpp`, and selectable FFT backends are
+isolated in `Audio/detail/FftBackend.hpp`.
 
 Wire-level helpers that are reused across physical transports belong in
 `include/Wire/detail/`. `Wire/detail/AttentionLine.hpp` is one such helper: it

@@ -47,10 +47,7 @@ enum class Esp32OrigPin : uint8_t {
     VSPI_MOSI = GPIO_NUM_23,
     VSPI_CS = GPIO_NUM_5,
 
-    // Reserved for PSRAM
-    // GPIO20 = GPIO_NUM_20,
-    // GPIO21 = GPIO_NUM_21,
-
+    GPIO21 = GPIO_NUM_21,
     GPIO22 = GPIO_NUM_22,
 
     GPIO25 = GPIO_NUM_25,

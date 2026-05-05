@@ -77,6 +77,15 @@ struct Console {
         return ERR(OutOfMemory);
     }
 
+    [[nodiscard]] static bool connected() {
+#if CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG ||                             \
+    CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+        return usb_serial_jtag_is_connected();
+#else
+        return true;
+#endif
+    }
+
     static ReturnCode write(std::span<const std::byte> data, bool drain = false,
                             std::optional<uint32_t> /*unused*/ = std::nullopt) {
         auto written = fwrite(reinterpret_cast<const char *>(data.data()), 1,

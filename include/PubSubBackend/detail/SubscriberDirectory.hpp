@@ -6,6 +6,7 @@
 #include "PubSubBackend/Interfaces/Types.hpp"
 #include "PubSubBackend/detail/Types.hpp"
 #include "Types/Error.hpp"
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <expected>
@@ -46,8 +47,7 @@ class SubscriberDirectory : public SubscriberDirectoryImpl {
             .topic = topic,
             .name = subscriberName,
         };
-        return this->_addImpl(
-            reinterpret_cast<uintptr_t>(subscriber.subscriber), entry);
+        return this->_addImpl(nextSubscriberKey(), entry);
     }
 
     [[nodiscard]] std::expected<TopicId, ReturnCode>
@@ -63,6 +63,14 @@ class SubscriberDirectory : public SubscriberDirectoryImpl {
                     this->ownerName());
         return topic;
     }
+
+  private:
+    [[nodiscard]] SubscriberKey nextSubscriberKey() {
+        auto key = _nextKey.fetch_add(1, std::memory_order_relaxed);
+        return key == 0 ? nextSubscriberKey() : key;
+    }
+
+    std::atomic<SubscriberKey> _nextKey{1};
 };
 
 } // namespace Totem::PubSubBackend::detail

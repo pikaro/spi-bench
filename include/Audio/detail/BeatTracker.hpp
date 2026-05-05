@@ -4,6 +4,7 @@
 #include "Audio/Interfaces/Types.hpp"
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <optional>
 
@@ -11,131 +12,222 @@ namespace Totem::Audio::detail {
 
 class BeatTracker {
   public:
+    using Events = std::array<std::optional<BeatResult>, beatGroupCount>;
+
     void reset(const BeatTrackerConfig &config) {
         _config = config;
-        _baseline = 0.0F;
-        _baselineInitialized = false;
-        _lastEnergy = 0;
-        _lastBeatUs = 0;
-        _bpm = 0.0F;
-        _ibi.fill(0);
-        _ibiCount = 0;
-        _ibiHead = 0;
-    }
-
-    [[nodiscard]] std::optional<BeatEvent> update(const FftFrame &frame) {
-        const auto energy = _energy(frame);
-        const auto previousBaseline =
-            _baselineInitialized ? _baseline : static_cast<float>(energy);
-        const bool refractoryOk =
-            _lastBeatUs == 0 ||
-            frame.timestampUs >=
-                _lastBeatUs +
-                    (static_cast<uint64_t>(_config.refractoryMs) * 1000ULL);
-        const bool aboveNoise = energy >= _config.minEnergy;
-        const bool aboveBaseline =
-            static_cast<float>(energy) > previousBaseline * _config.sensitivity;
-        const bool rising =
-            energy > static_cast<uint16_t>(_lastEnergy + _config.onsetDelta);
-
-        _updateBaseline(energy);
-
-        if (aboveNoise && aboveBaseline && rising && refractoryOk) {
-            _registerBeat(frame.timestampUs);
-            _lastEnergy = energy;
-            return BeatEvent{
-                .kind = BeatEventKind::Detected,
-                .frameSequence = frame.sequence,
-                .timestampUs = frame.timestampUs,
-                .energy = static_cast<uint8_t>(std::min<uint16_t>(energy, 255)),
-                .bpm = _bpm,
-            };
+        for (auto &state : _states) {
+            state.reset();
         }
-
-        _lastEnergy = energy;
-        return std::nullopt;
     }
 
-    [[nodiscard]] float bpm() const { return _bpm; }
+    [[nodiscard]] Events update(const FftResult &frame) {
+        Events events{};
+        for (const auto &groupConfig : _config.groups) {
+            const auto index = beatGroupIndex(groupConfig.group);
+            if (index >= _states.size()) {
+                continue;
+            }
+            events[index] = _states[index].update(frame, groupConfig);
+        }
+        return events;
+    }
+
+    [[nodiscard]] BeatGroup primaryGroup() const {
+        return _config.primaryGroup;
+    }
 
   private:
-    [[nodiscard]] uint16_t _energy(const FftFrame &frame) const {
-        uint16_t sum = 0;
-        const auto lower = _config.energyBands.lower;
-        const auto upper = _config.energyBands.upper;
-        for (uint8_t i = lower; i <= upper; ++i) {
-            sum = static_cast<uint16_t>(sum + frame.bands[i].scaled);
-        }
-        return static_cast<uint16_t>(sum / (upper - lower + 1U));
-    }
-
-    void _updateBaseline(uint16_t energy) {
-        if (!_baselineInitialized) {
-            _baseline = static_cast<float>(energy);
-            _baselineInitialized = true;
-            return;
-        }
-        _baseline = ((1.0F - _config.baselineAlpha) * _baseline) +
-                    (_config.baselineAlpha * static_cast<float>(energy));
-    }
-
-    void _registerBeat(uint64_t nowUs) {
-        if (_lastBeatUs != 0 && nowUs > _lastBeatUs) {
-            _pushIbi(static_cast<uint32_t>(nowUs - _lastBeatUs));
-            _updateBpm();
-        }
-        _lastBeatUs = nowUs;
-    }
-
-    void _pushIbi(uint32_t ibi) {
-        const auto maxIbi = static_cast<uint32_t>(
-            60000000ULL / std::max<uint16_t>(1, _config.minBpm));
-        const auto minIbi = static_cast<uint32_t>(
-            60000000ULL / std::max<uint16_t>(1, _config.maxBpm));
-        if (ibi < minIbi || ibi > maxIbi) {
-            return;
+    struct GroupState {
+        void reset() {
+            baseline = 0.0F;
+            fluxBaseline = 0.0F;
+            ambientFloor = 0.0F;
+            baselineInitialized = false;
+            fluxBaselineInitialized = false;
+            ambientFloorInitialized = false;
+            lastEnergy = 0.0F;
+            lastBeatUs = 0;
+            bpm = 0.0F;
+            ibi.fill(0);
+            ibiCount = 0;
+            ibiHead = 0;
         }
 
-        const auto capacity = _config.ibiHistorySize;
-        _ibi[_ibiHead] = ibi;
-        _ibiHead = static_cast<uint8_t>((_ibiHead + 1U) % capacity);
-        if (_ibiCount < capacity) {
-            ++_ibiCount;
-        }
-    }
+        [[nodiscard]] std::optional<BeatResult>
+        update(const FftResult &frame, const BeatGroupConfig &config) {
+            const auto energy = _energy(frame, config.energyBands);
+            const auto previousBaseline =
+                baselineInitialized ? baseline : 0.0F;
+            const auto previousAmbientFloor =
+                ambientFloorInitialized ? ambientFloor : 0.0F;
+            const bool refractoryOk =
+                lastBeatUs == 0 ||
+                frame.timestampUs >=
+                    lastBeatUs +
+                        (static_cast<uint64_t>(config.refractoryMs) * 1000ULL);
+            const auto ambientThreshold = std::max(
+                config.minEnergy,
+                std::max(previousAmbientFloor * config.ambientSensitivity,
+                         previousAmbientFloor + config.ambientEnergyMargin));
+            const bool aboveNoise = energy >= ambientThreshold;
+            const auto baselineThreshold =
+                std::max(previousBaseline * config.sensitivity,
+                         previousBaseline + config.onsetDelta);
+            const bool aboveBaseline = energy > baselineThreshold;
+            const auto flux = energy > lastEnergy ? energy - lastEnergy : 0.0F;
+            const auto previousFluxBaseline =
+                fluxBaselineInitialized ? fluxBaseline : 0.0F;
+            const bool rising =
+                flux >= config.onsetDelta &&
+                flux > std::max(config.onsetDelta,
+                                previousFluxBaseline * config.sensitivity);
+            const bool candidate = aboveNoise && (aboveBaseline || rising);
 
-    void _updateBpm() {
-        if (_ibiCount < 2) {
-            return;
+            if (!candidate || !refractoryOk) {
+                updateAmbientFloor(energy, config);
+                updateBaseline(energy, config);
+                updateFluxBaseline(flux, config);
+            }
+
+            if (candidate && refractoryOk) {
+                registerBeat(frame.timestampUs, config);
+                lastEnergy = energy;
+                return BeatResult{
+                    .kind = BeatEventKind::Detected,
+                    .group = config.group,
+                    .bands = config.energyBands,
+                    .frameSequence = frame.sequence,
+                    .timestampUs = frame.timestampUs,
+                    .energy = _eventEnergy(energy),
+                    .bpm = bpm,
+                };
+            }
+
+            lastEnergy = energy;
+            return std::nullopt;
         }
 
-        std::array<uint32_t, 16> sorted{};
-        for (uint8_t i = 0; i < _ibiCount; ++i) {
-            sorted[i] = _ibi[i];
-        }
-        std::sort(sorted.begin(), sorted.begin() + _ibiCount);
-        const bool even = (_ibiCount % 2U) == 0U;
-        const auto ibi = even ? ((sorted[(_ibiCount / 2U) - 1U] / 2U) +
-                                 (sorted[_ibiCount / 2U] / 2U))
-                              : sorted[_ibiCount / 2U];
-        if (ibi == 0) {
-            return;
+        [[nodiscard]] static float _energy(const FftResult &frame,
+                                           FftBandIndexRange bands) {
+            float sum = 0.0F;
+            for (uint8_t i = bands.lower; i <= bands.upper; ++i) {
+                const auto value = frame.bands[i].weightedMagnitude;
+                if (std::isfinite(value) && value > 0.0F) {
+                    sum += value;
+                }
+            }
+            return sum;
         }
 
-        const auto bpm = 60.0F * 1000000.0F / static_cast<float>(ibi);
-        _bpm = std::clamp(bpm, static_cast<float>(_config.minBpm),
-                          static_cast<float>(_config.maxBpm));
-    }
+        [[nodiscard]] static uint8_t _eventEnergy(float energy) {
+            if (!std::isfinite(energy) || energy <= 0.0F) {
+                return 0;
+            }
+            return static_cast<uint8_t>(
+                std::clamp(std::lround(energy), 0L, 255L));
+        }
+
+        void updateBaseline(float energy, const BeatGroupConfig &config) {
+            if (!baselineInitialized) {
+                baseline = energy;
+                baselineInitialized = true;
+                return;
+            }
+            baseline = ((1.0F - config.baselineAlpha) * baseline) +
+                       (config.baselineAlpha * energy);
+        }
+
+        void updateFluxBaseline(float flux, const BeatGroupConfig &config) {
+            if (!fluxBaselineInitialized) {
+                fluxBaseline = flux;
+                fluxBaselineInitialized = true;
+                return;
+            }
+            fluxBaseline = ((1.0F - config.baselineAlpha) * fluxBaseline) +
+                           (config.baselineAlpha * flux);
+        }
+
+        void updateAmbientFloor(float energy, const BeatGroupConfig &config) {
+            if (!ambientFloorInitialized) {
+                ambientFloor = energy;
+                ambientFloorInitialized = true;
+                return;
+            }
+            if (energy < ambientFloor) {
+                ambientFloor = energy;
+                return;
+            }
+            ambientFloor = ((1.0F - config.ambientAlpha) * ambientFloor) +
+                           (config.ambientAlpha * energy);
+        }
+
+        void registerBeat(uint64_t nowUs, const BeatGroupConfig &config) {
+            if (lastBeatUs != 0 && nowUs > lastBeatUs) {
+                pushIbi(static_cast<uint32_t>(nowUs - lastBeatUs), config);
+                updateBpm(config);
+            }
+            lastBeatUs = nowUs;
+        }
+
+        void pushIbi(uint32_t intervalUs, const BeatGroupConfig &config) {
+            const auto maxIbi = static_cast<uint32_t>(
+                60000000ULL / std::max<uint16_t>(1, config.minBpm));
+            const auto minIbi = static_cast<uint32_t>(
+                60000000ULL / std::max<uint16_t>(1, config.maxBpm));
+            if (intervalUs < minIbi || intervalUs > maxIbi) {
+                return;
+            }
+
+            const auto capacity = config.ibiHistorySize;
+            ibi[ibiHead] = intervalUs;
+            ibiHead = static_cast<uint8_t>((ibiHead + 1U) % capacity);
+            if (ibiCount < capacity) {
+                ++ibiCount;
+            }
+        }
+
+        void updateBpm(const BeatGroupConfig &config) {
+            if (ibiCount < 2) {
+                return;
+            }
+
+            std::array<uint32_t, 16> sorted{};
+            for (uint8_t i = 0; i < ibiCount; ++i) {
+                sorted[i] = ibi[i];
+            }
+            std::sort(sorted.begin(), sorted.begin() + ibiCount);
+            const bool even = (ibiCount % 2U) == 0U;
+            const auto intervalUs = even
+                                        ? ((sorted[(ibiCount / 2U) - 1U] / 2U) +
+                                           (sorted[ibiCount / 2U] / 2U))
+                                        : sorted[ibiCount / 2U];
+            if (intervalUs == 0) {
+                return;
+            }
+
+            const auto calculatedBpm =
+                60.0F * 1000000.0F / static_cast<float>(intervalUs);
+            bpm = std::clamp(calculatedBpm, static_cast<float>(config.minBpm),
+                             static_cast<float>(config.maxBpm));
+        }
+
+        float baseline = 0.0F;
+        float fluxBaseline = 0.0F;
+        float ambientFloor = 0.0F;
+        bool baselineInitialized = false;
+        bool fluxBaselineInitialized = false;
+        bool ambientFloorInitialized = false;
+        float lastEnergy = 0.0F;
+        uint64_t lastBeatUs = 0;
+        float bpm = 0.0F;
+        std::array<uint32_t, 16> ibi{};
+        uint8_t ibiCount = 0;
+        uint8_t ibiHead = 0;
+    };
 
     BeatTrackerConfig _config{};
-    float _baseline = 0.0F;
-    bool _baselineInitialized = false;
-    uint16_t _lastEnergy = 0;
-    uint64_t _lastBeatUs = 0;
-    float _bpm = 0.0F;
-    std::array<uint32_t, 16> _ibi{};
-    uint8_t _ibiCount = 0;
-    uint8_t _ibiHead = 0;
+    std::array<GroupState, beatGroupCount> _states{};
 };
 
 } // namespace Totem::Audio::detail

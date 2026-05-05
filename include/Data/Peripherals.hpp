@@ -10,4 +10,5 @@ enum class PeripheralLed : uint8_t {
     Bulb1,
     Bulb2,
     Onboard,
+    BeatIndicator,
 };

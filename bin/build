@@ -1,5 +1,12 @@
 #!/bin/bash
 
+REPO_ROOT=$(git rev-parse --show-toplevel)
+cd "$REPO_ROOT" || {
+    echo "Failed to change directory to repository root"
+    exit 1
+}
+. .venv/bin/activate
+
 RET=0
 pio run "$@" || RET=$?
 

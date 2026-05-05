@@ -225,6 +225,7 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
             _lastTransmittedAckRequiredFrameSequence =
                 _tx.header().ackSequence;
         }
+        beginSlot(BucketSize::B64);
     }
 
     void recordAttentionAsserted(int64_t assertedAtUs) {

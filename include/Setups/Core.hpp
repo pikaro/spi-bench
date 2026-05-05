@@ -1,6 +1,8 @@
 #pragma once
 
 #include "CommandBackend/Facade.hpp"
+#include "FileSystem/detail/Commands.hpp"
+#include "Generic/ConditionalMember.hpp"
 #include "LoggingBackend/Facade.hpp"
 #include "Macros/Facade.hpp"
 #include "MetricsBackend/Facade.hpp"
@@ -9,7 +11,9 @@
 #include "Platform/Console.hpp"
 #include "Platform/PlatformSelect.hpp"
 #include "Services/Commands.hpp"
+#include "Services/FileSystem.hpp"
 #include "Services/Metrics.hpp"
+#include "StaticConfig/Logging.hpp"
 #include "Support/CoreCommands.hpp"
 #include "TaskControllerRegistry/Facade.hpp"
 #include "Types/Error.hpp"
@@ -18,10 +22,12 @@
 struct CoreSetup {
     CoreSetup()
         : metricsBinding(metricsBackend), aggregator(taskRegistry),
+          errorJournal(taskRegistry),
           commandController(taskRegistry),
           consoleSource(commandController.store(), &commandController,
                         Totem::CommandBackend::Controller::wake),
-          systemTaskSource(taskRegistry), monitoring(taskRegistry) {}
+          systemTaskSource(taskRegistry), monitoring(taskRegistry) {
+    }
 
     void setup() {
         ::platform::wait_for_ready();
@@ -48,6 +54,27 @@ struct CoreSetup {
                      "Failed to add console sink to aggregator");
 
         LoggingService::set(aggregator);
+        ABORT_IF_ERR_BEGIN(Totem::LoggingBackend::NativeLogBridge::begin());
+
+        auto fileSystemBegin = fileSystem.begin();
+        if (!fileSystemBegin.ok()) {
+            _log_e("LittleFS unavailable: " ERR_FMT, ERR_ARG(fileSystemBegin));
+        } else {
+            FileSystemService::set(fileSystem);
+            _setupErrorJournal();
+            if (auto registerRet =
+                    Totem::FileSystem::detail::registerCommands(fileSystem);
+                !registerRet.ok()) {
+                _log_e("Failed to register filesystem commands: " ERR_FMT,
+                       ERR_ARG(registerRet));
+            }
+            if (auto listRet = Totem::FileSystem::detail::logFileSystemContents(
+                    fileSystem);
+                !listRet.ok()) {
+                _log_e("Failed to validate LittleFS contents: " ERR_FMT,
+                       ERR_ARG(listRet));
+            }
+        }
 
         ABORT_IF_ERR_BEGIN(monitoring.begin());
         ABORT_IF_ERR_BEGIN(commandController.begin());
@@ -65,6 +92,18 @@ struct CoreSetup {
         return ret;
     }
 
+    void _setupErrorJournal() {
+        if constexpr (LoggingConfig::errorJournalEnabled) {
+            auto &journal = errorJournal.get();
+            if (auto journalBegin = journal.begin(); !journalBegin.ok()) {
+                return;
+            }
+            if (auto sinkRet = aggregator.addSink(journal); !sinkRet.ok()) {
+                (void)journal.end();
+            }
+        }
+    }
+
     struct MetricsBinding {
         explicit MetricsBinding(Totem::MetricsBackend::Backend &backend) {
             MetricsService::set(backend);
@@ -77,9 +116,13 @@ struct CoreSetup {
     MetricsBinding metricsBinding;
     Totem::TaskControllerRegistry::Registry taskRegistry;
     Totem::LoggingBackend::Aggregator aggregator;
-    Totem::LoggingBackend::ConsoleOutput consoleOutput;
+    Totem::LoggingBackend::ConsoleSink consoleOutput;
+    [[no_unique_address]] ConditionalMember<
+        LoggingConfig::errorJournalEnabled,
+        Totem::LoggingBackend::ErrorJournalSink> errorJournal;
     Totem::CommandBackend::Controller commandController;
     Totem::CommandBackend::ConsoleTransport consoleSource;
     Totem::TaskControllerRegistry::SystemTaskSource systemTaskSource;
     Totem::Monitoring::Monitoring monitoring;
+    FileSystemService::DefaultFileSystem fileSystem;
 };

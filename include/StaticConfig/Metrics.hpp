@@ -7,6 +7,8 @@
 struct MetricCollection {
     using MetricLevel = Totem::MetricsBackend::MetricLevel;
 
+    // Components set to std::nullopt use this default threshold. Groups at
+    // shallower levels are compiled out by metrics_enabled().
     static constexpr MetricLevel minimum = MetricLevel::Baseline;
     static constexpr std::optional<MetricLevel> pubSub = std::nullopt;
     static constexpr std::optional<MetricLevel> rs485 = std::nullopt;
@@ -16,6 +18,10 @@ struct MetricCollection {
         std::nullopt;
     static constexpr std::optional<MetricLevel> logging = std::nullopt;
     static constexpr std::optional<MetricLevel> mutex = std::nullopt;
+    static constexpr std::optional<MetricLevel> audio = MetricLevel::Profiling;
+    static constexpr std::optional<MetricLevel> i2c = MetricLevel::Diagnostic;
+    static constexpr std::optional<MetricLevel> ledPwm = std::nullopt;
+    static constexpr std::optional<MetricLevel> buttons = std::nullopt;
 };
 
 struct MetricConfig {

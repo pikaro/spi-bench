@@ -42,6 +42,7 @@ class Master : public HasLifecycle<Master, MasterConfig>,
         Totem::Wire::WriteRequest request{};
         size_t length = 0;
         uint32_t sentAtMs = 0;
+        int64_t sentAtUs = 0;
         bool occupied = false;
     };
 
@@ -154,10 +155,7 @@ class Master : public HasLifecycle<Master, MasterConfig>,
                 this->config().serviceBudgetMs) {
                 break;
             }
-            if (this->config().interTurnDelayMs > 0) {
-                ::platform::delay(
-                    ::platform::ms_to_ticks(this->config().interTurnDelayMs));
-            }
+            _delayInterTurn();
             ret.combine(_runTurn(_consumeAttentionRequest()));
         }
         return ret;
@@ -308,10 +306,10 @@ class Master : public HasLifecycle<Master, MasterConfig>,
         const bool wasReady = _transceiver.ready();
         const auto previousRxSequence = _transceiver.lastReceivedSequence();
         const bool peerHadSlot = _transceiver.hasProtocolPreamble(rx);
-        auto parseRet = _transceiver.parseRx(rx, receivedAtUs);
         if (peerHadSlot) {
             _transceiver.markTxConsumed();
         }
+        auto parseRet = _transceiver.parseRx(rx, receivedAtUs);
         const bool helloResynced = _transceiver.consumeHelloResynced();
         if (!parseRet.ok()) {
             if (!_transceiver.ready() &&
@@ -383,8 +381,11 @@ class Master : public HasLifecycle<Master, MasterConfig>,
             }
         }
         if (helloResynced) {
-            _log_v("SPI master accepted peer hello resync; dropping stale "
-                   "pending operations");
+            metrics().addLinkRecovery(LinkRecoveryReason::HelloResync);
+            _log_w("SPI master link recovery reason=%s; dropping stale "
+                   "pending operations",
+                   link_recovery_reason_name(
+                       LinkRecoveryReason::HelloResync));
             FAIL_IF_ERR_FWD(_failQueuedWrites(ERR(WireError, SequenceError)),
                             "Failed to fail stale SPI master queued writes");
             FAIL_IF_ERR_FWD(_failPendingWrites(ERR(WireError, SequenceError)),
@@ -497,6 +498,13 @@ class Master : public HasLifecycle<Master, MasterConfig>,
         ::platform::delay(::platform::ms_to_ticks(delayMs == 0 ? 1 : delayMs));
     }
 
+    void _delayInterTurn() const {
+        if (this->config().interTurnDelayMs > 0) {
+            ::platform::delay(
+                ::platform::ms_to_ticks(this->config().interTurnDelayMs));
+        }
+    }
+
     [[nodiscard]] bool
     _shouldWidenReceiveWindow(bool attentionRequested) const {
         if (this->config().attentionReceiveWindowBytes <=
@@ -562,6 +570,7 @@ class Master : public HasLifecycle<Master, MasterConfig>,
             .request = item.request,
             .length = item.request.data.size(),
             .sentAtMs = ::platform::get_time(),
+            .sentAtUs = ::platform::get_time_us(),
             .occupied = true,
         };
         return OK();
@@ -595,9 +604,10 @@ class Master : public HasLifecycle<Master, MasterConfig>,
             auto request = pending.request;
             const auto handle = pending.handle;
             const auto length = pending.length;
+            const auto sentAtUs = pending.sentAtUs;
             pending = {};
             ret.combine(request.ack(handle, static_cast<uint16_t>(length),
-                                    receivedAtUs));
+                                    receivedAtUs, sentAtUs));
         }
         return ret;
     }
@@ -653,6 +663,10 @@ class Master : public HasLifecycle<Master, MasterConfig>,
 
     ReturnCode _resetLink(ReturnCode error) {
         metrics().addReset();
+        const auto reason = link_recovery_reason_from_error(error);
+        metrics().addLinkRecovery(reason);
+        _log_w("SPI master link reset reason=%s error=" ERR_FMT,
+               link_recovery_reason_name(reason), ERR_ARG(error));
         auto ret = OK();
         ret.combine(_failQueuedWrites(error));
         ret.combine(_failPendingWrites(error));

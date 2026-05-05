@@ -5,10 +5,10 @@
 #include "Macros/Facade.hpp"
 #include "StaticConfig/Logging.hpp"
 #include "Types/Error.hpp"
-#include <magic_enum/magic_enum.hpp>
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <magic_enum/magic_enum.hpp>
 #include <optional>
 #include <utility>
 
@@ -29,10 +29,10 @@ log_component_values_are_dense(std::index_sequence<Indices...> /*unused*/) {
     return ((static_cast<size_t>(values[Indices]) == Indices) && ...);
 }
 
-static_assert(log_component_values_are_dense(
-                  std::make_index_sequence<
-                      magic_enum::enum_count<LogComponent>()>{}),
-              "LogComponent values must remain contiguous from zero");
+static_assert(
+    log_component_values_are_dense(
+        std::make_index_sequence<magic_enum::enum_count<LogComponent>()>{}),
+    "LogComponent values must remain contiguous from zero");
 
 inline constexpr auto componentDefaultLogLevels = make_default_log_levels(
     LoggingDefaultLevel::defaultLevel, LoggingDefaultLevel::system,
@@ -41,7 +41,8 @@ inline constexpr auto componentDefaultLogLevels = make_default_log_levels(
     LoggingDefaultLevel::taskControllerRegistry, LoggingDefaultLevel::output,
     LoggingDefaultLevel::rs485, LoggingDefaultLevel::spi,
     LoggingDefaultLevel::clock, LoggingDefaultLevel::ledPwm,
-    LoggingDefaultLevel::input);
+    LoggingDefaultLevel::input, LoggingDefaultLevel::esp,
+    LoggingDefaultLevel::audio);
 
 static constexpr std::optional<LogLevel>
 default_level_for(LogComponent component) {

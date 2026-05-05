@@ -15,8 +15,13 @@ struct Metrics {
     using MetricType = Totem::MetricsBackend::MetricType;
     using MetricUnit = Totem::MetricsBackend::MetricUnit;
 
-    static constexpr MetricGroupDesc groupDef = {
-        .name = "pubsub",
+    static constexpr MetricGroupDesc coreGroupDef = {
+        .name = "psCore",
+        .level = Totem::MetricsBackend::MetricLevel::Core,
+    };
+
+    static constexpr MetricGroupDesc spiGroupDef = {
+        .name = "psSpi",
         .level = Totem::MetricsBackend::MetricLevel::Profiling,
     };
 
@@ -87,87 +92,101 @@ struct Metrics {
     };
 
     static Metrics create() {
-        REGISTER_METRICS_GROUP("PubSub", group);
-        REGISTER_METRIC("PubSub", ingressEvictedNoncritical, Counter, group);
-        REGISTER_METRIC("PubSub", ingressDroppedNoncritical, Counter, group);
-        REGISTER_METRIC("PubSub", ingressRejectedCritical, Counter, group);
-        REGISTER_METRIC("PubSub", egressEvictedNoncritical, Counter, group);
-        REGISTER_METRIC("PubSub", egressDroppedNoncritical, Counter, group);
-        REGISTER_METRIC("PubSub", egressRejectedCritical, Counter, group);
-        REGISTER_METRIC("PubSub", spiTx, Counter, group);
-        REGISTER_METRIC("PubSub", spiAck, Counter, group);
-        REGISTER_METRIC("PubSub", spiFail, Counter, group);
-        REGISTER_METRIC("PubSub", spiRx, Counter, group);
-        REGISTER_METRIC("PubSub", spiDrop, Counter, group);
+        REGISTER_METRICS_GROUP("PubSubCore", coreGroup);
+        REGISTER_METRIC("PubSubCore", ingressEvictedNoncritical, Counter,
+                        coreGroup);
+        REGISTER_METRIC("PubSubCore", ingressDroppedNoncritical, Counter,
+                        coreGroup);
+        REGISTER_METRIC("PubSubCore", ingressRejectedCritical, Counter,
+                        coreGroup);
+        REGISTER_METRIC("PubSubCore", egressEvictedNoncritical, Counter,
+                        coreGroup);
+        REGISTER_METRIC("PubSubCore", egressDroppedNoncritical, Counter,
+                        coreGroup);
+        REGISTER_METRIC("PubSubCore", egressRejectedCritical, Counter,
+                        coreGroup);
+        REGISTER_METRIC("PubSubCore", spiFail, Counter, coreGroup);
+        REGISTER_METRIC("PubSubCore", spiDrop, Counter, coreGroup);
+
+        REGISTER_METRICS_GROUP("PubSubSpi", spiGroup);
+        REGISTER_METRIC("PubSubSpi", spiTx, Counter, spiGroup);
+        REGISTER_METRIC("PubSubSpi", spiAck, Counter, spiGroup);
+        REGISTER_METRIC("PubSubSpi", spiRx, Counter, spiGroup);
 
         return Metrics{
-            .group = group,
+            .coreGroup = coreGroup,
             .ingressEvictedNoncritical = ingressEvictedNoncritical,
             .ingressDroppedNoncritical = ingressDroppedNoncritical,
             .ingressRejectedCritical = ingressRejectedCritical,
             .egressEvictedNoncritical = egressEvictedNoncritical,
             .egressDroppedNoncritical = egressDroppedNoncritical,
             .egressRejectedCritical = egressRejectedCritical,
+            .spiFail = spiFail,
+            .spiDrop = spiDrop,
+            .spiGroup = spiGroup,
             .spiTx = spiTx,
             .spiAck = spiAck,
-            .spiFail = spiFail,
             .spiRx = spiRx,
-            .spiDrop = spiDrop,
         };
     }
 
     void addIngressEvictedNoncritical(size_t count = 1) const {
-        METRIC_INCR(group, ingressEvictedNoncritical, count);
+        METRIC_INCR(coreGroup, ingressEvictedNoncritical, count);
     }
 
     void addIngressDroppedNoncritical(size_t count = 1) const {
-        METRIC_INCR(group, ingressDroppedNoncritical, count);
+        METRIC_INCR(coreGroup, ingressDroppedNoncritical, count);
     }
 
     void addIngressRejectedCritical(size_t count = 1) const {
-        METRIC_INCR(group, ingressRejectedCritical, count);
+        METRIC_INCR(coreGroup, ingressRejectedCritical, count);
     }
 
     void addEgressEvictedNoncritical(size_t count = 1) const {
-        METRIC_INCR(group, egressEvictedNoncritical, count);
+        METRIC_INCR(coreGroup, egressEvictedNoncritical, count);
     }
 
     void addEgressDroppedNoncritical(size_t count = 1) const {
-        METRIC_INCR(group, egressDroppedNoncritical, count);
+        METRIC_INCR(coreGroup, egressDroppedNoncritical, count);
     }
 
     void addEgressRejectedCritical(size_t count = 1) const {
-        METRIC_INCR(group, egressRejectedCritical, count);
+        METRIC_INCR(coreGroup, egressRejectedCritical, count);
     }
 
-    void addSpiTx(size_t count = 1) const { METRIC_INCR(group, spiTx, count); }
+    void addSpiTx(size_t count = 1) const {
+        METRIC_INCR(spiGroup, spiTx, count);
+    }
 
     void addSpiAck(size_t count = 1) const {
-        METRIC_INCR(group, spiAck, count);
+        METRIC_INCR(spiGroup, spiAck, count);
     }
 
     void addSpiFail(size_t count = 1) const {
-        METRIC_INCR(group, spiFail, count);
+        METRIC_INCR(coreGroup, spiFail, count);
     }
 
-    void addSpiRx(size_t count = 1) const { METRIC_INCR(group, spiRx, count); }
+    void addSpiRx(size_t count = 1) const {
+        METRIC_INCR(spiGroup, spiRx, count);
+    }
 
     void addSpiDrop(size_t count = 1) const {
-        METRIC_INCR(group, spiDrop, count);
+        METRIC_INCR(coreGroup, spiDrop, count);
     }
 
-    GroupHandle group;
+    GroupHandle coreGroup;
     CounterHandle ingressEvictedNoncritical;
     CounterHandle ingressDroppedNoncritical;
     CounterHandle ingressRejectedCritical;
     CounterHandle egressEvictedNoncritical;
     CounterHandle egressDroppedNoncritical;
     CounterHandle egressRejectedCritical;
+    CounterHandle spiFail;
+    CounterHandle spiDrop;
+    GroupHandle spiGroup;
     CounterHandle spiTx;
     CounterHandle spiAck;
-    CounterHandle spiFail;
     CounterHandle spiRx;
-    CounterHandle spiDrop;
 
     static constexpr auto component = MetricsBackend::MetricComponent::PubSub;
 };

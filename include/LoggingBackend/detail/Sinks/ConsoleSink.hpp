@@ -31,6 +31,8 @@ constexpr Color log_level_color(LogLevel level) {
         return Color::Yellow;
     case LogLevel::Error:
         return Color::Red;
+    case LogLevel::Off:
+        return Color::None;
     default:
         return Color::BrightMagenta;
     }
@@ -46,6 +48,8 @@ constexpr Color log_message_color(LogLevel level) {
         return Color::BrightWhite;
     case LogLevel::Error:
         return Color::Red;
+    case LogLevel::Off:
+        return Color::None;
     default:
         return Color::BrightMagenta;
     }
@@ -94,14 +98,14 @@ constexpr const char *log_color_to_string(Color color) {
     }
 }
 
-class ConsoleOutput : public HasLifecycle<ConsoleOutput, ConsoleConfig>,
-                      public HasLogLevel,
-                      public IRecordSink {
-    friend class HasLifecycle<ConsoleOutput, ConsoleConfig>;
-    friend struct LifecycleContract<ConsoleOutput, ConsoleConfig>;
+class ConsoleSink : public HasLifecycle<ConsoleSink, ConsoleConfig>,
+                    public HasLogLevel,
+                    public IRecordSink {
+    friend class HasLifecycle<ConsoleSink, ConsoleConfig>;
+    friend struct LifecycleContract<ConsoleSink, ConsoleConfig>;
 
   public:
-    ConsoleOutput() : HasLogLevel(name) {}
+    ConsoleSink() : HasLogLevel(name) {}
 
     static constexpr const char *name = "Output::Console";
 
@@ -110,7 +114,8 @@ class ConsoleOutput : public HasLifecycle<ConsoleOutput, ConsoleConfig>,
     [[nodiscard]] bool loggingFor(
         LogLevel level,
         std::optional<LogComponent> component = std::nullopt) const override {
-        return HasLogLevel::loggingFor(level, component);
+        return ::platform::Console::connected() &&
+               HasLogLevel::loggingFor(level, component);
     }
 
     ReturnCode
@@ -193,7 +198,7 @@ class ConsoleOutput : public HasLifecycle<ConsoleOutput, ConsoleConfig>,
              : 0);
 };
 
-inline constexpr LifecycleContract<ConsoleOutput, ConsoleConfig>
+inline constexpr LifecycleContract<ConsoleSink, ConsoleConfig>
     _output_console_lifecycle;
 
 } // namespace Totem::LoggingBackend::detail::Outputs

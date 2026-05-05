@@ -90,12 +90,14 @@ callback fires. Ingress frames are copied into a small RX queue from the RS485
 data handler and published during the normal PubSub transport polling path.
 
 `PubSubBackend/Transports/SpiTransport.hpp` is the hardware point-to-point SPI
-transport. The current master star setup uses two SPI transport IDs named for
-the low-speed and high-speed buses. Each bus currently has one attached slave
-because the SPI multi-peer scheduler is not implemented yet. Do not model the
-target topology as one master transport per endpoint: the high-speed bus must
-eventually host the four GPU nodes, and the low-speed bus must host media plus
-future LoRA and GPS peripherals.
+transport used by edge nodes and by the master's low-speed media link.
+`PubSubBackend/Transports/SpiRouterTransport.hpp` fronts multiple hardware SPI
+links as one shared-bus router transport. The current master star setup keeps
+transport IDs named for physical buses: low-speed SPI is a media point-to-point
+link, while high-speed SPI is one router transport with GPU0 and GPU1 peers.
+Do not model the target topology as one master PubSub transport per endpoint:
+the high-speed bus must eventually host the four GPU nodes, and the low-speed
+bus must host media plus future LoRA and GPS peripherals.
 
 Application PubSub envelopes require a synced clock before creation. The wire
 header carries both the legacy millisecond timestamp and a synced microsecond
@@ -130,7 +132,8 @@ The active hardware harness for the current multi-board stage is
   bridges traffic
 - media subscribes to synthetic `Power` events and publishes synthetic `Beat`
   events
-- GPU0 subscribes to synthetic `Power` events
+- GPU0 and GPU1 subscribe to synthetic `Power` and `Beat` events through the
+  high-speed SPI router transport
 - IO publishes synthetic `Power` events and subscribes to synthetic `Beat`
   events
 
@@ -140,8 +143,9 @@ point-to-point transport bring-up. Hardware harness reports split application
 publish counters from transport counters so a local publish with no remote
 route does not look like a successful wire transmission.
 The star harness also reports receive latency per logical route, for example
-`io->gpu0 power` and `media->io beat`, instead of collapsing every received
-test packet into one node-wide bucket. Latency summaries include rough fixed
+`io->gpu0 power`, `io->gpu1 power`, and `media->io beat`, instead of
+collapsing every received test packet into one node-wide bucket. Latency
+summaries include rough fixed
 histogram percentiles (`p50`, `p90`, `p99`) and a `targetMiss` count for packets
 above the current 10 ms propagation target. These percentiles are intentionally
 bucketed rather than exact to keep the on-device memory cost small.

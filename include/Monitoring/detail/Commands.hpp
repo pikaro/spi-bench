@@ -11,7 +11,6 @@
 #include "Types/Error.hpp"
 #include <array>
 #include <cstddef>
-#include <magic_enum/magic_enum.hpp>
 #include <span>
 
 namespace Totem::Monitoring::detail {
@@ -61,7 +60,7 @@ inline static ReturnCode dump_monitoring_snaphot(const MonitoringFrame &frame) {
     _log_i("  Memory stats (%zu pools):", frame.global.memoryStats.size());
     for (size_t i = 0; i < frame.global.memoryStats.size(); ++i) {
         const auto &stat = frame.global.memoryStats[i];
-        _log_i("    %2zu: " SV_FMT " (%8zu | %8zu) / %8zu "
+        _log_i("    %2zu: " SV_FMT " (%8zu free | %8zu min) / %8zu "
                "= (%6.2f%% | %6.2f%%) "
                "[%1s%1s%1s%1s%1s%1s%1s] "
                "[%1s%1s%1s]",
@@ -93,24 +92,20 @@ inline static ReturnCode dump_monitoring_snaphot(const MonitoringFrame &frame) {
             task.config != nullptr ? task.config->stackSize : 0;
         if (stackSize > 0 && task.stackLowestFree <= stackSize) {
             _log_i(
-                "    %2zu: " SV_FMT " -> " SV_FMT " <%s%s%s>"
-                "> p%3u @ c%2d "
+                "    %2zu: " SV_FMT " -> " SV_FMT " <%s%s%s> p%3u @ c%2d "
                 "(%5zuB / %5zuB = %6.2f%%) %6.2f%% in %8zums | %6.2f%% total",
                 i,
                 SV_ARG(task.sourceName, TaskRegistryConfig::sourceNameMaxLen),
                 SV_ARG(task.name, -TaskControllerConfig::maxTaskNameLen),
                 task.hasEverStarted ? "S" : "X", task_state_str(task.state),
-                platform_state_str(task.platformState),
-                SV_ARG(magic_enum::enum_name(task.platformState)),
-                task.currentPriority, task.coreId,
-                stackSize - task.stackLowestFree, stackSize,
+                platform_state_str(task.platformState), task.currentPriority,
+                task.coreId, stackSize - task.stackLowestFree, stackSize,
                 (double)task.stackUsedPct, (double)task.runTimeDeltaPct,
                 task.timestampDelta, (double)task.runTimeTotalPct);
             continue;
         }
 
-        _log_i("    %2zu: " SV_FMT " -> " SV_FMT " <%s%s%s>"
-               "> p%3u @ c%2d "
+        _log_i("    %2zu: " SV_FMT " -> " SV_FMT " <%s%s%s> p%3u @ c%2d "
                "( low %5luB              ) %6.2f%% in %8zums | %6.2f%% total",
                i, SV_ARG(task.sourceName, TaskRegistryConfig::sourceNameMaxLen),
                SV_ARG(task.name, -TaskControllerConfig::maxTaskNameLen),

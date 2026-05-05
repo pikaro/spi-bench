@@ -141,8 +141,10 @@ Buffer pressure is handled at the ingress and egress arena layer:
 - if only `Critical` PDUs remain, the new `Critical` PDU is rejected instead of
   silently dropping retained critical traffic
 
-These pressure events are counted through PubSub metrics so the local harness
-can distinguish transport loss from intentional noncritical shedding.
+These pressure events are counted through the Core-level `psCore` PubSub metric
+group so the local harness can distinguish transport loss from intentional
+noncritical shedding without enabling profiling. High-volume PubSub-over-SPI
+tx/rx/ack counters remain in the Profiling-level `psSpi` group.
 
 ## Abstract Transport Categories
 

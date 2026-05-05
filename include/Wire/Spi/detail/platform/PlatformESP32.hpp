@@ -18,6 +18,7 @@
 #include <atomic>
 #include <cstdint>
 #include <expected>
+#include <optional>
 
 namespace Totem::Wire::Spi::detail::platform {
 
@@ -56,6 +57,17 @@ class SpiMasterBus {
         if (!hostResult) {
             return hostResult.error();
         }
+        auto &state = _stateFor(config.busId);
+        if (state.initialized) {
+            FAIL_IF(!_sameBusConfig(state.config, config),
+                    ERR(CoreError, InvalidArgument),
+                    "SPI master bus already initialized with different "
+                    "configuration");
+            state.ownerCount++;
+            _state = &state;
+            _initialized = true;
+            return OK();
+        }
 
         spi_bus_config_t busConfig{};
         busConfig.mosi_io_num = pinValue(*config.pins.mosiPin);
@@ -73,7 +85,11 @@ class SpiMasterBus {
         FAIL_IF_PLATFORM_FWD(
             spi_bus_initialize(*hostResult, &busConfig, SPI_DMA_CH_AUTO),
             "Failed to initialize SPI master bus");
-        _host = *hostResult;
+        state.host = *hostResult;
+        state.config = config;
+        state.ownerCount = 1;
+        state.initialized = true;
+        _state = &state;
         _initialized = true;
         return OK();
     }
@@ -82,6 +98,8 @@ class SpiMasterBus {
     addDevice(const MasterDeviceConfig &config) {
         FAIL_IF(!_initialized, std::unexpected(ERR(CoreError, InvalidState)),
                 "Cannot add SPI device before bus init");
+        FAIL_IF(_state == nullptr, std::unexpected(ERR(CoreError, InvalidState)),
+                "SPI master bus state is not initialized");
 
         spi_device_interface_config_t deviceConfig{};
         deviceConfig.mode = static_cast<uint8_t>(config.mode);
@@ -95,19 +113,22 @@ class SpiMasterBus {
 
         spi_device_handle_t handle = nullptr;
         FAIL_IF_PLATFORM_FWD_UNEXPECTED(
-            spi_bus_add_device(_host, &deviceConfig, &handle),
+            spi_bus_add_device(_state->host, &deviceConfig, &handle),
             "Failed to add SPI device");
         auto stored = _storeDevice(handle);
         if (!stored) {
             (void)spi_bus_remove_device(handle);
             return std::unexpected(stored.error());
         }
+        _trackOwnedDevice(*stored);
         return *stored;
     }
 
     ReturnCode removeDevice(DeviceHandle device) {
         FAIL_IF(!_initialized, ERR(CoreError, InvalidState),
                 "Cannot remove SPI device before bus init");
+        FAIL_IF_NULL(_state, ERR(CoreError, InvalidState),
+                     "SPI master bus state is not initialized");
         auto handleResult = _deviceFor(device);
         if (!handleResult) {
             return handleResult.error();
@@ -116,12 +137,15 @@ class SpiMasterBus {
         FAIL_IF_PLATFORM_FWD(spi_bus_remove_device(*handleResult),
                              "Failed to remove SPI device");
         _eraseDevice(device);
+        _untrackOwnedDevice(device);
         return OK();
     }
 
     ReturnCode transfer(DeviceHandle device, const Transfer &transfer) const {
         FAIL_IF(!_initialized, ERR(CoreError, InvalidState),
                 "Cannot transfer before SPI master bus init");
+        FAIL_IF_NULL(_state, ERR(CoreError, InvalidState),
+                     "SPI master bus state is not initialized");
         FAIL_IF(!transfer.validate(), ERR(CoreError, InvalidArgument),
                 "Invalid SPI transfer");
 
@@ -145,25 +169,76 @@ class SpiMasterBus {
         if (!_initialized) {
             return OK();
         }
-        for (auto &device : _devices) {
-            if (device != nullptr) {
-                (void)spi_bus_remove_device(device);
-                device = nullptr;
+        FAIL_IF_NULL(_state, ERR(CoreError, InvalidState),
+                     "SPI master bus state is not initialized");
+        for (auto &device : _ownedDevices) {
+            if (!device.has_value()) {
+                continue;
             }
+            auto handleResult = _deviceFor(*device);
+            if (handleResult) {
+                (void)spi_bus_remove_device(*handleResult);
+            }
+            _eraseDevice(*device);
+            device.reset();
         }
-        FAIL_IF_PLATFORM_FWD(spi_bus_free(_host),
-                             "Failed to free SPI master bus");
+        if (_state->ownerCount > 0) {
+            _state->ownerCount--;
+        }
+        if (_state->ownerCount == 0) {
+            FAIL_IF_PLATFORM_FWD(spi_bus_free(_state->host),
+                                 "Failed to free SPI master bus");
+            *_state = BusState{};
+        }
+        _state = nullptr;
         _initialized = false;
         return OK();
     }
 
   private:
+    struct BusState {
+        spi_host_device_t host = SPI2_HOST;
+        MasterBusConfig config{};
+        std::array<spi_device_handle_t, 4> devices{};
+        uint8_t ownerCount = 0;
+        bool initialized = false;
+    };
+
+    [[nodiscard]] static bool _sameBusConfig(const MasterBusConfig &lhs,
+                                             const MasterBusConfig &rhs) {
+        return lhs.busId == rhs.busId &&
+               lhs.pins.mosiPin == rhs.pins.mosiPin &&
+               lhs.pins.misoPin == rhs.pins.misoPin &&
+               lhs.pins.sclkPin == rhs.pins.sclkPin &&
+               lhs.maxTransferSize == rhs.maxTransferSize;
+    }
+
+    [[nodiscard]] static BusState &_stateFor(BusId busId) {
+        static BusState bus2State{};
+#if SOC_SPI_PERIPH_NUM > 2
+        static BusState bus3State{};
+#endif
+        switch (busId) {
+        case BusId::Bus2:
+            return bus2State;
+        case BusId::Bus3:
+#if SOC_SPI_PERIPH_NUM > 2
+            return bus3State;
+#else
+            return bus2State;
+#endif
+        }
+        return bus2State;
+    }
+
     std::expected<DeviceHandle, ReturnCode>
     _storeDevice(spi_device_handle_t handle) {
+        FAIL_IF_NULL(_state, std::unexpected(ERR(CoreError, InvalidState)),
+                     "SPI master bus state is not initialized");
         // NOLINTNEXTLINE(bugprone-too-small-loop-variable)
-        for (uint8_t index = 0; index < _devices.size(); index++) {
-            if (_devices[index] == nullptr) {
-                _devices[index] = handle;
+        for (uint8_t index = 0; index < _state->devices.size(); index++) {
+            if (_state->devices[index] == nullptr) {
+                _state->devices[index] = handle;
                 return DeviceHandle{.index = index};
             }
         }
@@ -171,26 +246,47 @@ class SpiMasterBus {
     }
 
     void _eraseDevice(DeviceHandle handle) {
-        if (handle.valid() && handle.index < _devices.size()) {
-            _devices[handle.index] = nullptr;
+        if (_state != nullptr && handle.valid() &&
+            handle.index < _state->devices.size()) {
+            _state->devices[handle.index] = nullptr;
         }
     }
 
     std::expected<spi_device_handle_t, ReturnCode>
     _deviceFor(DeviceHandle handle) const {
-        FAIL_IF(!handle.valid() || handle.index >= _devices.size(),
+        FAIL_IF_NULL(_state, std::unexpected(ERR(CoreError, InvalidState)),
+                     "SPI master bus state is not initialized");
+        FAIL_IF(!handle.valid() || handle.index >= _state->devices.size(),
                 std::unexpected(ERR(CoreError, InvalidArgument)),
                 "Invalid SPI device handle");
-        auto *device = _devices[handle.index];
+        auto *device = _state->devices[handle.index];
         FAIL_IF(device == nullptr,
                 std::unexpected(ERR(CoreError, InvalidState)),
                 "SPI device handle is not active");
         return device;
     }
 
-    spi_host_device_t _host = SPI2_HOST;
+    void _trackOwnedDevice(DeviceHandle handle) {
+        for (auto &device : _ownedDevices) {
+            if (!device.has_value()) {
+                device = handle;
+                return;
+            }
+        }
+    }
+
+    void _untrackOwnedDevice(DeviceHandle handle) {
+        for (auto &device : _ownedDevices) {
+            if (device.has_value() && device->index == handle.index) {
+                device.reset();
+                return;
+            }
+        }
+    }
+
+    BusState *_state = nullptr;
     bool _initialized = false;
-    std::array<spi_device_handle_t, 4> _devices{};
+    std::array<std::optional<DeviceHandle>, 4> _ownedDevices{};
 };
 
 class SpiSlaveDevice {

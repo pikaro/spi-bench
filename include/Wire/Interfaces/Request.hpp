@@ -48,13 +48,14 @@ struct WriteRequest {
     }
 
     ReturnCode ack(RequestHandle<WriteTag> handle, uint16_t written,
-                   int64_t completedAtUs = 0) const {
+                   int64_t completedAtUs = 0, int64_t sentAtUs = 0) const {
         return onComplete({
             .owner = owner,
             .handle = handle,
             .result = OK(),
             .length = written,
             .completedAtUs = completedAtUs,
+            .sentAtUs = sentAtUs,
         });
     }
 

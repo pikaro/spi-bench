@@ -22,9 +22,9 @@ constexpr Totem::Wire::Rs485::SlaveConfig rs485SlaveConfig{
 
 constexpr Totem::LedPwm::Config ledPwmConfig{
     .leds = {{
-        {.led = PeripheralLed::Bulb1, .pin = Pin::GPIO6},
-        {.led = PeripheralLed::Bulb2, .pin = Pin::GPIO7},
-        {.led = PeripheralLed::Onboard, .pin = Pin::GPIO10},
+        {.led = PeripheralLed::Bulb1, .pin = Pin::GPIO6, .configured = true},
+        {.led = PeripheralLed::Bulb2, .pin = Pin::GPIO7, .configured = true},
+        {.led = PeripheralLed::Onboard, .pin = Pin::GPIO10, .configured = true},
     }},
 };
 

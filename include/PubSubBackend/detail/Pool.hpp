@@ -1,7 +1,8 @@
 #pragma once
 
-#include "Base/HasMutex.hpp"
 #include "Macros/Facade.hpp"
+#include "Mutex/Facade.hpp"
+#include "Platform/PlatformSelect.hpp"
 #include "PubSubBackend/Interfaces/Envelope.hpp"
 #include "PubSubBackend/detail/Codec.hpp"
 #include "PubSubBackend/detail/Types.hpp"
@@ -18,7 +19,7 @@
 namespace Totem::PubSubBackend::detail {
 
 template <typename T, size_t Capacity>
-class Pool : public HasMutex<Pool<T, Capacity>> {
+class Pool {
     struct Slot {
         MessageId messageId{};
         std::optional<T> value;
@@ -52,15 +53,21 @@ class Pool : public HasMutex<Pool<T, Capacity>> {
                                                MessageId messageId) {
         FAIL_IF(messageId == 0, std::unexpected(ERR(InvalidArgument)),
                 "Cannot store PubSub pool message with ID 0");
-        FAIL_IF_MUTEX_TIMEOUT(mutexTimeoutMs, std::unexpected(ERR(Timeout)),
-                              "Timed out locking PubSub pool for store");
-        for (auto &slot : _storage) {
-            if (!slot.value) {
-                slot.value.emplace(value);
-                slot.messageId = messageId;
-                _log_d("%s: stored messageId %u", name, slot.messageId);
-                return slot.messageId;
+        bool stored = false;
+        {
+            Mutex::ScopedSpinlockGuard guard{_lock};
+            for (auto &slot : _storage) {
+                if (!slot.value) {
+                    slot.value.emplace(value);
+                    slot.messageId = messageId;
+                    stored = true;
+                    break;
+                }
             }
+        }
+        if (stored) {
+            _log_d("%s: stored messageId %u", name, messageId);
+            return messageId;
         }
         return std::unexpected(ERR(Overflow));
     }
@@ -71,17 +78,22 @@ class Pool : public HasMutex<Pool<T, Capacity>> {
     }
 
     ReturnCode release(const Envelope &envelope) {
-        FAIL_IF_MUTEX_TIMEOUT(
-            mutexTimeoutMs, ERR(Timeout),
-            "Timed out locking PubSub pool for release of messageId %u",
-            envelope.header.messageId);
-        for (auto &slot : _storage) {
-            if (slot.value && slot.messageId == envelope.header.messageId) {
-                _log_d("%s: release messageId %u", name,
-                       envelope.header.messageId);
-                slot.value.reset();
-                return OK();
+        bool released = false;
+        {
+            Mutex::ScopedSpinlockGuard guard{_lock};
+            for (auto &slot : _storage) {
+                if (slot.value &&
+                    slot.messageId == envelope.header.messageId) {
+                    slot.value.reset();
+                    released = true;
+                    break;
+                }
             }
+        }
+        if (released) {
+            _log_d("%s: release messageId %u", name,
+                   envelope.header.messageId);
+            return OK();
         }
         return ERR(NotFound);
     }
@@ -94,10 +106,7 @@ class Pool : public HasMutex<Pool<T, Capacity>> {
      * ownership handoff and fanout complete.
      */
     [[nodiscard]] bool contains(MessageId messageId) const {
-        FAIL_IF_MUTEX_TIMEOUT(
-            mutexTimeoutMs, false,
-            "Timed out locking PubSub pool for contains check of messageId %u",
-            messageId);
+        Mutex::ScopedSpinlockGuard guard{_lock};
         for (const auto &slot : _storage) {
             if (slot.value && slot.messageId == messageId) {
                 return true;
@@ -121,8 +130,7 @@ class Pool : public HasMutex<Pool<T, Capacity>> {
 
     [[nodiscard]] std::expected<const void *, ReturnCode>
     getPtr(const Envelope &envelope) const {
-        FAIL_IF_MUTEX_TIMEOUT(mutexTimeoutMs, std::unexpected(ERR(Timeout)),
-                              "Timed out locking PubSub pool for getPtr");
+        Mutex::ScopedSpinlockGuard guard{_lock};
         for (const auto &slot : _storage) {
             if (slot.value && slot.messageId == envelope.header.messageId) {
                 return static_cast<const void *>(std::addressof(*slot.value));
@@ -140,8 +148,7 @@ class Pool : public HasMutex<Pool<T, Capacity>> {
 
     [[nodiscard]] std::expected<std::reference_wrapper<const T>, ReturnCode>
     get(const Envelope &envelope) const {
-        FAIL_IF_MUTEX_TIMEOUT(mutexTimeoutMs, std::unexpected(ERR(Timeout)),
-                              "Timed out locking PubSub pool for get");
+        Mutex::ScopedSpinlockGuard guard{_lock};
         for (const auto &slot : _storage) {
             if (slot.value && slot.messageId == envelope.header.messageId) {
                 return std::cref(*slot.value);
@@ -153,14 +160,18 @@ class Pool : public HasMutex<Pool<T, Capacity>> {
     static ReturnCode encodePayload(void *owner, const Envelope &env,
                                     std::span<std::byte> out) {
         auto *self = static_cast<Pool *>(owner);
-        FAIL_IF_SELF_MUTEX_TIMEOUT(
-            mutexTimeoutMs, ERR(Timeout),
-            "Timed out locking PubSub pool for encodePayload of messageId %u",
-            env.header.messageId);
-        for (const auto &slot : self->_storage) {
-            if (slot.value && slot.messageId == env.header.messageId) {
-                return Codec<T>::encode(*slot.value, out);
+        std::optional<T> value;
+        {
+            Mutex::ScopedSpinlockGuard guard{self->_lock};
+            for (const auto &slot : self->_storage) {
+                if (slot.value && slot.messageId == env.header.messageId) {
+                    value.emplace(*slot.value);
+                    break;
+                }
             }
+        }
+        if (value) {
+            return Codec<T>::encode(*value, out);
         }
         return ERR(NotFound);
     }
@@ -168,9 +179,6 @@ class Pool : public HasMutex<Pool<T, Capacity>> {
   private:
     std::array<Slot, Capacity> _storage;
     NextMessageIdCallback _nextMessageIdCallback = nullptr;
-
-    static constexpr uint32_t mutexTimeoutMs = 10;
+    mutable ::platform::Spinlock _lock = ::platform::create_spinlock();
 };
-
-inline constexpr MutexContract<Pool<int, 0>> _pool_mutex_contract;
 } // namespace Totem::PubSubBackend::detail

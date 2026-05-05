@@ -1,0 +1,3 @@
+dependencies:
+  espressif/esp-dsp: "^1.8.1"
+  joltwallet/littlefs: "~=1.16.0"

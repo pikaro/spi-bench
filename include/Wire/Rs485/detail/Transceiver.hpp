@@ -12,6 +12,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <expected>
 #include <span>
 
@@ -172,14 +173,8 @@ template <TransceiverMode Mode> class Transceiver {
         if (sentAtUs != nullptr) {
             *sentAtUs = writeStartUs;
         }
-        FAIL_IF_ERR_FWD(writeHeader(header),
-                        "Failed to write RS485 frame header for %s",
-                        _ownerName);
-        if (!payload.empty()) {
-            FAIL_IF_ERR_FWD(_uart.write(payload),
-                            "Failed to write RS485 frame payload for %s",
-                            _ownerName);
-        }
+        FAIL_IF_ERR_FWD(writeFrame(header, payload),
+                        "Failed to write RS485 frame for %s", _ownerName);
         FAIL_IF_ERR_FWD(
             _uart.waitTxComplete(_uartConfig.timeoutFromBytes(
                                      Header::headerSize + payload.size()) *
@@ -295,11 +290,33 @@ template <TransceiverMode Mode> class Transceiver {
         return _uart.write(std::as_bytes(std::span(_headerBuf)));
     }
 
+    ReturnCode writeFrame(const Header &header,
+                          std::span<const std::byte> payload) {
+        if (payload.empty()) {
+            return writeHeader(header);
+        }
+        const auto totalSize = Header::headerSize + payload.size();
+        if (totalSize > inlineWriteBufferSize) {
+            FAIL_IF_ERR_FWD(writeHeader(header),
+                            "Failed to write RS485 frame header");
+            return _uart.write(payload);
+        }
+
+        auto headerBytes = header.toBytes();
+        std::array<std::byte, inlineWriteBufferSize> frame{};
+        std::memcpy(frame.data(), headerBytes.data(), Header::headerSize);
+        std::memcpy(frame.data() + Header::headerSize, payload.data(),
+                    payload.size());
+        return _uart.write(std::span<const std::byte>{frame.data(), totalSize});
+    }
+
     platform::Uart _uart;
     UartConfig _uartConfig{};
     std::array<std::uint8_t, Header::headerSize> _headerBuf{};
     const char *_ownerName;
     TurnStateMachine<Mode> _turn;
+
+    static constexpr size_t inlineWriteBufferSize = Header::headerSize + 256;
 };
 
 } // namespace Totem::Wire::Rs485::detail

@@ -66,6 +66,10 @@ class Handler {
 
     ReturnCode step(uint32_t nowMs) {
         auto ret = OK();
+        // Active animation slot gauges are intentionally omitted here. This
+        // task runs at animation cadence, and per-LED slot metrics would add
+        // metric traffic to every visual frame for data that is only useful
+        // while profiling a specific effect.
         for (size_t i = 0; i < _platforms.size(); ++i) {
             if (!_platforms[i].used) {
                 continue;

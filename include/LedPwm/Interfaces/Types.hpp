@@ -9,6 +9,8 @@
 
 namespace Totem::LedPwm {
 
+using LedContext = detail::LedContext;
+
 struct NormalizedValue {
     static constexpr uint16_t max = std::numeric_limits<uint16_t>::max();
 
@@ -162,7 +164,7 @@ struct LedCommand {
         return LedCommand{.payload = ClearAnimations{}};
     }
 
-    ReturnCode run(detail::LedContext ctx) const {
+    ReturnCode run(LedContext ctx) const {
         return ctx.command(static_cast<void *>(&ctx),
                            static_cast<const void *>(this));
     }

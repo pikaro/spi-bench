@@ -5,6 +5,14 @@
 #include "Wire/Spi/Interfaces/MasterConfig.hpp"
 #include "Wire/Spi/Interfaces/Types.hpp"
 
+#ifndef PUBSUB_STAR_MASTER_HIGH_SPI_CLOCK_HZ
+#define PUBSUB_STAR_MASTER_HIGH_SPI_CLOCK_HZ 10000000
+#endif
+
+#ifndef PUBSUB_STAR_MASTER_LOW_SPI_CLOCK_HZ
+#define PUBSUB_STAR_MASTER_LOW_SPI_CLOCK_HZ 10000000
+#endif
+
 inline Totem::Wire::Rs485::MasterConfig rs485MasterConfig{
     .uartConfig =
         {
@@ -45,7 +53,7 @@ inline Totem::Wire::Spi::MasterConfig spiMasterBusHighSpeedConfig{
     .device =
         {
             .csPin = Pin::GPIO4,
-            .clockHz = 10'000'000,
+            .clockHz = PUBSUB_STAR_MASTER_HIGH_SPI_CLOCK_HZ,
             .mode = Totem::Wire::Spi::Mode::Mode0,
             .bitOrder = Totem::Wire::Spi::BitOrder::MsbFirst,
             .queueSize = 1,
@@ -53,24 +61,33 @@ inline Totem::Wire::Spi::MasterConfig spiMasterBusHighSpeedConfig{
         },
     .task =
         {
-            .name = "SpiMasterTask",
+            .name = "SpiGpu0Task",
             .priority = 2,
             .core = Totem::TaskController::Config::CorePreference::specific(0),
             .stackSize = 8192,
-            .intervalMs = 100,
+            .intervalMs = 10,
             .noCatchup = true,
             .useNotify = true,
             .notifyExpectTimeout = false,
             .notifyTimeoutMs = 10,
         },
+    .serviceBudgetMs = 6,
+    .maxTurnsPerStep = 4,
+    .interTurnDelayMs = 1,
+    .maxOutboundSlotBytes = 256,
+    .attentionReceiveWindowBytes = 256,
+    .localWriteCoalesceUs = 1000,
+    .noSlotBackoffUs = 1000,
     .attentionPin = Pin::GPIO5,
-    // {
-    //     .csPin = Pin::GPIO11,
-    //     .clockHz = 20'000'000,
-    //     .queueSize = 1,
-    //     // attention GPIO10
-    // },
 };
+
+inline Totem::Wire::Spi::MasterConfig spiMasterBusHighSpeedGpu1Config = [] {
+    auto config = spiMasterBusHighSpeedConfig;
+    config.device.csPin = Pin::GPIO11;
+    config.task.name = "SpiGpu1Task";
+    config.attentionPin = Pin::GPIO10;
+    return config;
+}();
 
 inline Totem::Wire::Spi::MasterConfig spiMasterBusLowSpeedConfig{
     .bus =
@@ -88,7 +105,7 @@ inline Totem::Wire::Spi::MasterConfig spiMasterBusLowSpeedConfig{
     .device =
         {
             .csPin = Pin::GPIO38,
-            .clockHz = 10'000'000,
+            .clockHz = PUBSUB_STAR_MASTER_LOW_SPI_CLOCK_HZ,
             .mode = Totem::Wire::Spi::Mode::Mode0,
             .bitOrder = Totem::Wire::Spi::BitOrder::MsbFirst,
             .queueSize = 1,
@@ -96,9 +113,9 @@ inline Totem::Wire::Spi::MasterConfig spiMasterBusLowSpeedConfig{
         },
     .task =
         {
-            .name = "SpiMasterTask",
+            .name = "SpiMediaTask",
             .priority = 2,
-            .core = Totem::TaskController::Config::CorePreference::specific(0),
+            .core = Totem::TaskController::Config::CorePreference::specific(1),
             .stackSize = 8192,
             .intervalMs = 10,
             .noCatchup = true,
@@ -106,12 +123,14 @@ inline Totem::Wire::Spi::MasterConfig spiMasterBusLowSpeedConfig{
             .notifyExpectTimeout = false,
             .notifyTimeoutMs = 10,
         },
-    .serviceBudgetMs = 5,
-    .maxTurnsPerStep = 1,
-    .interTurnDelayMs = 0,
+    .serviceBudgetMs = 6,
+    .maxTurnsPerStep = 4,
+    .interTurnDelayMs = 1,
     .maxOutboundSlotBytes = 256,
     .attentionReceiveWindowBytes = 256,
     .localWriteCoalesceUs = 1000,
     .noSlotBackoffUs = 1000,
     .attentionPin = Pin::GPIO39,
 };
+
+inline constexpr Pin levelShifterEnablePin = Pin::GPIO13;

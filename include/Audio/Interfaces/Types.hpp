@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 
 namespace Totem::Audio {
 
@@ -14,9 +15,9 @@ inline constexpr size_t fftMaxFrameHandlers = 4;
 inline constexpr size_t fftMaxBeatHandlers = 4;
 inline constexpr size_t i2sMaxProbeBytes = 256;
 
-enum class I2SRole : uint8_t {
-    Slave,
-    Master,
+enum class I2SHostClockRole : uint8_t {
+    ConsumesExternalClock,
+    ProvidesClock,
 };
 
 enum class I2SFormat : uint8_t {
@@ -62,8 +63,11 @@ struct I2SSourceStatus {
     bool ready = false;
     uint32_t probes = 0;
     uint32_t emptyReads = 0;
+    uint32_t readTimeouts = 0;
+    uint32_t readErrors = 0;
     uint32_t observedBytes = 0;
     uint32_t lastDataMs = 0;
+    int32_t lastReadStatus = 0;
 };
 
 enum class FftBand : uint8_t {
@@ -90,14 +94,14 @@ using FftBandRanges = std::array<FftBandRange, fftBandCount>;
 
 constexpr FftBandRanges defaultFftBandRanges() {
     return FftBandRanges{{
-        {.lowerHz = 20, .upperHz = 60},
-        {.lowerHz = 60, .upperHz = 150},
-        {.lowerHz = 150, .upperHz = 400},
-        {.lowerHz = 400, .upperHz = 1000},
-        {.lowerHz = 1000, .upperHz = 2500},
+        {.lowerHz = 40, .upperHz = 80},
+        {.lowerHz = 80, .upperHz = 160},
+        {.lowerHz = 160, .upperHz = 320},
+        {.lowerHz = 320, .upperHz = 640},
+        {.lowerHz = 640, .upperHz = 1250},
+        {.lowerHz = 1250, .upperHz = 2500},
         {.lowerHz = 2500, .upperHz = 5000},
         {.lowerHz = 5000, .upperHz = 10000},
-        {.lowerHz = 10000, .upperHz = 20000},
     }};
 }
 
@@ -114,11 +118,35 @@ constexpr std::array<float, fftBandCount> flatFftBandGains() {
     }};
 }
 
+constexpr std::array<float, fftBandCount> defaultFftBandGains() {
+    return std::array<float, fftBandCount>{{
+        1.0F,
+        1.0F,
+        1.05F,
+        1.15F,
+        1.35F,
+        1.65F,
+        2.1F,
+        2.6F,
+    }};
+}
+
 enum class FftWindow : uint8_t {
     None,
     Hamming,
     Hann,
 };
+
+constexpr bool isFftWindow(FftWindow window) {
+    switch (window) {
+    case FftWindow::None:
+    case FftWindow::Hamming:
+    case FftWindow::Hann:
+        return true;
+    default:
+        return false;
+    }
+}
 
 enum class FftMagnitudeMode : uint8_t {
     Average,
@@ -126,20 +154,147 @@ enum class FftMagnitudeMode : uint8_t {
     Rms,
 };
 
+constexpr bool isFftMagnitudeMode(FftMagnitudeMode mode) {
+    switch (mode) {
+    case FftMagnitudeMode::Average:
+    case FftMagnitudeMode::Sum:
+    case FftMagnitudeMode::Rms:
+        return true;
+    default:
+        return false;
+    }
+}
+
+enum class FftMagnitudeCompression : uint8_t {
+    Linear,
+    Sqrt,
+    Log1p,
+};
+
+constexpr bool isFftMagnitudeCompression(FftMagnitudeCompression mode) {
+    switch (mode) {
+    case FftMagnitudeCompression::Linear:
+    case FftMagnitudeCompression::Sqrt:
+    case FftMagnitudeCompression::Log1p:
+        return true;
+    default:
+        return false;
+    }
+}
+
 enum class FftWeighting : uint8_t {
     None,
     AWeighting,
 };
 
-struct FftMagnitudeCacheConfig {
-    float floorAdaptAlpha = 0.005F;
-    float peakAdaptAlpha = 0.02F;
-    float minimumRange = 1.0F;
+constexpr bool isFftWeighting(FftWeighting weighting) {
+    switch (weighting) {
+    case FftWeighting::None:
+    case FftWeighting::AWeighting:
+        return true;
+    default:
+        return false;
+    }
+}
+
+struct FftBandCalibrationConfig {
+    std::array<float, fftBandCount> bandGains = defaultFftBandGains();
 
     [[nodiscard]] bool validate() const {
-        return floorAdaptAlpha >= 0.0F && floorAdaptAlpha <= 1.0F &&
+        for (const auto gain : bandGains) {
+            if (!std::isfinite(gain) || gain < 0.0F) {
+                return false;
+            }
+        }
+        return true;
+    }
+};
+
+struct FftPerceptualWeightingConfig {
+    FftWeighting weighting = FftWeighting::AWeighting;
+    float amount = 1.0F;
+
+    [[nodiscard]] bool validate() const {
+        return isFftWeighting(weighting) && std::isfinite(amount) &&
+               amount >= 0.0F && amount <= 1.0F;
+    }
+};
+
+struct FftMagnitudeCompressionConfig {
+    FftMagnitudeCompression mode = FftMagnitudeCompression::Sqrt;
+    float logScale = 1.0F;
+
+    [[nodiscard]] bool validate() const {
+        return isFftMagnitudeCompression(mode) && std::isfinite(logScale) &&
+               logScale > 0.0F;
+    }
+};
+
+struct FftSignalPipelineConfig {
+    std::optional<FftBandCalibrationConfig> calibration =
+        FftBandCalibrationConfig{};
+    std::optional<FftPerceptualWeightingConfig> perceptualWeighting =
+        std::nullopt;
+    std::optional<FftMagnitudeCompressionConfig> compression =
+        FftMagnitudeCompressionConfig{};
+
+    [[nodiscard]] bool validate() const {
+        return (!calibration.has_value() || calibration->validate()) &&
+               (!perceptualWeighting.has_value() ||
+                perceptualWeighting->validate()) &&
+               (!compression.has_value() || compression->validate());
+    }
+};
+
+enum class FftBackendLibrary : uint8_t {
+    RealFft,
+    EspressifFft,
+};
+
+constexpr bool isFftBackendLibrary(FftBackendLibrary library) {
+    switch (library) {
+    case FftBackendLibrary::RealFft:
+    case FftBackendLibrary::EspressifFft:
+        return true;
+    default:
+        return false;
+    }
+}
+
+enum class FftMagnitudeCacheMode : uint8_t {
+    PerBandAdaptive,
+    TotalEnergyAdaptive,
+};
+
+constexpr bool isFftMagnitudeCacheMode(FftMagnitudeCacheMode mode) {
+    switch (mode) {
+    case FftMagnitudeCacheMode::PerBandAdaptive:
+    case FftMagnitudeCacheMode::TotalEnergyAdaptive:
+        return true;
+    default:
+        return false;
+    }
+}
+
+struct FftMagnitudeCacheConfig {
+    FftMagnitudeCacheMode mode = FftMagnitudeCacheMode::PerBandAdaptive;
+    float floorAdaptAlpha = 0.0002F;
+    float peakAdaptAlpha = 0.002F;
+    float minimumRange = 0.25F;
+    uint8_t scaledNoiseGate = 8;
+    float scaledAttackAlpha = 0.65F;
+    float scaledReleaseAlpha = 0.25F;
+
+    [[nodiscard]] bool validate() const {
+        return isFftMagnitudeCacheMode(mode) &&
+               std::isfinite(floorAdaptAlpha) && floorAdaptAlpha >= 0.0F &&
+               floorAdaptAlpha <= 1.0F && std::isfinite(peakAdaptAlpha) &&
                peakAdaptAlpha >= 0.0F && peakAdaptAlpha <= 1.0F &&
-               minimumRange > 0.0F;
+               std::isfinite(minimumRange) && minimumRange > 0.0F &&
+               scaledNoiseGate < 255 && std::isfinite(scaledAttackAlpha) &&
+               scaledAttackAlpha >= 0.0F && scaledAttackAlpha <= 1.0F &&
+               std::isfinite(scaledReleaseAlpha) &&
+               scaledReleaseAlpha >= 0.0F && scaledReleaseAlpha <= 1.0F;
     }
 };
 
@@ -151,6 +306,38 @@ struct FftBandIndexRange {
         return lower <= upper && upper < fftBandCount;
     }
 };
+
+inline constexpr size_t beatGroupCount = 3;
+
+enum class BeatGroup : uint8_t {
+    Bass,
+    Mid,
+    High,
+};
+
+constexpr bool isBeatGroup(BeatGroup group) {
+    switch (group) {
+    case BeatGroup::Bass:
+    case BeatGroup::Mid:
+    case BeatGroup::High:
+        return true;
+    default:
+        return false;
+    }
+}
+
+constexpr size_t beatGroupIndex(BeatGroup group) {
+    switch (group) {
+    case BeatGroup::Bass:
+        return 0;
+    case BeatGroup::Mid:
+        return 1;
+    case BeatGroup::High:
+        return 2;
+    default:
+        return beatGroupCount;
+    }
+}
 
 enum class BeatEventKind : uint8_t {
     Detected,
@@ -169,7 +356,7 @@ struct FftBandValue {
     uint8_t scaled = 0;
 };
 
-struct FftFrame {
+struct FftResult {
     AudioInfo audio{};
     uint32_t sequence = 0;
     uint64_t timestampUs = 0;
@@ -178,36 +365,60 @@ struct FftFrame {
     std::array<FftBandValue, fftBandCount> bands{};
 };
 
-struct BeatEvent {
+struct BeatResult {
     BeatEventKind kind = BeatEventKind::Detected;
+    BeatGroup group = BeatGroup::Bass;
+    FftBandIndexRange bands{};
     uint32_t frameSequence = 0;
     uint64_t timestampUs = 0;
     uint8_t energy = 0;
     float bpm = 0.0F;
 };
 
+struct BeatGroupStatus {
+    bool hasBeat = false;
+    uint32_t beats = 0;
+    uint32_t bpmHundredths = 0;
+    uint8_t energy = 0;
+    uint32_t lastBeatAgeMs = 0;
+};
+
+struct BeatTrackerStatus {
+    BeatGroup primaryGroup = BeatGroup::Bass;
+    BeatGroupStatus primary{};
+    std::array<BeatGroupStatus, beatGroupCount> groups{};
+};
+
 struct FftRuntimeStats {
+    uint32_t copyCalls = 0;
     uint32_t copiedBytes = 0;
     uint32_t emptyCopies = 0;
+    uint32_t readinessProbes = 0;
     uint32_t sourceUnavailableSkips = 0;
     uint32_t frames = 0;
     uint32_t droppedFrames = 0;
     uint32_t beats = 0;
     uint32_t maxCopyUs = 0;
+    uint32_t maxReadinessProbeUs = 0;
     uint32_t maxFrameUs = 0;
+    uint32_t maxBandComputeUs = 0;
+    uint32_t maxMagnitudeCacheUs = 0;
+    uint32_t maxFrameDispatchUs = 0;
+    uint32_t maxBeatUpdateUs = 0;
+    uint32_t maxBeatDispatchUs = 0;
 };
 
-using FftFrameCallback = ReturnCode (*)(void *owner, const FftFrame &frame);
-using BeatCallback = ReturnCode (*)(void *owner, const BeatEvent &event);
+using FftFrameCallback = ReturnCode (*)(void *owner, const FftResult &frame);
+using BeatCallback = ReturnCode (*)(void *owner, const BeatResult &event);
 
-struct FftFrameHandler {
+struct FftResultHandler {
     void *owner = nullptr;
     FftFrameCallback callback = nullptr;
 
     [[nodiscard]] bool valid() const { return callback != nullptr; }
 };
 
-struct BeatHandler {
+struct BeatResultHandler {
     void *owner = nullptr;
     BeatCallback callback = nullptr;
 

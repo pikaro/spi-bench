@@ -6,6 +6,7 @@
 #include "LedPwm/Interfaces/Config.hpp"
 #include "LedPwm/Interfaces/Types.hpp"
 #include "LedPwm/detail/Handler.hpp"
+#include "LedPwm/detail/Metrics.hpp"
 #include "LedPwm/detail/Types.hpp"
 #include "Macros/Facade.hpp"
 #include "Platform/PlatformSelect.hpp"
@@ -49,6 +50,9 @@ class LedPwm : public HasLifecycle<LedPwm, Config>,
         FAIL_IF_INACTIVE_UNEXPECTED("Cannot get LED context before %s begins",
                                     name);
         for (size_t i = 0; i < this->config().leds.size(); ++i) {
+            if (!config().leds[i].configured) {
+                continue;
+            }
             if (config().leds[i].led == led) {
                 return LedContext{
                     .ctx = static_cast<void *>(this),
@@ -63,11 +67,15 @@ class LedPwm : public HasLifecycle<LedPwm, Config>,
 
   private:
     ReturnCode _onBegin() {
+        (void)metrics();
         DEFAULT_TASK();
         INIT_QUEUE_OR_FAIL(_commandQueue);
 
         auto ret = OK();
         for (size_t i = 0; i < this->config().leds.size(); ++i) {
+            if (!config().leds[i].configured) {
+                continue;
+            }
             auto handle = LedHandle{.idx = static_cast<uint8_t>(i)};
             ret.combine(_handler.init(config(), handle));
         }
@@ -83,6 +91,9 @@ class LedPwm : public HasLifecycle<LedPwm, Config>,
         auto ret = OK();
         ret.combine(this->_endTaskController());
         for (size_t i = 0; i < this->config().leds.size(); ++i) {
+            if (!config().leds[i].configured) {
+                continue;
+            }
             auto handle = LedHandle{.idx = static_cast<uint8_t>(i)};
             ret.combine(_handler.deinit(handle));
         }
@@ -91,6 +102,7 @@ class LedPwm : public HasLifecycle<LedPwm, Config>,
     }
 
     ReturnCode _onTaskStep() {
+        metrics().addTaskStep();
         const auto nowMs = ::platform::get_time();
         QueueItem item{};
         while (true) {
@@ -103,10 +115,18 @@ class LedPwm : public HasLifecycle<LedPwm, Config>,
                 FAIL_ERR_FWD(result,
                              "Failed to receive LED command from queue");
             }
-            FAIL_IF_ERR_FWD(_handler.handle(item.led, item.cmd, nowMs),
-                            "Failed to handle LED command");
+            auto handleRet = _handler.handle(item.led, item.cmd, nowMs);
+            if (!handleRet.ok()) {
+                metrics().addHandleFailure();
+                FAIL_ERR_FWD(handleRet, "Failed to handle LED command");
+            }
+            metrics().addHandled();
         }
-        FAIL_IF_ERR_FWD(_handler.step(nowMs), "Failed to step LED animations");
+        auto stepRet = _handler.step(nowMs);
+        if (!stepRet.ok()) {
+            metrics().addHandleFailure();
+            FAIL_ERR_FWD(stepRet, "Failed to step LED animations");
+        }
         return OK();
     }
 
@@ -124,9 +144,12 @@ class LedPwm : public HasLifecycle<LedPwm, Config>,
             .led = ctxPtr->led,
             .cmd = *cmdPtr,
         };
-        FAIL_IF_ERR_FWD(
-            Totem::Queue::Platform::send(self->_commandQueue, &item),
-            "Failed to enqueue LED command");
+        auto ret = Totem::Queue::Platform::send(self->_commandQueue, &item);
+        if (!ret.ok()) {
+            metrics().addQueueFailure();
+            FAIL_ERR_FWD(ret, "Failed to enqueue LED command");
+        }
+        metrics().addQueued();
         return OK();
     }
 

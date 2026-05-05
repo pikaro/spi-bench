@@ -1,37 +1,64 @@
 #pragma once
 
+#include "Data.hpp"
 #include "Platform/Hardware.hpp"
 #include "Wire/Spi/Interfaces/SlaveConfig.hpp"
 #include "Wire/Spi/Interfaces/Types.hpp"
 
-#if (NODE_IDENTITY == GPUNode0)
+namespace {
 
-#define GPU_MOSI GPIO4
-#define GPU_MISO GPIO5
-#define GPU_SCLK GPIO6
-#define GPU_CS GPIO7
-#define GPU_ATTENTION GPIO8
+inline constexpr auto gpuNodeName = Totem::Data::NodeName::NODE_IDENTITY;
 
-#elif (NODE_IDENTITY == GPUNode1)
+[[nodiscard]] constexpr Totem::Wire::Spi::BusPins gpuSpiPins() {
+    if constexpr (gpuNodeName == Totem::Data::NodeName::GPUNode1) {
+        return {
+            .mosiPin = Pin::GPIO9,
+            .misoPin = Pin::GPIO8,
+            .sclkPin = Pin::GPIO7,
+        };
+    }
+    return {
+        .mosiPin = Pin::GPIO4,
+        .misoPin = Pin::GPIO5,
+        .sclkPin = Pin::GPIO6,
+    };
+}
 
-#define GPU_MOSI GPIO9
-#define GPU_MISO GPIO8
-#define GPU_SCLK GPIO7
-#define GPU_CS GPIO6
-#define GPU_ATTENTION GPIO5
+[[nodiscard]] constexpr Pin gpuCsPin() {
+    if constexpr (gpuNodeName == Totem::Data::NodeName::GPUNode1) {
+        return Pin::GPIO6;
+    }
+    return Pin::GPIO7;
+}
 
-#endif
+[[nodiscard]] constexpr Pin gpuAttentionPin() {
+    if constexpr (gpuNodeName == Totem::Data::NodeName::GPUNode1) {
+        return Pin::GPIO5;
+    }
+    return Pin::GPIO8;
+}
+
+} // namespace
 
 inline Totem::Wire::Spi::SlaveConfig spiSlaveConfig{
     .busId = Totem::Wire::Spi::BusId::Bus2,
-    .pins =
-        {
-            .mosiPin = Pin::GPU_MOSI,
-            .misoPin = Pin::GPU_MISO,
-            .sclkPin = Pin::GPU_SCLK,
-        },
-    .csPin = Pin::GPU_CS,
+    .pins = gpuSpiPins(),
+    .csPin = gpuCsPin(),
     .maxTransferSize = 4096,
+    .transferWindowBytes = 256,
+    .maxOutboundSlotBytes = 256,
+    .mode = Totem::Wire::Spi::Mode::Mode0,
     .queueSize = 1,
-    .attentionPin = Pin::GPU_ATTENTION,
+    .task =
+        {
+            .name = "SpiSlaveTask",
+            .priority = 2,
+            .stackSize = 8192,
+            .intervalMs = 10,
+            .noCatchup = true,
+            .useNotify = true,
+            .notifyExpectTimeout = false,
+            .notifyTimeoutMs = 10,
+        },
+    .attentionPin = gpuAttentionPin(),
 };

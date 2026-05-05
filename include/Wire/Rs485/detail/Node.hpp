@@ -111,10 +111,17 @@ class Node : public HasLifecycle<Derived, ConfT>,
   protected:
     int64_t _beginTaskStep() {
         metrics().addTaskStep();
-        return ::platform::get_time_us();
+        if constexpr (Metrics::profilingEnabled) {
+            return ::platform::get_time_us();
+        }
+        return 0;
     }
 
-    void _endTaskStep(int64_t startedAtUs) { _finishTaskStep(startedAtUs); }
+    void _endTaskStep(int64_t startedAtUs) {
+        if constexpr (Metrics::profilingEnabled) {
+            _finishTaskStep(startedAtUs);
+        }
+    }
 
     ReturnCode _onBegin() {
         (void)metrics();
@@ -175,10 +182,13 @@ class Node : public HasLifecycle<Derived, ConfT>,
         if (!ready()) {
             return OK();
         }
+        bool returnUnusedSlaveTurn = false;
         if (_transceiver.canRead()) {
             FAIL_IF_ERR_FWD(_pollIncoming(),
                             "Failed to poll incoming frame for %s",
                             Derived::name);
+            returnUnusedSlaveTurn =
+                !Derived::sendsHeartbeat && _transceiver.canInitiateWrite();
             if (!ready() || !_transceiver.canInitiateWrite()) {
                 return OK();
             }
@@ -201,8 +211,8 @@ class Node : public HasLifecycle<Derived, ConfT>,
         if (!ready() || !_transceiver.canInitiateWrite()) {
             return OK();
         }
-        FAIL_IF_ERR_FWD(_nopStep(), "Failed to process nop for %s",
-                        Derived::name);
+        FAIL_IF_ERR_FWD(_nopStep(returnUnusedSlaveTurn),
+                        "Failed to process nop for %s", Derived::name);
         return OK();
     }
 
@@ -396,12 +406,14 @@ class Node : public HasLifecycle<Derived, ConfT>,
             metrics().addUartDataWake();
             return self->_wake(Signal::UartData);
         case UartEventType::Overflow:
+            metrics().addUartOverflowWake();
             return self->_wake(Signal::UartOverflow);
         case UartEventType::Error:
         case UartEventType::Break:
         case UartEventType::Pattern:
         case UartEventType::Unknown:
         default:
+            metrics().addUartErrorWake();
             return self->_wake(Signal::UartError);
         }
     }
@@ -551,9 +563,10 @@ class Node : public HasLifecycle<Derived, ConfT>,
 
         Header sentHeader{};
         metrics().addTxDataFrame();
-        auto ret =
-            _transceiver.sendFrame(FrameType::Data, item.request.payloadType,
-                                   item.request.data, 0, &sentHeader);
+        int64_t sentAtUs = 0;
+        auto ret = _transceiver.sendFrame(
+            FrameType::Data, item.request.payloadType, item.request.data, 0,
+            &sentHeader, FrameTurn::Initiated, &sentAtUs);
         log_trace_packet("data.sent", sentHeader, Derived::name);
         if (!ret.ok()) {
             return _failWrite(item, ret, "data send failed");
@@ -586,10 +599,10 @@ class Node : public HasLifecycle<Derived, ConfT>,
         }
         return item.request.ack(item.handle,
                                 static_cast<uint16_t>(item.request.data.size()),
-                                ::platform::get_time_us());
+                                ::platform::get_time_us(), sentAtUs);
     }
 
-    ReturnCode _nopStep() {
+    ReturnCode _nopStep(bool force = false) {
         const auto nowMs = ::platform::get_time();
         const bool attentionRequested = _consumeAttentionRequest();
         if constexpr (Derived::sendsHeartbeat) {
@@ -597,7 +610,7 @@ class Node : public HasLifecycle<Derived, ConfT>,
                 return OK();
             }
         }
-        if (!attentionRequested &&
+        if (!force && !attentionRequested &&
             static_cast<uint32_t>(nowMs - _lastNopSentMs) < nopIntervalMs) {
             return OK();
         }

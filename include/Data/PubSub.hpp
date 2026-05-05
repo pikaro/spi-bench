@@ -48,10 +48,12 @@ template <> struct NodeTraits<NodeName::Master> {
         RS485 = 1U << 2,
         WebSocket = 1U << 3,
 
-        // Current hardware has one attached peer on each SPI bus, but the
-        // target topology is multi-peer per bus. Prefer bus names for new code.
+        // SPI transport IDs name physical buses. HighSpeedSPI currently routes
+        // GPU0/GPU1 as peers on one shared bus; future code should keep using
+        // bus names rather than inventing one master transport per endpoint.
         MediaSPI = LowSpeedSPI,
         GPU0SPI = HighSpeedSPI,
+        GPU1SPI = HighSpeedSPI,
         SPI = LowSpeedSPI,
     };
     using Limits = PubSubConfig;

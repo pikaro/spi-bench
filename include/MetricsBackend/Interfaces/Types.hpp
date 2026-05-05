@@ -23,12 +23,20 @@ enum class MetricComponent : uint8_t {
     Spi,
     Mutex,
     Logging,
+    Audio,
+    I2C,
+    LedPwm,
+    Buttons,
 };
 
 enum class MetricLevel : uint8_t {
+    // Most detailed, highest-volume probes for profiling a code path.
     Profiling = 0,
+    // Detailed counters and timings used while diagnosing a subsystem.
     Diagnostic,
+    // Cheap steady-state health metrics suitable for normal runs.
     Baseline,
+    // Rare loss, recovery, and failure counters worth keeping even in lean runs.
     Core,
 };
 

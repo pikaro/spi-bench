@@ -20,6 +20,8 @@
     flushes the display from its own task.
 - `Audio/detail/platform/PlatformESP32.hpp` is the component-owned ESP32
     platform layer for arduino-audio-tools I2S/FFT types and ESP32-A2DP.
+    BTstack A2DP uses a separate ESP-IDF component wrapper because it replaces
+    Bluedroid as the Bluetooth host stack.
 
 The current design supports one simultaneous audio source. That keeps ownership
 and runtime scheduling simple while still allowing source selection through
@@ -42,6 +44,14 @@ and runtime scheduling simple while still allowing source selection through
     intentionally small, currently 3 KB, because classic Bluetooth leaves
     limited internal DRAM on the original ESP32 and the buffer only has to
     bridge callback bursts to the FFT task.
+- `AudioSourceKind::BtstackA2DP` uses `BtstackA2DPSource` as an experimental
+    Bluetooth A2DP sink through BlueKitchen BTstack. It is built only in
+    `env:media-btstack`; BTstack and Bluedroid cannot run as runtime-selectable
+    alternatives in one firmware because BTstack requires the ESP-IDF Bluetooth
+    controller-only configuration while `pschatzmann/ESP32-A2DP` uses
+    Bluedroid. The source starts a dedicated BTstack FreeRTOS task, decodes SBC
+    through BTstack's Bluedroid-derived SBC decoder, and writes mono or stereo
+    16-bit PCM into the same fixed ring stream used by `A2DPSource`.
 
 Only the selected source is started at runtime. Config for the selected source
 must be present in `AudioSourceConfig`; inactive configs may be omitted.
@@ -50,9 +60,23 @@ must be present in `AudioSourceConfig`; inactive configs may be omitted.
 `data/media/littlefs/test.wav` by default. Upload the filesystem image before
 testing `WavFile` so the mounted LittleFS contains the sample.
 
-Enabling `A2DPSource` requires the ESP-IDF Bluetooth stack. On the original
-4 MiB ESP32 media board this has a large flash-size cost, so A2DP should be
-treated as a diagnostic input until the linked firmware size is validated.
+Enabling `A2DPSource` requires the ESP-IDF Bluedroid Bluetooth stack. On the
+original 4 MiB ESP32 media board this has a large flash-size cost, so Bluedroid
+A2DP should be treated as a diagnostic input until the linked firmware size is
+validated. `env:media-btstack` is the lower-flash-size alternative: it pins
+BTstack to a known commit through `platformio.ini`, ignores BTstack as a normal
+PlatformIO library, and builds only the classic A2DP sink sources through
+`components/btstack`. `components/btstack_config` keeps BTstack's pools static
+and small for one A2DP connection. The current build verification result is
+approximately 115 KB RAM and 1.19 MB flash for `media-btstack`, compared with
+approximately 121 KB RAM and 1.60 MB flash for the default Bluedroid media
+build.
+
+BTstack is viable here as a compile-time source/backend selection, not as an
+in-process plugin next to Bluedroid. It also carries BlueKitchen's
+non-commercial/personal-use license clause in the source files used for A2DP
+and SBC decoding, so any commercial use would need a license review before this
+becomes a product direction.
 
 ## I2S Devices
 

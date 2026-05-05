@@ -21,10 +21,22 @@
 
 #if TOTEM_AUDIO_ENABLE_BTSTACK_A2DP
 extern "C" {
-#include "btstack.h"
+#include "bluetooth.h"
+#include "bluetooth_company_id.h"
+#include "bluetooth_sdp.h"
+#include "btstack_defines.h"
+#include "btstack_event.h"
 #include "btstack_port_esp32.h"
 #include "btstack_run_loop.h"
-#include "classic/btstack_sbc_bluedroid.h"
+#include "classic/a2dp_sink.h"
+#include "classic/avdtp.h"
+#include "classic/avdtp_util.h"
+#include "classic/btstack_sbc.h"
+#include "classic/device_id_server.h"
+#include "classic/sdp_server.h"
+#include "gap.h"
+#include "hci.h"
+#include "l2cap.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 }
@@ -127,7 +139,7 @@ class BtstackA2DPSource
         _receivedBytes.store(0, std::memory_order_release);
         _lastDataMs.store(0, std::memory_order_release);
         _lastWaitingLogMs = 0;
-        _decoder = nullptr;
+        _decoderConfigured = false;
         std::memset(&_decoderContext, 0, sizeof(_decoderContext));
 
         const auto created = xTaskCreatePinnedToCore(
@@ -230,13 +242,12 @@ class BtstackA2DPSource
     }
 
     void _configureDecoder() {
-        if (_decoder != nullptr) {
+        if (_decoderConfigured) {
             return;
         }
-        _decoder =
-            btstack_sbc_decoder_bluedroid_init_instance(&_decoderContext);
-        _decoder->configure(&_decoderContext, SBC_MODE_STANDARD, _onPcmData,
-                            this);
+        btstack_sbc_decoder_init(&_decoderContext, SBC_MODE_STANDARD,
+                                 _onPcmData, this);
+        _decoderConfigured = true;
     }
 
     void _setSbcConfiguration(const uint8_t *packet) {
@@ -351,7 +362,8 @@ class BtstackA2DPSource
         _configureDecoder();
         const auto *sbcData = packet + mediaHeaderBytes + 1;
         const auto sbcBytes = static_cast<uint16_t>(size - mediaHeaderBytes - 1);
-        _decoder->decode_signed_16(&_decoderContext, 0, sbcData, sbcBytes);
+        btstack_sbc_decoder_process_data(&_decoderContext, 0, sbcData,
+                                         sbcBytes);
     }
 
     void _writeDecodedPcm(int16_t *data, int numSamples, int numChannels,
@@ -423,8 +435,7 @@ class BtstackA2DPSource
     PcmRingStream _stream{};
     AudioInfo _audioInfo{};
     SbcConfiguration _sbcConfiguration{};
-    const btstack_sbc_decoder_t *_decoder = nullptr;
-    btstack_sbc_decoder_bluedroid_t _decoderContext{};
+    btstack_sbc_decoder_state_t _decoderContext{};
     btstack_packet_callback_registration_t _hciEventCallback{};
     std::array<uint8_t, 150> _sdpA2dpSinkService{};
     std::array<uint8_t, 100> _sdpDeviceIdService{};
@@ -433,6 +444,7 @@ class BtstackA2DPSource
     TaskHandle_t _taskHandle = nullptr;
     uint16_t _a2dpCid = 0;
     uint8_t _localSeid = 0;
+    bool _decoderConfigured = false;
     uint32_t _lastWaitingLogMs = 0;
     std::atomic<bool> _ready{false};
     std::atomic<bool> _connected{false};

@@ -12,20 +12,43 @@ endif()
 
 set(BTSTACK_PORT_ROOT "${BTSTACK_ROOT}/port/esp32/components/btstack")
 
-file(GLOB btstack_core_sources
-  "${BTSTACK_ROOT}/src/*.c"
-)
-
-file(GLOB btstack_classic_sources
-  "${BTSTACK_ROOT}/src/classic/*.c"
-)
-
 file(GLOB btstack_sbc_decoder_sources
   "${BTSTACK_ROOT}/3rd-party/bluedroid/decoder/srce/*.c"
 )
 
-file(GLOB btstack_sbc_encoder_sources
-  "${BTSTACK_ROOT}/3rd-party/bluedroid/encoder/srce/*.c"
+set(btstack_core_sources
+  "${BTSTACK_ROOT}/src/ad_parser.c"
+  "${BTSTACK_ROOT}/src/btstack_crypto.c"
+  "${BTSTACK_ROOT}/src/btstack_linked_list.c"
+  "${BTSTACK_ROOT}/src/btstack_linked_queue.c"
+  "${BTSTACK_ROOT}/src/btstack_memory.c"
+  "${BTSTACK_ROOT}/src/btstack_memory_pool.c"
+  "${BTSTACK_ROOT}/src/btstack_ring_buffer.c"
+  "${BTSTACK_ROOT}/src/btstack_run_loop.c"
+  "${BTSTACK_ROOT}/src/btstack_tlv.c"
+  "${BTSTACK_ROOT}/src/btstack_util.c"
+  "${BTSTACK_ROOT}/src/hci.c"
+  "${BTSTACK_ROOT}/src/hci_cmd.c"
+  "${BTSTACK_ROOT}/src/hci_dump.c"
+  "${BTSTACK_ROOT}/src/l2cap.c"
+  "${BTSTACK_ROOT}/src/l2cap_signaling.c"
+)
+
+set(btstack_classic_sources
+  "${BTSTACK_ROOT}/src/classic/a2dp.c"
+  "${BTSTACK_ROOT}/src/classic/a2dp_sink.c"
+  "${BTSTACK_ROOT}/src/classic/avdtp.c"
+  "${BTSTACK_ROOT}/src/classic/avdtp_acceptor.c"
+  "${BTSTACK_ROOT}/src/classic/avdtp_initiator.c"
+  "${BTSTACK_ROOT}/src/classic/avdtp_sink.c"
+  "${BTSTACK_ROOT}/src/classic/avdtp_util.c"
+  "${BTSTACK_ROOT}/src/classic/btstack_link_key_db_tlv.c"
+  "${BTSTACK_ROOT}/src/classic/btstack_sbc_decoder_bluedroid.c"
+  "${BTSTACK_ROOT}/src/classic/btstack_sbc_plc.c"
+  "${BTSTACK_ROOT}/src/classic/device_id_server.c"
+  "${BTSTACK_ROOT}/src/classic/sdp_client.c"
+  "${BTSTACK_ROOT}/src/classic/sdp_server.c"
+  "${BTSTACK_ROOT}/src/classic/sdp_util.c"
 )
 
 set(btstack_port_sources
@@ -41,7 +64,6 @@ idf_component_register(
     ${btstack_core_sources}
     ${btstack_classic_sources}
     ${btstack_sbc_decoder_sources}
-    ${btstack_sbc_encoder_sources}
     ${btstack_port_sources}
   INCLUDE_DIRS
     "${BTSTACK_ROOT}/3rd-party/bluedroid/decoder/include"

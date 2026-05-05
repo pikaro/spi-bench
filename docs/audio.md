@@ -220,6 +220,9 @@ The analyzer registers metrics through `include/Audio/detail/Metrics.hpp`.
 `audCore` keeps rare frame-drop counters, `audFft` keeps diagnostic
 copy/readiness/frame/beat counters plus primary-group last beat energy and BPM,
 and `audProf` keeps profiling-only timing totals and max subphase durations. The
+profiling group is disabled by default to leave Bluetooth builds with more
+internal-heap headroom; define `TOTEM_ENABLE_AUDIO_PROFILING_METRICS=1` for a
+temporary profiling firmware when investigating FFT phase timings. The
 main metric groups are:
 
 - `copy`, `copyB`, `empty`, `skip`, and `probe` for source feeding.

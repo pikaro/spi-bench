@@ -14,7 +14,7 @@
 #include "Wire/Spi/Interfaces/SlaveConfig.hpp"
 #include "Wire/Spi/Interfaces/Types.hpp"
 
-inline constexpr bool enableFftDebugDisplay = false;
+inline constexpr bool enableFftDebugDisplay = true;
 
 #ifndef TOTEM_AUDIO_USE_BTSTACK_A2DP
 #define TOTEM_AUDIO_USE_BTSTACK_A2DP 0
@@ -26,7 +26,7 @@ inline Totem::LedPwm::Config ledPwmConfig{
             .name = "BeatLed",
             .priority = 1,
             .core = Totem::TaskController::Config::CorePreference::specific(1),
-            .stackSize = 2560,
+            .stackSize = 4096,
             .intervalMs = 5,
             .noCatchup = true,
         },
@@ -111,6 +111,9 @@ inline Totem::Audio::AudioSourceConfig audioSourceConfig{
     .btstackA2DP =
         Totem::Audio::BtstackA2DPSourceConfig{
             .deviceName = "Totem Media",
+            .bufferStartThresholdBytes = 256,
+            .taskPriority = 1,
+            .cooperativeYieldIntervalMs = 4,
         },
 };
 
@@ -149,7 +152,7 @@ inline Totem::Wire::Spi::SlaveConfig spiSlaveConfig{
             .name = "SpiSlaveTask",
             .priority = 2,
             .core = Totem::TaskController::Config::CorePreference::specific(0),
-            .stackSize = 4096,
+            .stackSize = 8192,
             .intervalMs = 10,
             .noCatchup = true,
             .useNotify = true,

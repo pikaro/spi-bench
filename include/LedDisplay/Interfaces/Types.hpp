@@ -38,10 +38,23 @@ enum class AnimationKind : uint8_t {
     DiagnosticFill = 0,
     CenterWave,
     FftReactive,
+    PrimitiveDemo,
 };
 
 enum class Layer : uint8_t {
     Main = 0,
+};
+
+enum class PrimitiveKind : uint8_t {
+    RingSweep = 0,
+    SpokeSweep,
+    TheaterChase,
+    Twinkle,
+    Sparkle,
+    Explosion,
+    Fire,
+    Comet,
+    Rainbow,
 };
 
 struct WIRE_MSG DiagnosticFillConfig {
@@ -63,7 +76,17 @@ struct WIRE_MSG FftReactiveConfig {
     uint8_t valueScale = 128;
 };
 
-struct AnimationCommand {
+struct WIRE_MSG PrimitiveDemoConfig {
+    PrimitiveKind primitive = PrimitiveKind::Explosion;
+    uint8_t hue = 144;
+    uint8_t saturation = 255;
+    uint8_t value = 180;
+    uint8_t width = 5;
+    uint8_t density = 48;
+    uint8_t speed = 128;
+};
+
+struct WIRE_MSG AnimationCommand {
     AnimationCommandType type = AnimationCommandType::Play;
     AnimationKind kind = AnimationKind::CenterWave;
     uint16_t requestId = 0;
@@ -90,7 +113,12 @@ struct FftReactive {
     FftReactiveConfig config{};
 };
 
-using AnimationPayload = std::variant<DiagnosticFill, CenterWave, FftReactive>;
+struct PrimitiveDemo {
+    PrimitiveDemoConfig config{};
+};
+
+using AnimationPayload =
+    std::variant<DiagnosticFill, CenterWave, FftReactive, PrimitiveDemo>;
 
 static_assert(std::is_trivially_copyable_v<HsvColor>,
               "HsvColor must remain queue-copyable");
@@ -102,6 +130,8 @@ static_assert(std::is_trivially_copyable_v<CenterWaveConfig>,
               "CenterWaveConfig must remain queue-copyable");
 static_assert(std::is_trivially_copyable_v<FftReactiveConfig>,
               "FftReactiveConfig must remain queue-copyable");
+static_assert(std::is_trivially_copyable_v<PrimitiveDemoConfig>,
+              "PrimitiveDemoConfig must remain queue-copyable");
 static_assert(std::is_trivially_copyable_v<AnimationCommand>,
               "AnimationCommand must remain queue-copyable");
 static_assert(std::is_trivially_copyable_v<AnimationPayload>,

@@ -4,6 +4,10 @@
 #include <cstddef>
 #include <optional>
 
+#ifndef TOTEM_ENABLE_AUDIO_PROFILING_METRICS
+#define TOTEM_ENABLE_AUDIO_PROFILING_METRICS 0
+#endif
+
 struct MetricCollection {
     using MetricLevel = Totem::MetricsBackend::MetricLevel;
 
@@ -18,7 +22,11 @@ struct MetricCollection {
         std::nullopt;
     static constexpr std::optional<MetricLevel> logging = std::nullopt;
     static constexpr std::optional<MetricLevel> mutex = std::nullopt;
+#if TOTEM_ENABLE_AUDIO_PROFILING_METRICS
     static constexpr std::optional<MetricLevel> audio = MetricLevel::Profiling;
+#else
+    static constexpr std::optional<MetricLevel> audio = MetricLevel::Diagnostic;
+#endif
     static constexpr std::optional<MetricLevel> i2c = MetricLevel::Diagnostic;
     static constexpr std::optional<MetricLevel> ledPwm = std::nullopt;
     static constexpr std::optional<MetricLevel> buttons = std::nullopt;

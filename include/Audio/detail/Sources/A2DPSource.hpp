@@ -258,7 +258,7 @@ class A2DPSource : public HasLifecycle<A2DPSource, A2DPSourceConfig>,
 
     ReturnCode _onEnd() { return OK(); }
 
-    PcmRingStream _stream{};
+    NullAudioStream _stream{};
     AudioInfo _audioInfo{};
 };
 #endif

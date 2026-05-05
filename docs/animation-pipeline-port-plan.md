@@ -592,14 +592,15 @@ not become a runtime scene graph.
 This should proceed like the SPI work: small, reviewable phases that each prove
 one layer of the system. Do not implement all abstractions up front.
 
-Current status: the initial GPU implementation covers phases 1 through 5. It
-adds `LedTopology`, `LedDisplay`, compile-time group/data-line ownership,
-FastLED-backed output, a temporary free-running 100 FPS render/present task,
-fixed animation slots, opaque byte-backed animation config payloads, and a
-local `/ledwave` command that queues the default center-to-edge wave on each GPU
-node. The implementation also contains an early `FftReactiveConfig` payload and
-render placeholder, but the real FFT latest-state subscriber remains Phase 6
-work.
+Current status: the GPU implementation covers phases 1 through 6 and part of
+Phase 7. It adds `LedTopology`, `LedDisplay`, compile-time group/data-line
+ownership, FastLED-backed output, a temporary free-running 100 FPS
+render/present task, fixed animation slots, opaque byte-backed animation config
+payloads, the PubSub `Animation` topic, GPU animation-command subscription,
+FFT latest-state subscription, and `/anim` PubSub publishing from every node.
+GPU-local bring-up commands remain available through `/ledwave` and `/ledprim`.
+The master-driven present strobe, fixed layer stack, and beat/wheel latest-state
+subscribers remain future work.
 
 ### Phase 1: Skeleton
 

@@ -100,6 +100,14 @@ Useful GPU LED bring-up commands:
 - Trigger it on both active GPU nodes:
     `!gpu0 /ledwave`
     `!gpu1 /ledwave`
+- Trigger a local primitive demo on a GPU without PubSub:
+    `!gpu0 /ledprim Explosion`
+    `!gpu0 /ledprim Twinkle`
+    `!gpu0 /ledprim Fire`
+- Publish animation commands over PubSub from any node:
+    `!master /anim wave`
+    `!io /anim prim Comet`
+    `!gpu0 /anim stop`
 
 Useful filesystem validation command:
 

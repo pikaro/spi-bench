@@ -51,6 +51,7 @@ struct LedDisplayConfig {
         ownedPixelCount / dataLineCount;
 
     static constexpr size_t commandQueueSize = 6;
+    static constexpr size_t animationPublishPoolSize = 6;
     static constexpr size_t maxActiveAnimations = 4;
     static constexpr size_t animationCommandPayloadBytes = 32;
 
@@ -79,6 +80,7 @@ struct LedDisplayConfig {
     static constexpr Totem::TaskController::Config task{
         .name = "LedDisplay",
         .priority = 3,
+        .core = Totem::TaskController::Config::CorePreference::specific(1),
         .stackSize = 8192,
         .intervalMs = taskIntervalMs,
         .noCatchup = true,

@@ -178,11 +178,17 @@ struct BtstackA2DPSourceConfig {
         .channels = 1,
         .bitsPerSample = 16,
     };
-    uint16_t bufferStartThresholdBytes = 768;
+    uint16_t bufferStartThresholdBytes = 256;
     uint16_t waitingLogIntervalMs = 5000;
     uint8_t taskCore = 1;
-    uint8_t taskPriority = 10;
+    uint8_t taskPriority = 1;
     uint16_t taskStackSize = 6144;
+    /**
+     * Minimum interval between explicit one-tick yields while decoding media.
+     * This keeps the BTstack run loop from starving watchdog-owned peer tasks
+     * during continuous A2DP playback. Set to 0 to disable.
+     */
+    uint16_t cooperativeYieldIntervalMs = 4;
 
     [[nodiscard]] bool validate() const {
         return deviceName != nullptr && deviceName[0] != '\0' &&

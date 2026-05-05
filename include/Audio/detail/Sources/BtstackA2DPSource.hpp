@@ -85,7 +85,6 @@ class BtstackA2DPSource
             _streaming.load(std::memory_order_acquire) && hasData;
         _ready.store(isReady, std::memory_order_release);
         if (isReady) {
-            _lastWaitingLogMs = 0;
             return true;
         }
 
@@ -103,7 +102,6 @@ class BtstackA2DPSource
 
     void observeReadResult(std::size_t bytesRead, uint32_t nowMs) override {
         if (bytesRead > 0) {
-            _lastWaitingLogMs = 0;
             _observedBytes.fetch_add(static_cast<uint32_t>(bytesRead),
                                      std::memory_order_acq_rel);
             _lastDataMs.store(nowMs, std::memory_order_release);
@@ -139,6 +137,7 @@ class BtstackA2DPSource
         _receivedBytes.store(0, std::memory_order_release);
         _lastDataMs.store(0, std::memory_order_release);
         _lastWaitingLogMs = 0;
+        _lastCooperativeYieldTick = 0;
         _decoderConfigured = false;
         std::memset(&_decoderContext, 0, sizeof(_decoderContext));
 
@@ -274,6 +273,7 @@ class BtstackA2DPSource
         _a2dpCid = a2dp_subevent_stream_established_get_a2dp_cid(packet);
         _localSeid = a2dp_subevent_stream_established_get_local_seid(packet);
         _connected.store(true, std::memory_order_release);
+        _lastWaitingLogMs = 0;
         _log_i("BTstack A2DP stream established: cid=0x%04x, localSeid=%u",
                _a2dpCid, _localSeid);
     }
@@ -303,6 +303,7 @@ class BtstackA2DPSource
             _streaming.store(false, std::memory_order_release);
             _ready.store(false, std::memory_order_release);
             _stream.clear();
+            _lastWaitingLogMs = 0;
             _log_i("BTstack A2DP stream suspended");
             break;
         case A2DP_SUBEVENT_STREAM_RELEASED:
@@ -311,6 +312,7 @@ class BtstackA2DPSource
             _streaming.store(false, std::memory_order_release);
             _ready.store(false, std::memory_order_release);
             _stream.clear();
+            _lastWaitingLogMs = 0;
             _log_i("BTstack A2DP stream released");
             break;
         default:
@@ -364,6 +366,7 @@ class BtstackA2DPSource
         const auto sbcBytes = static_cast<uint16_t>(size - mediaHeaderBytes - 1);
         btstack_sbc_decoder_process_data(&_decoderContext, 0, sbcData,
                                          sbcBytes);
+        _yieldCooperatively();
     }
 
     void _writeDecodedPcm(int16_t *data, int numSamples, int numChannels,
@@ -388,6 +391,25 @@ class BtstackA2DPSource
         if (written > 0) {
             _receivedBytes.fetch_add(static_cast<uint32_t>(written),
                                      std::memory_order_acq_rel);
+        }
+    }
+
+    void _yieldCooperatively() {
+        if (config().cooperativeYieldIntervalMs == 0) {
+            return;
+        }
+
+        auto intervalTicks =
+            pdMS_TO_TICKS(config().cooperativeYieldIntervalMs);
+        if (intervalTicks == 0) {
+            intervalTicks = 1;
+        }
+
+        const auto now = xTaskGetTickCount();
+        if (_lastCooperativeYieldTick == 0 ||
+            now - _lastCooperativeYieldTick >= intervalTicks) {
+            _lastCooperativeYieldTick = now;
+            vTaskDelay(1);
         }
     }
 
@@ -446,6 +468,7 @@ class BtstackA2DPSource
     uint8_t _localSeid = 0;
     bool _decoderConfigured = false;
     uint32_t _lastWaitingLogMs = 0;
+    TickType_t _lastCooperativeYieldTick = 0;
     std::atomic<bool> _ready{false};
     std::atomic<bool> _connected{false};
     std::atomic<bool> _streaming{false};
@@ -493,7 +516,7 @@ class BtstackA2DPSource
 
     ReturnCode _onEnd() { return OK(); }
 
-    PcmRingStream _stream{};
+    NullAudioStream _stream{};
     AudioInfo _audioInfo{};
 };
 #endif

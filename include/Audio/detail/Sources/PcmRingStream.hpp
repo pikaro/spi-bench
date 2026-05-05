@@ -14,6 +14,16 @@
 
 namespace Totem::Audio::detail {
 
+class NullAudioStream : public Platform::AudioStream {
+  public:
+    int available() override { return 0; }
+    int availableForWrite() override { return 0; }
+    void flush() override {}
+    size_t write(const uint8_t *, size_t) override { return 0; }
+    size_t readBytes(uint8_t *, size_t) override { return 0; }
+    operator bool() override { return false; }
+};
+
 class PcmRingStream : public Platform::AudioStream {
   public:
     DELETE_COPY(PcmRingStream)
@@ -37,8 +47,7 @@ class PcmRingStream : public Platform::AudioStream {
     [[nodiscard]] std::size_t capacity() const { return _buffer.size(); }
 
     [[nodiscard]] std::size_t bytesAvailable() {
-        Guard guard{_lock};
-        return _used;
+        return _usedSnapshot.load(std::memory_order_acquire);
     }
 
     [[nodiscard]] uint32_t droppedBytes() const {
@@ -46,11 +55,12 @@ class PcmRingStream : public Platform::AudioStream {
     }
 
     void clear() {
-        Guard guard{_lock};
-        _read = 0;
-        _write = 0;
-        _used = 0;
-        _droppedBytes.store(0, std::memory_order_release);
+        TryGuard guard{_lock};
+        if (!guard) {
+            _clearRequested.store(true, std::memory_order_release);
+            return;
+        }
+        _clearLocked();
     }
 
     size_t writePcm(const uint8_t *data, size_t len) {
@@ -59,7 +69,13 @@ class PcmRingStream : public Platform::AudioStream {
             return 0;
         }
 
-        Guard guard{_lock};
+        TryGuard guard{_lock};
+        if (!guard) {
+            _droppedBytes.fetch_add(static_cast<uint32_t>(len),
+                                    std::memory_order_acq_rel);
+            return 0;
+        }
+        _handlePendingClearLocked();
         auto incoming = len;
         if (incoming >= _buffer.size()) {
             _droppedBytes.fetch_add(
@@ -86,6 +102,7 @@ class PcmRingStream : public Platform::AudioStream {
         std::copy_n(data + first, incoming - first, _buffer.data());
         _write = (_write + incoming) % _buffer.size();
         _used += incoming;
+        _publishUsedLocked();
         return len;
     }
 
@@ -95,9 +112,38 @@ class PcmRingStream : public Platform::AudioStream {
             return 0;
         }
 
-        Guard guard{_lock};
+        TryGuard guard{_lock};
         const auto frames = len / 4U;
-        for (std::size_t frame = 0; frame < frames; ++frame) {
+        if (!guard) {
+            _droppedBytes.fetch_add(static_cast<uint32_t>(frames * 2U),
+                                    std::memory_order_acq_rel);
+            return 0;
+        }
+        _handlePendingClearLocked();
+        auto framesToWrite = frames;
+        std::size_t firstFrame = 0;
+        auto outgoing = framesToWrite * 2U;
+        if (outgoing >= _buffer.size()) {
+            framesToWrite = _buffer.size() / 2U;
+            firstFrame = frames - framesToWrite;
+            outgoing = framesToWrite * 2U;
+            _droppedBytes.fetch_add(
+                static_cast<uint32_t>(_used + (frames * 2U) - outgoing),
+                std::memory_order_acq_rel);
+            _read = 0;
+            _write = 0;
+            _used = 0;
+        } else {
+            const auto free = _buffer.size() - _used;
+            if (outgoing > free) {
+                const auto drop = outgoing - free;
+                _read = (_read + drop) % _buffer.size();
+                _used -= drop;
+                _droppedBytes.fetch_add(static_cast<uint32_t>(drop),
+                                        std::memory_order_acq_rel);
+            }
+        }
+        for (std::size_t frame = firstFrame; frame < frames; ++frame) {
             const auto *frameData = data + (frame * 4U);
             const auto left = static_cast<int16_t>(
                 static_cast<uint16_t>(frameData[0]) |
@@ -112,6 +158,7 @@ class PcmRingStream : public Platform::AudioStream {
             _writeByteLocked(static_cast<uint8_t>(
                 (static_cast<uint16_t>(mono) >> 8U) & 0xFFU));
         }
+        _publishUsedLocked();
         return frames * 4U;
     }
 
@@ -119,18 +166,18 @@ class PcmRingStream : public Platform::AudioStream {
         if (!_active.load(std::memory_order_acquire)) {
             return 0;
         }
-        Guard guard{_lock};
         return static_cast<int>(
-            std::min<std::size_t>(_used, std::numeric_limits<int>::max()));
+            std::min<std::size_t>(bytesAvailable(),
+                                  std::numeric_limits<int>::max()));
     }
 
     int availableForWrite() override {
         if (!_active.load(std::memory_order_acquire)) {
             return 0;
         }
-        Guard guard{_lock};
         return static_cast<int>(std::min<std::size_t>(
-            _buffer.size() - _used, std::numeric_limits<int>::max()));
+            _buffer.size() - bytesAvailable(),
+            std::numeric_limits<int>::max()));
     }
 
     void flush() override {}
@@ -145,13 +192,18 @@ class PcmRingStream : public Platform::AudioStream {
             return 0;
         }
 
-        Guard guard{_lock};
+        TryGuard guard{_lock};
+        if (!guard) {
+            return 0;
+        }
+        _handlePendingClearLocked();
         const auto count = std::min(len, _used);
         const auto first = std::min(count, _buffer.size() - _read);
         std::copy_n(_buffer.data() + _read, first, data);
         std::copy_n(_buffer.data(), count - first, data + first);
         _read = (_read + count) % _buffer.size();
         _used -= count;
+        _publishUsedLocked();
         return count;
     }
 
@@ -160,15 +212,21 @@ class PcmRingStream : public Platform::AudioStream {
     }
 
   private:
-    struct Guard {
-        explicit Guard(std::atomic_flag &flag) : lock(flag) {
-            while (lock.test_and_set(std::memory_order_acquire)) {
+    struct TryGuard {
+        explicit TryGuard(std::atomic_flag &flag)
+            : lock(flag),
+              locked(!lock.test_and_set(std::memory_order_acquire)) {}
+
+        ~TryGuard() {
+            if (locked) {
+                lock.clear(std::memory_order_release);
             }
         }
 
-        ~Guard() { lock.clear(std::memory_order_release); }
+        explicit operator bool() const { return locked; }
 
         std::atomic_flag &lock;
+        bool locked;
     };
 
     [[nodiscard]] std::size_t _next(std::size_t index) const {
@@ -177,21 +235,40 @@ class PcmRingStream : public Platform::AudioStream {
     }
 
     void _writeByteLocked(uint8_t value) {
-        if (_used == _buffer.size()) {
-            _read = _next(_read);
-            --_used;
-            _droppedBytes.fetch_add(1, std::memory_order_acq_rel);
-        }
         _buffer[_write] = value;
         _write = _next(_write);
         ++_used;
+    }
+
+    void _clearLocked() {
+        _read = 0;
+        _write = 0;
+        _used = 0;
+        _clearRequested.store(false, std::memory_order_release);
+        _droppedBytes.store(0, std::memory_order_release);
+        _publishUsedLocked();
+    }
+
+    void _handlePendingClearLocked() {
+        if (_clearRequested.exchange(false, std::memory_order_acq_rel)) {
+            _read = 0;
+            _write = 0;
+            _used = 0;
+            _publishUsedLocked();
+        }
+    }
+
+    void _publishUsedLocked() {
+        _usedSnapshot.store(_used, std::memory_order_release);
     }
 
     AudioInfo _audioInfo{};
     std::array<uint8_t, a2dpSourceBufferBytes> _buffer{};
     std::atomic_flag _lock = ATOMIC_FLAG_INIT;
     std::atomic<bool> _active{false};
+    std::atomic<bool> _clearRequested{false};
     std::atomic<uint32_t> _droppedBytes{0};
+    std::atomic<std::size_t> _usedSnapshot{0};
     std::size_t _read = 0;
     std::size_t _write = 0;
     std::size_t _used = 0;

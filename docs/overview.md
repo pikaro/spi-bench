@@ -66,8 +66,9 @@ organized as follows:
     detection; see
     [audio.md](audio.md)
 - `include/LedTopology/` and `include/LedDisplay/`: GPU-node logical LED
-    topology, compile-time ownership, FastLED-backed output, and local
-    animation playback; see [animation-pipeline-port-plan.md](animation-pipeline-port-plan.md)
+    topology, compile-time ownership, FastLED-backed output, local animation
+    playback, primitive drawing helpers, and PubSub animation commands; see
+    [animation-pipeline-port-plan.md](animation-pipeline-port-plan.md)
 - `include/Generated/Wire/`: generated wire-format support code
 - `include/Wire/Rs485/`: point-to-point RS485 wire layer; see
     [wire-rs485.md](wire-rs485.md)

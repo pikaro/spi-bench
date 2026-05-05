@@ -734,6 +734,8 @@ template <class Link> struct PubSubStarSpiEdgeSetup {
             PUBSUB_STAR_MEDIA_PUBLISHES_PER_INTERVAL;
         uint32_t reportIntervalMs = 1000;
         uint32_t pubSubTaskStackSize = 8192;
+        Totem::TaskController::Config::CorePreference pubSubTaskCore =
+            Totem::TaskController::Config::CorePreference::any();
         bool publishes = false;
     };
 
@@ -757,8 +759,7 @@ template <class Link> struct PubSubStarSpiEdgeSetup {
 
     void setup() {
         ABORT_IF_ERR_BEGIN(pubSubNode.begin(PubSubStarTest::makePubSubConfig(
-            "PubSubStar", 5,
-            Totem::TaskController::Config::CorePreference::any(),
+            "PubSubStar", 5, config.pubSubTaskCore,
             config.pubSubTaskStackSize)));
         ABORT_IF_ERR_BEGIN(transport.begin());
         ABORT_IF_ERR(transport.registerHandler(),
@@ -833,6 +834,8 @@ template <class Link> struct PubSubStarSpiEdgeSetup {
             auto config = Config{
                 .consumerName = "PubSub-star-gpu1",
                 .publishLabel = "gpu1 idle",
+                .pubSubTaskCore =
+                    Totem::TaskController::Config::CorePreference::specific(0),
             };
 #if PUBSUB_STAR_GPU1_SUBSCRIBE_POWER
             config.subscribeTopics[config.subscribeTopicCount++] = Topic::Power;
@@ -855,6 +858,8 @@ template <class Link> struct PubSubStarSpiEdgeSetup {
         auto config = Config{
             .consumerName = "PubSub-star-gpu0",
             .publishLabel = "gpu0 idle",
+            .pubSubTaskCore =
+                Totem::TaskController::Config::CorePreference::specific(0),
         };
 #if PUBSUB_STAR_GPU0_SUBSCRIBE_POWER
         config.subscribeTopics[config.subscribeTopicCount++] = Topic::Power;

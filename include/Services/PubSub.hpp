@@ -50,6 +50,8 @@ class PubSubService {
 
     static void set(INode &backendNode) { backend = &backendNode; }
 
+    [[nodiscard]] static bool configured() { return backend != nullptr; }
+
     static INode &get() {
         ABORT_IF_NULL(backend, "PubSub backend node is not set");
         return *backend;

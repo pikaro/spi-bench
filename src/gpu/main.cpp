@@ -30,6 +30,7 @@ void setup() {
     ABORT_IF_ERR_BEGIN(spiSlave.begin(spiSlaveConfig));
     pubSubStar.setup();
     ABORT_IF_ERR_BEGIN(ledDisplay.begin());
+    ABORT_IF_ERR_BEGIN(ledDisplay.subscribePubSub());
 
     _log_i("Setup complete");
 }

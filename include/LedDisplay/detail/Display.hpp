@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Audio/Interfaces/Wire.hpp"
 #include "Base/HasCommands.hpp"
 #include "Base/HasLifecycle.hpp"
 #include "Base/HasTaskController.hpp"
@@ -7,11 +8,14 @@
 #include "LedDisplay/Interfaces/Types.hpp"
 #include "LedDisplay/Outputs/FastLedOutput.hpp"
 #include "LedDisplay/detail/Commands.hpp"
+#include "LedDisplay/detail/Primitives.hpp"
 #include "LedDisplay/detail/RendererSelect.hpp"
 #include "LedTopology/Facade.hpp"
 #include "Macros/Facade.hpp"
+#include "Mutex/Facade.hpp"
 #include "PubSubBackend/detail/Codec.hpp"
 #include "Queue/Facade.hpp"
+#include "Services/PubSub.hpp"
 #include "TaskController/Interfaces/IRegistry.hpp"
 #include "TaskController/Interfaces/TaskHooks.hpp"
 #include "Types/Error.hpp"
@@ -78,6 +82,63 @@ class Display : public HasLifecycle<Display, Config>,
         return OK();
     }
 
+    ReturnCode playPrimitive(PrimitiveKind primitive) {
+        auto cmd = AnimationCommand{
+            .type = AnimationCommandType::Play,
+            .kind = AnimationKind::PrimitiveDemo,
+            .requestId = _nextRequestId(),
+            .layer = Layer::Main,
+            .lifetimeMs = 2400,
+        };
+        const auto config = PrimitiveDemoConfig{
+            .primitive = primitive,
+            .hue = 144,
+            .saturation = 255,
+            .value = 180,
+            .width = 5,
+            .density = 56,
+            .speed = 160,
+        };
+        FAIL_IF_ERR_FWD(_encodePayload(cmd, config),
+                        "Failed to encode primitive demo config");
+        FAIL_IF_ERR_FWD(_enqueue(cmd),
+                        "Failed to enqueue primitive demo animation");
+        _log_i("Queued LED primitive demo primitive=%u request=%u",
+               static_cast<unsigned>(primitive), cmd.requestId);
+        return OK();
+    }
+
+    ReturnCode subscribePubSub() {
+        if (_pubSubSubscribed) {
+            return OK();
+        }
+        FAIL_IF_NOT(PubSubService::configured(), ERR(CoreError, InvalidState),
+                    "PubSub backend is not configured");
+
+        auto &pubSub = PubSubService::get();
+        auto animationSub = pubSub.subscribe(
+            "led-anim",
+            {.subscriber = this, .callback = _onAnimationEnvelope},
+            PubSubService::Topic::Animation);
+        if (!animationSub) {
+            return animationSub.error();
+        }
+        _animationSub = *animationSub;
+
+        auto fftSub = pubSub.subscribe(
+            "led-fft", {.subscriber = this, .callback = _onFftEnvelope},
+            PubSubService::Topic::FftFrame);
+        if (!fftSub) {
+            (void)pubSub.unsubscribe(_animationSub);
+            _animationSub = 0;
+            return fftSub.error();
+        }
+        _fftSub = *fftSub;
+        _pubSubSubscribed = true;
+        _log_i("LedDisplay subscribed to animation and FFT PubSub topics");
+        return OK();
+    }
+
   private:
     ReturnCode _onBegin() {
         static_assert(Config::dataLineCount <= 2,
@@ -94,11 +155,62 @@ class Display : public HasLifecycle<Display, Config>,
 
     ReturnCode _onEnd() {
         auto ret = OK();
+        ret.combine(_unsubscribePubSub());
         ret.combine(this->_endTaskController());
         ret.combine(this->_deregisterCommands());
         ret.combine(_output.deinit());
         DESTROY_QUEUE(ret, _commandQueue);
         return ret;
+    }
+
+    ReturnCode _unsubscribePubSub() {
+        if (!_pubSubSubscribed || !PubSubService::configured()) {
+            _pubSubSubscribed = false;
+            _animationSub = 0;
+            _fftSub = 0;
+            return OK();
+        }
+        auto ret = OK();
+        auto &pubSub = PubSubService::get();
+        if (_animationSub != 0) {
+            ret.combine(pubSub.unsubscribe(_animationSub));
+        }
+        if (_fftSub != 0) {
+            ret.combine(pubSub.unsubscribe(_fftSub));
+        }
+        _animationSub = 0;
+        _fftSub = 0;
+        _pubSubSubscribed = false;
+        return ret;
+    }
+
+    static ReturnCode
+    _onAnimationEnvelope(void *owner,
+                         const Totem::PubSubBackend::Envelope &envelope) {
+        auto *self = static_cast<Display *>(owner);
+        FAIL_IF_NULL(self, ERR(CoreError, InvalidArgument),
+                     "LedDisplay animation subscriber owner is null");
+        FAIL_IF_UNEXPECTED_FWD(cmd, envelope.getPayloadAs<AnimationCommand>(),
+                               "Failed to decode animation command");
+        return self->_enqueue(cmd);
+    }
+
+    static ReturnCode
+    _onFftEnvelope(void *owner,
+                   const Totem::PubSubBackend::Envelope &envelope) {
+        auto *self = static_cast<Display *>(owner);
+        FAIL_IF_NULL(self, ERR(CoreError, InvalidArgument),
+                     "LedDisplay FFT subscriber owner is null");
+        FAIL_IF_UNEXPECTED_FWD(frame, envelope.getPayloadAs<Totem::Audio::FftFrame>(),
+                               "Failed to decode FFT frame");
+        return self->_captureFftFrame(frame);
+    }
+
+    ReturnCode _captureFftFrame(const Totem::Audio::FftFrame &frame) {
+        Totem::Mutex::ScopedSpinlockGuard guard{_inputLock};
+        _latestFftFrame = frame;
+        _hasFftFrame = true;
+        return OK();
     }
 
     ReturnCode _onTaskStep() {
@@ -198,6 +310,13 @@ class Display : public HasLifecycle<Display, Config>,
             slot.payload = AnimationPayload{FftReactive{.config = config}};
             break;
         }
+        case AnimationKind::PrimitiveDemo: {
+            FAIL_IF_UNEXPECTED_FWD(config,
+                                   _decodePayload<PrimitiveDemoConfig>(cmd),
+                                   "Failed to decode primitive demo config");
+            slot.payload = AnimationPayload{PrimitiveDemo{.config = config}};
+            break;
+        }
         default:
             slot.active = false;
             FAIL(ERR(CoreError, InvalidArgument), "Unknown animation kind");
@@ -270,51 +389,64 @@ class Display : public HasLifecycle<Display, Config>,
                  uint32_t nowMs) {
         const uint32_t elapsed = nowMs - slot.startMs;
         const uint32_t duration = slot.lifetimeMs == 0 ? 1200U : slot.lifetimeMs;
-        const uint32_t width = std::max<uint32_t>(animation.config.width, 1U);
-        const uint32_t extent = Config::ringCount + width + 1U;
-        const uint32_t head = (elapsed * extent) / duration;
-
-        for (uint8_t spoke = 0; spoke < Config::spokeCount; ++spoke) {
-            for (uint8_t radial = 0; radial < Config::ringCount; ++radial) {
-                const auto diff =
-                    head > radial ? head - radial : radial - head;
-                if (diff > width) {
-                    continue;
-                }
-                const auto scale =
-                    static_cast<uint8_t>(((width + 1U - diff) * 255U) /
-                                         (width + 1U));
-                const auto value = Render::scale8(animation.config.value, scale);
-                _writeLogical(spoke, radial,
-                              HsvColor{.hue = animation.config.hue,
-                                       .saturation =
-                                           animation.config.saturation,
-                                       .value = value},
-                              BlendOp::MaxValue);
-            }
-        }
+        auto canvas = PrimitiveCanvas{_frame};
+        drawCenterWave(canvas,
+                       PrimitiveParams{
+                           .elapsedMs = elapsed,
+                           .durationMs = duration,
+                           .hue = animation.config.hue,
+                           .saturation = animation.config.saturation,
+                           .value = animation.config.value,
+                           .width = animation.config.width,
+                       });
     }
 
     void _render(const FftReactive &animation,
                  const ActiveAnimation & /*unused*/, uint32_t nowMs) {
-        const auto pulse =
-            static_cast<uint8_t>((nowMs / 8U) & 0xFFU);
-        for (uint8_t spoke = 0; spoke < Config::spokeCount; ++spoke) {
-            for (uint8_t radial = 0; radial < Config::ringCount; ++radial) {
-                const uint8_t wave =
-                    static_cast<uint8_t>((pulse + radial * 5U + spoke * 7U) &
-                                         0xFFU);
-                const uint8_t value =
-                    Render::scale8(wave, animation.config.valueScale);
-                _writeLogical(spoke, radial,
-                              HsvColor{.hue = static_cast<uint8_t>(
-                                           animation.config.baseHue + spoke * 8U),
-                                       .saturation =
-                                           animation.config.saturation,
-                                       .value = value},
-                              BlendOp::MaxValue);
-            }
+        auto canvas = PrimitiveCanvas{_frame};
+        const auto snapshot = _snapshotFftFrame();
+        if (!snapshot.valid) {
+            drawRainbow(canvas,
+                        PrimitiveParams{
+                            .elapsedMs = nowMs,
+                            .durationMs = 2000,
+                            .hue = animation.config.baseHue,
+                            .saturation = animation.config.saturation,
+                            .value = animation.config.valueScale,
+                        });
+            return;
         }
+
+        for (uint8_t radial = 0; radial < Config::ringCount; ++radial) {
+            const size_t band = (static_cast<size_t>(radial) * 8U) /
+                                Config::ringCount;
+            const uint8_t bandValue =
+                Render::scale8(_fftBandValue(snapshot.frame, band),
+                               animation.config.valueScale);
+            canvas.ring(radial,
+                        HsvColor{.hue = static_cast<uint8_t>(
+                                     animation.config.baseHue + band * 24U),
+                                 .saturation = animation.config.saturation,
+                                 .value = bandValue});
+        }
+    }
+
+    void _render(const PrimitiveDemo &animation, const ActiveAnimation &slot,
+                 uint32_t nowMs) {
+        const uint32_t elapsed = nowMs - slot.startMs;
+        const uint32_t duration = slot.lifetimeMs == 0 ? 2400U : slot.lifetimeMs;
+        auto canvas = PrimitiveCanvas{_frame};
+        drawPrimitiveDemo(canvas, animation.config.primitive,
+                          PrimitiveParams{
+                              .elapsedMs = elapsed,
+                              .durationMs = duration,
+                              .hue = animation.config.hue,
+                              .saturation = animation.config.saturation,
+                              .value = animation.config.value,
+                              .width = animation.config.width,
+                              .density = animation.config.density,
+                              .speed = animation.config.speed,
+                          });
     }
 
     void _writeLogical(uint8_t spoke, uint8_t radial, HsvColor color,
@@ -336,6 +468,51 @@ class Display : public HasLifecycle<Display, Config>,
     }
 
     void _clearFrame() { _frame.fill(HsvColor{}); }
+
+    struct FftSnapshot {
+        Totem::Audio::FftFrame frame{};
+        bool valid = false;
+    };
+
+    FftSnapshot _snapshotFftFrame() const {
+        Totem::Mutex::ScopedSpinlockGuard guard{_inputLock};
+        return FftSnapshot{.frame = _latestFftFrame, .valid = _hasFftFrame};
+    }
+
+    [[nodiscard]] static uint8_t
+    _fftBandValue(const Totem::Audio::FftFrame &frame, size_t band) {
+        uint16_t raw = 0;
+        switch (band) {
+        case 0:
+            raw = frame.subBass;
+            break;
+        case 1:
+            raw = frame.bass;
+            break;
+        case 2:
+            raw = frame.lowMid;
+            break;
+        case 3:
+            raw = frame.mid;
+            break;
+        case 4:
+            raw = frame.highMid;
+            break;
+        case 5:
+            raw = frame.presence;
+            break;
+        case 6:
+            raw = frame.brilliance;
+            break;
+        default:
+            raw = frame.air;
+            break;
+        }
+        if (raw <= 255U) {
+            return static_cast<uint8_t>(raw);
+        }
+        return static_cast<uint8_t>(std::min<uint16_t>(raw >> 8U, 255U));
+    }
 
     template <typename T>
     static ReturnCode _encodePayload(AnimationCommand &cmd, const T &payload) {
@@ -394,11 +571,17 @@ class Display : public HasLifecycle<Display, Config>,
     Outputs::FastLedOutput _output;
     std::array<HsvColor, Config::ownedPixelCount> _frame{};
     std::array<ActiveAnimation, Config::maxActiveAnimations> _animations{};
+    Totem::Audio::FftFrame _latestFftFrame{};
+    bool _hasFftFrame = false;
+    bool _pubSubSubscribed = false;
+    Totem::PubSubBackend::SubscriberKey _animationSub = 0;
+    Totem::PubSubBackend::SubscriberKey _fftSub = 0;
     uint16_t _lastRequestId = 0;
     uint64_t _lastFrameUs = 0;
     uint32_t _lastDitherErrorMs = 0;
     uint32_t _maxShowUs = 0;
     uint32_t _frames = 0;
+    mutable ::platform::Spinlock _inputLock = ::platform::create_spinlock();
 
     STANDARD_QUEUE(_commandQueue, AnimationCommand, Config::commandQueueSize)
 };

@@ -16,12 +16,6 @@
 #include "AudioTools/CoreAudio/AudioStreams.h"
 #include "AudioTools/CoreAudio/BaseStream.h"
 #include "AudioTools/CoreAudio/StreamCopy.h"
-#ifndef TOTEM_AUDIO_ENABLE_BLUEDROID_A2DP
-#define TOTEM_AUDIO_ENABLE_BLUEDROID_A2DP 1
-#endif
-#if TOTEM_AUDIO_ENABLE_BLUEDROID_A2DP
-#include "BluetoothA2DPSink.h"
-#endif
 #include "Macros/Facade.hpp"
 #include "Types/Error.hpp"
 #include "driver/i2s_std.h"
@@ -262,16 +256,6 @@ struct Platform {
     using WindowFunction = audio_tools::WindowFunction;
     using HammingWindow = audio_tools::Hamming;
     using HannWindow = audio_tools::Hann;
-#if TOTEM_AUDIO_ENABLE_BLUEDROID_A2DP
-    using A2DPSink = BluetoothA2DPSink;
-    using A2DPAudioState = esp_a2d_audio_state_t;
-    using A2DPConnectionState = esp_a2d_connection_state_t;
-
-    static constexpr A2DPAudioState a2dpAudioStarted =
-        ESP_A2D_AUDIO_STATE_STARTED;
-    static constexpr A2DPConnectionState a2dpConnected =
-        ESP_A2D_CONNECTION_STATE_CONNECTED;
-#endif
 
     static void setAudioInfo(AudioStream &stream, AudioInfo info) {
         stream.setAudioInfo(toPlatformAudioInfo(info));

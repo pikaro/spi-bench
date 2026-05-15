@@ -152,6 +152,28 @@ ______________________________________________________________________
 - Avoid unnecessary abstractions
 - Maintain deterministic behavior and clear data flow
 
+### Build Configuration
+
+- Do not add `#define` entries or `-D...` compiler flags to express ordinary
+    project-owned build configuration. Prefer `constexpr` values in
+    `include/StaticConfig/` so IDEs and code navigation see the active
+    configuration.
+- Keep preprocessor and build-flag selectors narrow. They are acceptable for
+    true build differentiation that cannot reasonably be represented as
+    `constexpr`, such as selecting platform/HAL code or node identity when the
+    same code is compiled for different hardware roles.
+- Real macro use is outside this restriction. Function-like macros, include
+    guards, and required external SDK/library macros may still use the
+    preprocessor when that is the appropriate mechanism.
+- If a change appears to need a new project-owned build flag outside these
+    cases, treat it as a blocking assumption and ask first.
+- Do not add persistent PlatformIO environments as a maintainability mechanism.
+    The active project environments are `master`, `media`, `io`, `gpu0`, and
+    `gpu1`; future persistent environments are expected only for `wheel` and
+    `test`. Any other environment is a temporary agent-local diagnostic tool
+    and must be removed before finishing unless the owner explicitly asks to
+    keep it.
+
 ### Comments and Docstrings
 
 - Document intent, constraints, and non-obvious behavior

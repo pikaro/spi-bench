@@ -7,8 +7,9 @@
 - `Audio/Facade.hpp` exports the public audio classes.
 - `Audio/Interfaces/Types.hpp` contains value-type configuration and callback
     payloads for I2S input, FFT frames, magnitude scaling, and beat events.
-- `Audio/detail/Sources/` owns selectable audio inputs. `AudioSource` starts
-    exactly one configured source and exposes it through `IAudioSource`.
+- `Audio/detail/Sources/` owns the concrete audio inputs. The media app
+    instantiates exactly one source object and passes it to `FftAnalyzer`
+    through `IAudioSource`.
 - `Audio/detail/FftAnalyzer.hpp` feeds the source into arduino-audio-tools'
     stream/sink FFT path, calculates fixed FFT bands, updates the magnitude
     cache, and emits frame/beat callbacks.
@@ -19,17 +20,19 @@
     a 128x32 SSD1306 I2C display. It subscribes to FFT frames and beats but
     flushes the display from its own task.
 - `Audio/detail/platform/PlatformESP32.hpp` is the component-owned ESP32
-    platform layer for arduino-audio-tools I2S/FFT types and ESP32-A2DP.
-    BTstack A2DP uses a separate ESP-IDF component wrapper because it replaces
-    Bluedroid as the Bluetooth host stack.
+    platform layer for arduino-audio-tools I2S/FFT types.
+    Bluetooth source headers include their stack-specific dependencies only
+    when that source is selected.
 
-The current design supports one simultaneous audio source. That keeps ownership
-and runtime scheduling simple while still allowing source selection through
-`AudioSourceConfig::kind`.
+The current design supports one simultaneous audio source. `src/media/config.hpp`
+keeps source-specific configs near each other for switching, but the selected
+source is a compile-time type choice through `mediaAudioSourceKind` and
+`MediaAudioSourceBinding`. There is no aggregate source object that owns I2S,
+WAV, Bluedroid, and BTstack members at the same time.
 
 ## Audio Sources
 
-`AudioSourceConfig::kind` selects the active source:
+`mediaAudioSourceKind` selects the active source:
 
 - `AudioSourceKind::I2S` uses `I2SSource` for live microphone or sound-card
     input.
@@ -45,16 +48,21 @@ and runtime scheduling simple while still allowing source selection through
     limited internal DRAM on the original ESP32 and the buffer only has to
     bridge callback bursts to the FFT task.
 - `AudioSourceKind::BtstackA2DP` uses `BtstackA2DPSource` as an experimental
-    Bluetooth A2DP sink through BlueKitchen BTstack. It is built only in
-    `env:media-btstack`; BTstack and Bluedroid cannot run as runtime-selectable
-    alternatives in one firmware because BTstack requires the ESP-IDF Bluetooth
-    controller-only configuration while `pschatzmann/ESP32-A2DP` uses
-    Bluedroid. The source starts a dedicated BTstack FreeRTOS task, decodes SBC
-    through BTstack's Bluedroid-derived SBC decoder, and writes mono or stereo
-    16-bit PCM into the same fixed ring stream used by `A2DPSource`.
+    Bluetooth A2DP sink through BlueKitchen BTstack. BTstack and Bluedroid
+    cannot run as runtime-selectable alternatives in one firmware because
+    BTstack requires the ESP-IDF Bluetooth controller-only configuration while
+    `pschatzmann/ESP32-A2DP` uses Bluedroid. The source starts a dedicated
+    BTstack FreeRTOS task, decodes SBC through BTstack's Bluedroid-derived SBC
+    decoder, and writes mono or stereo 16-bit PCM into the same fixed ring
+    stream used by `A2DPSource`.
 
-Only the selected source is started at runtime. Config for the selected source
-must be present in `AudioSourceConfig`; inactive configs may be omitted.
+Only the selected source type is instantiated. Inactive source configs in
+`src/media/config.hpp` are `constexpr` values for easy switching and do not
+create BSS objects. The active `env:media` build currently selects I2S and keeps
+Bluetooth disabled so Bluetooth SDK/library globals do not consume media-node
+DRAM. Selecting a Bluetooth source also requires including the matching concrete
+source header in `src/media/config.hpp` and enabling the corresponding
+SDK/library dependencies for that firmware.
 
 `bin/wavgen.py` writes short LittleFS-friendly fixtures to
 `data/media/littlefs/test.wav` by default. Upload the filesystem image before
@@ -63,14 +71,10 @@ testing `WavFile` so the mounted LittleFS contains the sample.
 Enabling `A2DPSource` requires the ESP-IDF Bluedroid Bluetooth stack. On the
 original 4 MiB ESP32 media board this has a large flash-size cost, so Bluedroid
 A2DP should be treated as a diagnostic input until the linked firmware size is
-validated. `env:media-btstack` is the lower-flash-size alternative: it pins
-BTstack to a known commit through `platformio.ini`, ignores BTstack as a normal
-PlatformIO library, and builds only the classic A2DP sink sources through
-`components/btstack`. `components/btstack_config` keeps BTstack's pools static
-and small for one A2DP connection. The current build verification result is
-approximately 115 KB RAM and 1.19 MB flash for `media-btstack`, compared with
-approximately 121 KB RAM and 1.60 MB flash for the default Bluedroid media
-build.
+validated. The BTstack alternative pins BTstack to a known commit, ignores
+BTstack as a normal PlatformIO library, and builds only the classic A2DP sink
+sources through `components/btstack`. `components/btstack_config` keeps
+BTstack's pools static and small for one A2DP connection.
 
 BTstack is viable here as a compile-time source/backend selection, not as an
 in-process plugin next to Bluedroid. It also carries BlueKitchen's
@@ -236,11 +240,12 @@ main metric groups are:
 ## SSD1306 Debug Display
 
 `src/media/config.hpp` contains optional I2C SSD1306 display config for realtime
-FFT debugging. `enableFftDebugDisplay` is currently disabled in the A2DP media
-configuration because Classic Bluetooth, SPI/PubSub, FFT, and the display task
-do not leave enough internal heap headroom on the original ESP32. When enabled,
-the media node starts `Wire::I2C::Master`, `Wire::I2C::Ssd1306Display`, and
-`Audio::FftDisplay` before the analyzer starts.
+FFT debugging. `enableFftDebugDisplay` currently enables it for the I2S media
+build. Bluetooth media builds may need to disable it because Classic Bluetooth,
+SPI/PubSub, FFT, and the display task can leave too little internal heap
+headroom on the original ESP32. When enabled, the media node starts
+`Wire::I2C::Master`, `Wire::I2C::Ssd1306Display`, and `Audio::FftDisplay`
+before the analyzer starts.
 The analyzer callbacks only update a latest-frame slot; the display task owns
 the slow I2C flush so FFT processing does not block on display transfer time.
 When `FftDisplayConfig::showRawBands` is enabled, each band is drawn as two

@@ -61,9 +61,9 @@ organized as follows:
 - `include/FileSystem/`: static-memory filesystem wrapper selected through the
     component detail layer; the current backend is ESP-IDF LittleFS mounted at
     `/littlefs`
-- `include/Audio/`: media-node selectable I2S, LittleFS WAV, Bluedroid A2DP,
-    or BTstack A2DP audio input, FFT analysis, magnitude scaling, and beat
-    detection; see
+- `include/Audio/`: media-node compile-time selected I2S, LittleFS WAV,
+    Bluedroid A2DP, or BTstack A2DP audio input, FFT analysis, magnitude
+    scaling, and beat detection; see
     [audio.md](audio.md)
 - `include/LedTopology/` and `include/LedDisplay/`: GPU-node logical LED
     topology, compile-time ownership, FastLED-backed output, local animation

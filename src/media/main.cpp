@@ -20,7 +20,7 @@ Totem::Clock::Clock clockSlave{Totem::Clock::Clock::Role::Slave};
 Totem::LedPwm::LedPwm ledPwm{core.taskRegistry};
 Totem::Wire::I2C::Master i2cMaster{};
 Totem::Wire::I2C::Ssd1306Display fftDisplay{i2cMaster};
-Totem::Audio::AudioSource audioSource{};
+MediaAudioSourceType audioSource{};
 Totem::Audio::FftAnalyzer fftAnalyzer{core.taskRegistry, audioSource};
 Totem::Audio::FftDisplay fftDisplayVisualizer{core.taskRegistry, fftAnalyzer,
                                               fftDisplay};
@@ -97,7 +97,7 @@ void setup() {
 
     ABORT_IF_ERR_BEGIN(spiSlave.begin(spiSlaveConfig));
     pubSubStar.setup();
-    ABORT_IF_ERR_BEGIN(audioSource.begin(audioSourceConfig));
+    ABORT_IF_ERR_BEGIN(beginMediaAudioSource(audioSource));
     ABORT_IF_ERR_BEGIN(fftAnalyzer.begin(fftAnalyzerConfig));
 
     _log_i("Setup complete");

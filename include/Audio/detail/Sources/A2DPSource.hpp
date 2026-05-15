@@ -7,6 +7,7 @@
 #include "Audio/detail/Sources/PcmRingStream.hpp"
 #include "Audio/detail/Types.hpp"
 #include "Base/HasLifecycle.hpp"
+#include "BluetoothA2DPSink.h"
 #include "Macros/Facade.hpp"
 #include "Types/Error.hpp"
 #include <atomic>
@@ -15,11 +16,6 @@
 
 namespace Totem::Audio::detail {
 
-#ifndef TOTEM_AUDIO_ENABLE_BLUEDROID_A2DP
-#define TOTEM_AUDIO_ENABLE_BLUEDROID_A2DP 1
-#endif
-
-#if TOTEM_AUDIO_ENABLE_BLUEDROID_A2DP
 class A2DPSource : public HasLifecycle<A2DPSource, A2DPSourceConfig>,
                    public IAudioSource {
     friend class HasLifecycle<A2DPSource, A2DPSourceConfig>;
@@ -154,8 +150,8 @@ class A2DPSource : public HasLifecycle<A2DPSource, A2DPSourceConfig>,
         _log_i("A2DP sample rate updated: %u Hz", sampleRate);
     }
 
-    void _setAudioState(Platform::A2DPAudioState state) {
-        const bool streaming = state == Platform::a2dpAudioStarted;
+    void _setAudioState(esp_a2d_audio_state_t state) {
+        const bool streaming = state == ESP_A2D_AUDIO_STATE_STARTED;
         _streaming.store(streaming, std::memory_order_release);
         if (!streaming) {
             _ready.store(false, std::memory_order_release);
@@ -163,8 +159,8 @@ class A2DPSource : public HasLifecycle<A2DPSource, A2DPSourceConfig>,
         _log_i("A2DP audio state changed: %d", static_cast<int>(state));
     }
 
-    void _setConnectionState(Platform::A2DPConnectionState state) {
-        const bool connected = state == Platform::a2dpConnected;
+    void _setConnectionState(esp_a2d_connection_state_t state) {
+        const bool connected = state == ESP_A2D_CONNECTION_STATE_CONNECTED;
         _connected.store(connected, std::memory_order_release);
         if (!connected) {
             _ready.store(false, std::memory_order_release);
@@ -189,7 +185,7 @@ class A2DPSource : public HasLifecycle<A2DPSource, A2DPSourceConfig>,
         self->_setSampleRate(sampleRate);
     }
 
-    static void _onAudioStateChanged(Platform::A2DPAudioState state,
+    static void _onAudioStateChanged(esp_a2d_audio_state_t state,
                                      void *owner) {
         auto *self = static_cast<A2DPSource *>(owner);
         if (self == nullptr) {
@@ -199,7 +195,7 @@ class A2DPSource : public HasLifecycle<A2DPSource, A2DPSourceConfig>,
     }
 
     static void
-    _onConnectionStateChanged(Platform::A2DPConnectionState state,
+    _onConnectionStateChanged(esp_a2d_connection_state_t state,
                               void *owner) {
         auto *self = static_cast<A2DPSource *>(owner);
         if (self == nullptr) {
@@ -210,7 +206,7 @@ class A2DPSource : public HasLifecycle<A2DPSource, A2DPSourceConfig>,
 
     static inline A2DPSource *_activeInstance = nullptr;
 
-    Platform::A2DPSink _sink{};
+    BluetoothA2DPSink _sink{};
     PcmRingStream _stream{};
     AudioInfo _audioInfo{};
     uint32_t _lastWaitingLogMs = 0;
@@ -221,46 +217,5 @@ class A2DPSource : public HasLifecycle<A2DPSource, A2DPSourceConfig>,
     std::atomic<uint32_t> _receivedBytes{0};
     std::atomic<uint32_t> _lastDataMs{0};
 };
-#else
-class A2DPSource : public HasLifecycle<A2DPSource, A2DPSourceConfig>,
-                   public IAudioSource {
-    friend class HasLifecycle<A2DPSource, A2DPSourceConfig>;
-    friend struct LifecycleContract<A2DPSource, A2DPSourceConfig>;
-
-  public:
-    DELETE_COPY(A2DPSource)
-    DELETE_MOVE(A2DPSource)
-
-    static constexpr const char *name = "Audio::A2DPSource";
-    static constexpr LogComponent logComponent =
-        Totem::Audio::detail::logComponent;
-
-    A2DPSource() = default;
-
-    [[nodiscard]] bool active() const override { return false; }
-    [[nodiscard]] const AudioInfo &audioInfo() const override {
-        return _audioInfo;
-    }
-    [[nodiscard]] bool ready() const override { return false; }
-    [[nodiscard]] const char *sourceName() const override {
-        return "a2dp-disabled";
-    }
-    bool pollReadiness(uint32_t) override { return false; }
-    void observeReadResult(std::size_t, uint32_t) override {}
-    Platform::AudioStream &stream() override { return _stream; }
-
-  private:
-    ReturnCode _onBegin() {
-        FAIL_IF(true, ERR(CoreError, InvalidState),
-                "Bluedroid A2DP source is disabled in this build");
-        return OK();
-    }
-
-    ReturnCode _onEnd() { return OK(); }
-
-    NullAudioStream _stream{};
-    AudioInfo _audioInfo{};
-};
-#endif
 
 } // namespace Totem::Audio::detail

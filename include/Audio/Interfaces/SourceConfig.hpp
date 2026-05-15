@@ -3,7 +3,6 @@
 #include "Audio/Interfaces/Types.hpp"
 #include <cstddef>
 #include <cstdint>
-#include <optional>
 
 namespace Totem::Audio {
 
@@ -198,32 +197,6 @@ struct BtstackA2DPSourceConfig {
                bufferStartThresholdBytes <= a2dpSourceBufferBytes &&
                waitingLogIntervalMs > 0 && taskCore <= 1 &&
                taskPriority > 0 && taskStackSize >= 4096;
-    }
-};
-
-struct AudioSourceConfig {
-    AudioSourceKind kind = AudioSourceKind::I2S;
-    std::optional<I2SSourceConfig> i2s = I2SSourceConfig{};
-    std::optional<WavSourceConfig> wav = std::nullopt;
-    std::optional<A2DPSourceConfig> a2dp = std::nullopt;
-    std::optional<BtstackA2DPSourceConfig> btstackA2DP = std::nullopt;
-
-    [[nodiscard]] bool validate() const {
-        if (!isAudioSourceKind(kind)) {
-            return false;
-        }
-        switch (kind) {
-        case AudioSourceKind::I2S:
-            return i2s.has_value() && i2s->validate();
-        case AudioSourceKind::WavFile:
-            return wav.has_value() && wav->validate();
-        case AudioSourceKind::A2DP:
-            return a2dp.has_value() && a2dp->validate();
-        case AudioSourceKind::BtstackA2DP:
-            return btstackA2DP.has_value() && btstackA2DP->validate();
-        default:
-            return false;
-        }
     }
 };
 

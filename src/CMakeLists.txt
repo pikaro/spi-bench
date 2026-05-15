@@ -20,7 +20,7 @@ message(STATUS "src_root is set to '${src_root}'")
 
 file(GLOB_RECURSE app_sources ${CMAKE_SOURCE_DIR}/src/${src_root}/*.*)
 
-if(src_root STREQUAL "media" AND NOT ENABLE_BTSTACK)
+if(src_root STREQUAL "media" AND ENABLE_BLUETOOTH AND NOT ENABLE_BTSTACK)
     set(a2dp_src_root "${CMAKE_SOURCE_DIR}/.pio/libdeps/${environment_base}/ESP32-A2DP/src")
     if(IS_DIRECTORY "${a2dp_src_root}")
         list(APPEND app_sources

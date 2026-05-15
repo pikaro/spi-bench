@@ -15,11 +15,6 @@
 #include <cstdint>
 #include <cstring>
 
-#ifndef TOTEM_AUDIO_ENABLE_BTSTACK_A2DP
-#define TOTEM_AUDIO_ENABLE_BTSTACK_A2DP 0
-#endif
-
-#if TOTEM_AUDIO_ENABLE_BTSTACK_A2DP
 extern "C" {
 #include "bluetooth.h"
 #include "bluetooth_company_id.h"
@@ -40,11 +35,9 @@ extern "C" {
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 }
-#endif
 
 namespace Totem::Audio::detail {
 
-#if TOTEM_AUDIO_ENABLE_BTSTACK_A2DP
 class BtstackA2DPSource
     : public HasLifecycle<BtstackA2DPSource, BtstackA2DPSourceConfig>,
       public IAudioSource {
@@ -477,48 +470,5 @@ class BtstackA2DPSource
     std::atomic<uint32_t> _receivedBytes{0};
     std::atomic<uint32_t> _lastDataMs{0};
 };
-#else
-class BtstackA2DPSource
-    : public HasLifecycle<BtstackA2DPSource, BtstackA2DPSourceConfig>,
-      public IAudioSource {
-    friend class HasLifecycle<BtstackA2DPSource, BtstackA2DPSourceConfig>;
-    friend struct LifecycleContract<BtstackA2DPSource,
-                                    BtstackA2DPSourceConfig>;
-
-  public:
-    DELETE_COPY(BtstackA2DPSource)
-    DELETE_MOVE(BtstackA2DPSource)
-
-    static constexpr const char *name = "Audio::BtstackA2DPSource";
-    static constexpr LogComponent logComponent =
-        Totem::Audio::detail::logComponent;
-
-    BtstackA2DPSource() = default;
-
-    [[nodiscard]] bool active() const override { return false; }
-    [[nodiscard]] const AudioInfo &audioInfo() const override {
-        return _audioInfo;
-    }
-    [[nodiscard]] bool ready() const override { return false; }
-    [[nodiscard]] const char *sourceName() const override {
-        return "btstack-a2dp-disabled";
-    }
-    bool pollReadiness(uint32_t) override { return false; }
-    void observeReadResult(std::size_t, uint32_t) override {}
-    Platform::AudioStream &stream() override { return _stream; }
-
-  private:
-    ReturnCode _onBegin() {
-        FAIL_IF(true, ERR(CoreError, InvalidState),
-                "BTstack A2DP source is disabled in this build");
-        return OK();
-    }
-
-    ReturnCode _onEnd() { return OK(); }
-
-    NullAudioStream _stream{};
-    AudioInfo _audioInfo{};
-};
-#endif
 
 } // namespace Totem::Audio::detail

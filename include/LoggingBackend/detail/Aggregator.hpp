@@ -22,7 +22,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <optional>
+#include <type_traits>
 
 namespace Totem::LoggingBackend::detail {
 
@@ -97,8 +99,7 @@ class BINDING Aggregator : public HasLifecycle<Aggregator, AggregatorConfig>,
 
         DEFAULT_TASK();
 
-        auto ringBufferResult = RingBuffer::Buffer::create(
-            config().ringBufferSize * sizeof(LogRecord));
+        auto ringBufferResult = _createRingBuffer();
         FAIL_IF_UNEXPECTED(ringBuffer, ringBufferResult,
                            ringBufferResult.error(),
                            "Failed to create ring buffer for %s", name);
@@ -107,6 +108,19 @@ class BINDING Aggregator : public HasLifecycle<Aggregator, AggregatorConfig>,
         START_TASK();
 
         return OK();
+    }
+
+    std::expected<::platform::RingBufferHandle, ReturnCode> _createRingBuffer() {
+        auto size = config().ringBufferSize * sizeof(LogRecord);
+        if (config().ringBufferAllocation == RingBufferAllocation::Dynamic) {
+            return RingBuffer::Buffer::create(size);
+        }
+
+        if constexpr (AggregatorConfig::hasStaticRingBufferStorage) {
+            return RingBuffer::Buffer::create(_ringBufferStorage, size);
+        }
+        _log_e("Static ring buffer storage is disabled for %s", name);
+        return std::unexpected(ERR(InvalidArgument));
     }
 
     ReturnCode _onEnd() {
@@ -179,6 +193,14 @@ class BINDING Aggregator : public HasLifecycle<Aggregator, AggregatorConfig>,
         return writeResult;
     }
 
+    struct EmptyRingBufferStorage {};
+    using RingBufferStorage = std::conditional_t<
+        AggregatorConfig::hasStaticRingBufferStorage,
+        RingBuffer::Buffer::Storage<AggregatorConfig::maxRingBufferSize *
+                                    sizeof(LogRecord)>,
+        EmptyRingBufferStorage>;
+
+    RingBufferStorage _ringBufferStorage{};
     ::platform::RingBufferHandle _ringBuffer;
     std::array<IRecordSink *, LoggingConfig::maxSinks> _sinks{nullptr};
 

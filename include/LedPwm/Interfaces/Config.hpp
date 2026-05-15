@@ -4,6 +4,7 @@
 #include "LedPwm/detail/PlatformSelect.hpp"
 #include "Platform/PlatformSelect.hpp"
 #include "StaticConfig/LedPwm.hpp"
+#include "StaticConfig/Stacks.hpp"
 #include "TaskController/Interfaces/Config.hpp"
 #include <array>
 #include <cmath>
@@ -21,7 +22,7 @@ struct PeripheralLedConfig {
 struct Config {
     Totem::TaskController::Config task{
         .name = "LedPwm",
-        .stackSize = 4096,
+        .stackSize = StaticConfig::TaskStacks::ledPwm,
         .intervalMs = 10,
     };
 

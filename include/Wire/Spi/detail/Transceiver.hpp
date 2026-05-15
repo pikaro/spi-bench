@@ -278,27 +278,22 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
             metrics().addSlotRx();
             metrics().addRxBytes(header.slotLength);
             beginSlot(BucketSize::B64);
+            FAIL_IF_ERR_FWD(_queuePreReadyHelloIfNeeded("empty-slot"),
+                            "Failed to queue SPI hello after pre-ready empty "
+                            "slot");
             return OK();
         }
-        if (ready() && containsHello) {
-            if (_sequenceBehind(header.sequence, expectedSequence)) {
-                metrics().addHelloResync();
-                _log_v("SPI peer hello restart from slot sequence %u "
-                       "expected %u",
-                       header.sequence, expectedSequence);
-                reset(header.peerId, header.connectionId);
-                _receivedSlotSequence.reset(
-                    static_cast<uint16_t>(header.sequence + 1));
-                _lastReceivedSequence = header.sequence;
-                _helloResynced = true;
-            } else {
-                _log_v("SPI stale hello consumed from slot sequence %u",
-                       header.sequence);
-                metrics().addSlotRx();
-                metrics().addRxBytes(header.slotLength);
-                beginSlot(BucketSize::B64);
-                return OK();
-            }
+        if (ready() && containsHello &&
+            _sequenceBehind(header.sequence, expectedSequence)) {
+            metrics().addHelloResync();
+            _log_v("SPI peer hello restart from slot sequence %u "
+                   "expected %u",
+                   header.sequence, expectedSequence);
+            reset(header.peerId, header.connectionId);
+            _receivedSlotSequence.reset(
+                static_cast<uint16_t>(header.sequence + 1));
+            _lastReceivedSequence = header.sequence;
+            _helloResynced = true;
         }
         if (!_helloResynced) {
             const bool sequenceOk =
@@ -324,6 +319,9 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
                     metrics().addSlotRx();
                     metrics().addRxBytes(header.slotLength);
                     beginSlot(BucketSize::B64);
+                    FAIL_IF_ERR_FWD(
+                        _queuePreReadyHelloIfNeeded("stale-slot"),
+                        "Failed to queue SPI hello after pre-ready stale slot");
                     return OK();
                 }
                 metrics().addMissedSequence();
@@ -350,6 +348,9 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
                                                    receivedAtUs),
                                         "Failed to handle SPI header ack");
                     }
+                    FAIL_IF_ERR_FWD(
+                        _queuePreReadyHelloIfNeeded("slot"),
+                        "Failed to queue SPI hello after pre-ready slot");
                     return OK();
                 }
                 metrics().addBadSlot();
@@ -422,13 +423,15 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
                FrameHeader::size + payloadBytes;
     }
 
-    ReturnCode _appendControl(FrameType type, SlotFlags flag) {
+    ReturnCode _appendControl(FrameType type, SlotFlags flag,
+                              uint16_t responseTo = 0) {
         FAIL_IF_ERR_FWD(_ensureCapacityForNextFrame(0),
                         "Failed to grow SPI control slot");
         _tx.addFlags(flag);
+        const auto sequence = _frameSequence.next();
         FAIL_IF_ERR_FWD(_tx.appendFrame(type, PayloadType::Raw,
                                         std::span<const std::byte>{},
-                                        _frameSequence.next()),
+                                        sequence, responseTo),
                         "Failed to append SPI control frame");
         metrics().addFrameTx();
         return OK();
@@ -453,7 +456,7 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
         metrics().addFrameRx();
         switch (frame.header.type) {
         case FrameType::Hello:
-            return _handleHello();
+            return _handleHello(frame);
         case FrameType::Heartbeat:
         case FrameType::Status:
         case FrameType::Nop:
@@ -465,10 +468,25 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
                               ERR(CoreError, OperationFailed),
                               receivedAtUs);
         case FrameType::Data:
+            FAIL_IF_ERR_FWD(_dropPreReadyApplicationFrame(frame),
+                            "Failed to handle pre-ready SPI data frame");
+            if (!ready()) {
+                return OK();
+            }
             return _handleData(frame, receivedAtUs);
         case FrameType::Request:
+            FAIL_IF_ERR_FWD(_dropPreReadyApplicationFrame(frame),
+                            "Failed to handle pre-ready SPI request frame");
+            if (!ready()) {
+                return OK();
+            }
             return _dispatchRequest(frame, receivedAtUs);
         case FrameType::Response:
+            FAIL_IF_ERR_FWD(_dropPreReadyApplicationFrame(frame),
+                            "Failed to handle pre-ready SPI response frame");
+            if (!ready()) {
+                return OK();
+            }
             if (_responseCallback != nullptr) {
                 return _responseCallback(_responseOwner, frame, receivedAtUs);
             }
@@ -482,14 +500,38 @@ template <size_t Capacity, size_t MaxHandlers = 4> class Transceiver {
         return _state.transition(LinkEvent::ReceiveHello);
     }
 
-    ReturnCode _handleHello() {
+    ReturnCode _handleHello(const FrameView &frame) {
         const bool wasReady = ready();
-        FAIL_IF_ERR_FWD(_markHelloReceived(), "Failed to handle SPI hello");
-        if (_autoHelloResponse && !wasReady) {
-            FAIL_IF_ERR_FWD(_appendControl(FrameType::Hello, SlotFlags::Hello),
-                            "Failed to queue SPI hello response");
+        if (!wasReady) {
+            FAIL_IF_ERR_FWD(_markHelloReceived(),
+                            "Failed to handle SPI hello");
+        }
+        if (frame.header.responseTo == 0) {
+            // Hello requests are idempotent; acknowledgements are not answered.
+            FAIL_IF_ERR_FWD(_appendControl(FrameType::Hello, SlotFlags::Hello,
+                                           frame.header.sequence),
+                            "Failed to queue SPI hello acknowledgement");
         }
         return OK();
+    }
+
+    ReturnCode _dropPreReadyApplicationFrame(const FrameView &frame) {
+        if (ready()) {
+            return OK();
+        }
+        _log_v("SPI ignoring pre-ready frame type=%u seq=%u payload=%u",
+               static_cast<unsigned>(frame.header.type),
+               frame.header.sequence,
+               static_cast<unsigned>(frame.header.payloadType));
+        return _queuePreReadyHelloIfNeeded("application-frame");
+    }
+
+    ReturnCode _queuePreReadyHelloIfNeeded(const char *reason) {
+        if (ready() || !_autoHelloResponse || _tx.frameCount() > 0) {
+            return OK();
+        }
+        _log_v("SPI queueing hello response after pre-ready %s", reason);
+        return queueHello();
     }
 
     ReturnCode _handleAck(uint16_t sequence, ReturnCode result,

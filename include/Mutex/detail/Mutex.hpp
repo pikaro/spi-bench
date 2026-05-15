@@ -2,12 +2,22 @@
 
 #include "Macros/Facade.hpp"
 #include "PlatformSelect.hpp"
+#include <cstdint>
 
 namespace Totem::Mutex::detail {
 
+enum class MutexAllocation : uint8_t {
+    Static,
+    Dynamic,
+};
+
 class Mutex {
   public:
-    Mutex() : _handle{Platform::create_mutex().value_or(nullptr)} {
+    explicit Mutex(MutexAllocation allocation = MutexAllocation::Static)
+        : _handle{Platform::create_mutex(
+                      allocation == MutexAllocation::Static ? &_storage
+                                                            : nullptr)
+                      .value_or(nullptr)} {
         ABORT_IF_NULL(_handle, "Failed to create mutex");
     }
 
@@ -27,6 +37,7 @@ class Mutex {
     [[nodiscard]] MutexHandle get() const { return _handle; }
 
   private:
+    Platform::MutexStorage _storage{};
     MutexHandle _handle{};
 };
 

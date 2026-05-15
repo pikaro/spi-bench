@@ -125,10 +125,10 @@ struct MetricDesc {
 };
 
 struct MetricGroup {
-    const MetricGroupDesc *desc{};
+    MetricGroupDesc desc{};
     size_t metricCount = 0;
 
-    [[nodiscard]] std::string_view displayName() const { return desc->name; }
+    [[nodiscard]] std::string_view displayName() const { return desc.name; }
 };
 
 struct Metric {

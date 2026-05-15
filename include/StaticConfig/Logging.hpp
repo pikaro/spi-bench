@@ -44,6 +44,9 @@ struct LoggingDefaultLevel {
 struct LoggingConfig {
     static constexpr bool useColor = true;
 
+    static constexpr bool aggregatorRingBufferStatic = true;
+    static constexpr std::size_t aggregatorRingBufferRecords = 100;
+
     static constexpr bool errorJournalEnabled = true;
     static constexpr std::size_t errorJournalHistoryRecords = 5;
     static constexpr std::size_t errorJournalTrailingRecords = 5;

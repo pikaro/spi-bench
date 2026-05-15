@@ -1,5 +1,6 @@
 #pragma once
 
+#include "StaticConfig/Stacks.hpp"
 #include "TaskController/Interfaces/Config.hpp"
 #include <cstdint>
 
@@ -8,7 +9,7 @@ namespace Totem::PubSubBackend {
 struct Config {
     Totem::TaskController::Config task{
         .name = "PubSubNode",
-        .stackSize = 9000,
+        .stackSize = StaticConfig::TaskStacks::pubSubNode,
         .intervalMs = 100,
         .noCatchup = true,
         .useNotify = true,

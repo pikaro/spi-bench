@@ -51,8 +51,15 @@ template <class Link> class Rs485Transport : public BaseTransport {
 
     static constexpr size_t rxQueueDepth = 8;
     static constexpr size_t inFlightDepth = 8;
+    static constexpr size_t deferredRawDepth = 8;
 
     struct RxFrame {
+        std::array<std::byte, Base::bufferSize> data{};
+        size_t size = 0;
+    };
+
+    struct RawFrame {
+        Header header{};
         std::array<std::byte, Base::bufferSize> data{};
         size_t size = 0;
     };
@@ -163,6 +170,14 @@ template <class Link> class Rs485Transport : public BaseTransport {
 
         size_t count = 0;
         while (count < maxCount) {
+            bool sentRaw = false;
+            FAIL_IF_ERR_FWD(_sendDeferredRawFrame(sentRaw),
+                            "Failed to send deferred raw RS485 frame");
+            if (sentRaw) {
+                ++count;
+                continue;
+            }
+
             auto *slot = _findFreeInFlight();
             if (slot == nullptr) {
                 _statsTxInFlightFull.fetch_add(1,
@@ -229,9 +244,21 @@ template <class Link> class Rs485Transport : public BaseTransport {
             if (!sendRet.ok()) {
                 *slot = {};
                 _statsTxFailed.fetch_add(1, std::memory_order_relaxed);
-                FAIL(sendRet,
-                     "Failed to enqueue PubSub frame on RS485 link: " ERR_FMT,
-                     ERR_ARG(sendRet));
+                _log_w(SV_FMT
+                       ": dropping PubSub message %u after RS485 enqueue "
+                       "failed: " ERR_FMT,
+                       SV_ARG(_instanceName), item->envelope.header.messageId,
+                       ERR_ARG(sendRet));
+                auto ackRet = _ack(item->envelope);
+                if (!ackRet.ok()) {
+                    _log_w(SV_FMT
+                           ": failed PubSub message %u was not tracked for "
+                           "release: " ERR_FMT,
+                           SV_ARG(_instanceName),
+                           item->envelope.header.messageId, ERR_ARG(ackRet));
+                }
+                ++count;
+                continue;
             }
             _statsTxQueued.fetch_add(1, std::memory_order_relaxed);
             detail::log_trace_packet("rs485.tx.queued", item->envelope.header,
@@ -387,31 +414,104 @@ template <class Link> class Rs485Transport : public BaseTransport {
                              std::span<const std::byte> frame) {
         FAIL_IF(frame.size() > Base::bufferSize, ERR(CoreError, Overflow),
                 "Raw RS485 PubSub frame exceeds transport buffer size");
+        if (_rawSendQueued.load(std::memory_order_relaxed) != 0) {
+            return _queueRawFrame(header, frame);
+        }
+
         auto *slot = _findFreeInFlight();
         if (slot == nullptr) {
+            _statsTxInFlightFull.fetch_add(1, std::memory_order_relaxed);
+            return _queueRawFrame(header, frame);
+        }
+
+        return _startRawFrame(header, frame, *slot);
+    }
+
+    ReturnCode _queueRawFrame(const Header &header,
+                              std::span<const std::byte> frame) {
+        FAIL_IF_ERR_FWD(_ensureRawSendQueue(),
+                        "Failed to ensure RS485 raw send queue");
+        RawFrame rawFrame{};
+        rawFrame.header = header;
+        std::memcpy(rawFrame.data.data(), frame.data(), frame.size());
+        rawFrame.size = frame.size();
+
+        if (Totem::Queue::Platform::spacesAvailable(_rawSendQueue) == 0) {
             _statsTxInFlightFull.fetch_add(1, std::memory_order_relaxed);
             return ERR(CoreError, Overflow);
         }
 
-        std::memcpy(slot->data.data(), frame.data(), frame.size());
-        slot->header = header;
-        slot->size = frame.size();
-        slot->transport = this;
-        slot->queuedAtUs = ::platform::get_time_us();
-        slot->occupied = true;
-        slot->acknowledgeOnComplete = false;
+        auto sendRet =
+            Totem::Queue::Platform::send(_rawSendQueue, &rawFrame, 0);
+        if (!sendRet.ok()) {
+            _statsTxInFlightFull.fetch_add(1, std::memory_order_relaxed);
+            return sendRet;
+        }
+        _rawSendQueued.fetch_add(1, std::memory_order_relaxed);
+        return OK();
+    }
+
+    ReturnCode _sendDeferredRawFrame(bool &sent) {
+        sent = false;
+        if (_rawSendQueued.load(std::memory_order_relaxed) == 0) {
+            return OK();
+        }
+
+        auto *slot = _findFreeInFlight();
+        if (slot == nullptr) {
+            _statsTxInFlightFull.fetch_add(1, std::memory_order_relaxed);
+            return OK();
+        }
+
+        RawFrame rawFrame{};
+        auto receiveRet =
+            Totem::Queue::Platform::receive(_rawSendQueue, &rawFrame, 0);
+        if (!receiveRet.ok()) {
+            if (receiveRet == ERR(Timeout)) {
+                return OK();
+            }
+            FAIL(receiveRet,
+                 "Failed to receive deferred raw RS485 frame: " ERR_FMT,
+                 ERR_ARG(receiveRet));
+        }
+        _rawSendQueued.fetch_sub(1, std::memory_order_relaxed);
+        auto sendRet = _startRawFrame(
+            rawFrame.header,
+            std::span<const std::byte>{rawFrame.data.data(), rawFrame.size},
+            *slot);
+        if (!sendRet.ok()) {
+            _log_w(SV_FMT
+                   ": dropping deferred raw RS485 PubSub message %u after "
+                   "enqueue failed: " ERR_FMT,
+                   SV_ARG(_instanceName), rawFrame.header.messageId,
+                   ERR_ARG(sendRet));
+        }
+        sent = true;
+        return OK();
+    }
+
+    ReturnCode _startRawFrame(const Header &header,
+                              std::span<const std::byte> frame,
+                              InFlightFrame &slot) {
+        std::memcpy(slot.data.data(), frame.data(), frame.size());
+        slot.header = header;
+        slot.size = frame.size();
+        slot.transport = this;
+        slot.queuedAtUs = ::platform::get_time_us();
+        slot.occupied = true;
+        slot.acknowledgeOnComplete = false;
 
         detail::log_trace_packet("rs485.tx.raw.prepared", header,
                                  _instanceName.data());
         auto request = Wire::WriteRequest{
-            .owner = slot,
+            .owner = &slot,
             .payloadType = Wire::PayloadType::PubSub,
-            .data = std::span<const std::byte>{slot->data.data(), slot->size},
+            .data = std::span<const std::byte>{slot.data.data(), slot.size},
             .onComplete = _onWireWriteComplete,
         };
         auto sendRet = _link.send(request);
         if (!sendRet.ok()) {
-            *slot = {};
+            slot = {};
             _statsTxFailed.fetch_add(1, std::memory_order_relaxed);
             return sendRet;
         }
@@ -429,6 +529,18 @@ template <class Link> class Rs485Transport : public BaseTransport {
         FAIL_IF_UNEXPECTED_FWD(queueHandle, queueResult,
                                "Failed to create RS485 RX queue");
         _rxFrameQueue = queueHandle;
+        return OK();
+    }
+
+    ReturnCode _ensureRawSendQueue() {
+        if (_rawSendQueue != nullptr) {
+            return OK();
+        }
+        auto queueResult =
+            Totem::Queue::Platform::create(_rawSendQueueStorage);
+        FAIL_IF_UNEXPECTED_FWD(queueHandle, queueResult,
+                               "Failed to create RS485 raw send queue");
+        _rawSendQueue = queueHandle;
         return OK();
     }
 
@@ -501,8 +613,12 @@ template <class Link> class Rs485Transport : public BaseTransport {
     Totem::Queue::Handle _rxFrameQueue{};
     Totem::Queue::Platform::Storage<RxFrame, rxQueueDepth>
         _rxFrameQueueStorage{};
+    Totem::Queue::Handle _rawSendQueue{};
+    Totem::Queue::Platform::Storage<RawFrame, deferredRawDepth>
+        _rawSendQueueStorage{};
 
     std::array<InFlightFrame, inFlightDepth> _inFlight{};
+    std::atomic<uint32_t> _rawSendQueued{0};
 
     std::atomic<uint32_t> _statsTxQueued{0};
     std::atomic<uint32_t> _statsTxAcked{0};

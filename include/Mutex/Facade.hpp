@@ -7,6 +7,7 @@
 namespace Totem::Mutex {
 
 using detail::Mutex;
+using detail::MutexAllocation;
 using detail::ScopedMutexGuard;
 using detail::ScopedSpinlockGuard;
 

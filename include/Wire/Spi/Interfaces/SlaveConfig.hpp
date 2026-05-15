@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Platform/PlatformSelect.hpp"
+#include "StaticConfig/Stacks.hpp"
 #include "TaskController/Interfaces/Config.hpp"
 #include "Wire/Spi/Interfaces/Types.hpp"
 #include <cstdint>
@@ -21,7 +22,7 @@ struct SlaveConfig {
     Totem::TaskController::Config task{
         .name = "SpiSlaveTask",
         .priority = 2,
-        .stackSize = 8192,
+        .stackSize = StaticConfig::TaskStacks::spiSlave,
         .intervalMs = 100,
         .noCatchup = true,
         .useNotify = true,

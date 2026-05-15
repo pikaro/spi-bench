@@ -1,5 +1,6 @@
 #pragma once
 
+#include "StaticConfig/Stacks.hpp"
 #include "TaskController/Interfaces/Config.hpp"
 #include <cstdint>
 
@@ -12,7 +13,7 @@ struct FftDisplayConfig {
     Totem::TaskController::Config task{
         .name = "FftDisplay",
         .priority = 2,
-        .stackSize = 4096,
+        .stackSize = StaticConfig::TaskStacks::audioFftDisplay,
         .intervalMs = 100,
         .noCatchup = true,
     };

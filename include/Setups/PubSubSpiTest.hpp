@@ -13,6 +13,7 @@
 #include "Services/PubSub.hpp"
 #include "Setups/PubSubTest.hpp"
 #include "Setups/PubSubTestMessage.hpp"
+#include "StaticConfig/Stacks.hpp"
 #include "TaskController/Interfaces/IRegistry.hpp"
 #include "Types/Error.hpp"
 #include <cinttypes>
@@ -278,7 +279,7 @@ template <class Link> struct PubSubSpiTestSetup {
                 {
                     .name = taskName,
                     .priority = 3,
-                    .stackSize = 8192,
+                    .stackSize = Totem::StaticConfig::TaskStacks::pubSubNode,
                     .intervalMs = 5,
                     .noCatchup = true,
                     .useNotify = true,

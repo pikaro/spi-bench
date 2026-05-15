@@ -8,7 +8,9 @@
 #include "Types/Error.hpp"
 #include "freertos/projdefs.h"
 #include "freertos/ringbuf.h"
+#include <array>
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <utility>
 
@@ -41,6 +43,11 @@ struct RingBuffer {
     using RingBufferHandle = ::platform::RingBufferHandle;
     using Tick = ::platform::Tick;
 
+    template <size_t N> struct Storage {
+        std::array<uint8_t, N> buffer{};
+        StaticRingbuffer_t ringBuffer{};
+    };
+
     static std::expected<RingBufferHandle, ReturnCode> create(
         size_t size,
         const PlatformConfigAbstraction &config = PlatformConfigAbstraction()) {
@@ -48,6 +55,26 @@ struct RingBuffer {
         auto *handle = xRingbufferCreate(size, platformConfig.type);
         if (handle == nullptr) {
             _log_e("Failed to create ring buffer of size %zu", size);
+            return std::unexpected(ERR(OperationFailed));
+        }
+        return handle;
+    }
+
+    template <size_t N>
+    static std::expected<RingBufferHandle, ReturnCode> create(
+        Storage<N> &storage, size_t size,
+        const PlatformConfigAbstraction &config = PlatformConfigAbstraction()) {
+        if (size == 0 || size > storage.buffer.size()) {
+            _log_e("Invalid static ring buffer size %zu of capacity %zu", size,
+                   storage.buffer.size());
+            return std::unexpected(ERR(InvalidArgument));
+        }
+        auto platformConfig = PlatformConfig::fromAbstraction(config);
+        auto *handle = xRingbufferCreateStatic(
+            size, platformConfig.type, storage.buffer.data(),
+            &storage.ringBuffer);
+        if (handle == nullptr) {
+            _log_e("Failed to create static ring buffer of size %zu", size);
             return std::unexpected(ERR(OperationFailed));
         }
         return handle;

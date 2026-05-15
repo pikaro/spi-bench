@@ -21,6 +21,26 @@ The intended data model is event-driven. High-rate LED frame data should not be
 broadcast through PubSub. Nodes publish compact events and state updates; GPU
 nodes subscribe to those topics and generate their own frame output.
 
+## Prototype Status
+
+For the first prototype target, PubSub is considered integration-ready for the
+current five-node graph:
+
+- `master` bridges one low-speed SPI link to `media`, one high-speed shared SPI
+  router with `gpu0` and `gpu1`, and one RS485 link to `io`.
+- `io` can publish power/button-class events toward the SPI nodes through the
+  master.
+- `media` can publish beat/FFT-class events toward `io`, `gpu0`, and `gpu1`
+  through the master.
+- GPU nodes share the same event interests in this prototype shape, matching
+  the intended later four-GPU bus.
+
+The accepted behavior for this stage is reliable delivery, bounded static
+storage, graceful recovery after master or edge reset, and route-level latency
+visibility. `media -> io` is the current slowest route and may miss the 10 ms
+target; treat that as a measured performance limitation rather than a
+correctness failure unless drops, backpressure, or recovery errors appear.
+
 ## Traffic Classes
 
 PubSub uses two traffic classes:
@@ -148,7 +168,15 @@ collapsing every received test packet into one node-wide bucket. Latency
 summaries include rough fixed
 histogram percentiles (`p50`, `p90`, `p99`) and a `targetMiss` count for packets
 above the current 10 ms propagation target. These percentiles are intentionally
-bucketed rather than exact to keep the on-device memory cost small.
+bucketed rather than exact to keep the on-device memory cost small. Route
+delivery counts include every received packet, but latency samples outside the
+clock-valid measurement window are reported as `invalid` instead of
+polluting the percentile buckets. If a route receives packets but all latency
+samples in the reporting window are invalid, the harness prints
+`lat=invalid` rather than numeric zeroes. Valid route lines use
+`lat=min/avg/p50/p90/p99/max` plus `miss` and `invalid` counters; the compact
+format keeps the complete route status under the embedded logger's line limit.
+Invalid samples are expected during master reboot or clock resync windows.
 
 Transport availability can change while the drainer is publishing a frame. A
 transport enqueue failure after in-flight storage should release that target and
@@ -251,4 +279,5 @@ Keep PubSub changes minimal and reviewable:
   already required by transport abstraction
 - update this document when ownership, scheduling, or transport semantics
   change
-- build `master`, `media`, `gpu0`, and `io` after hardware PubSub changes
+- build `master`, `media`, `gpu0`, `gpu1`, and `io` after hardware PubSub
+  changes

@@ -4,6 +4,7 @@
 #include "Mutex/Facade.hpp"
 #include "PubSubBackend/Interfaces/Envelope.hpp"
 #include "PubSubBackend/detail/ControlPlane.hpp"
+#include "PubSubBackend/detail/Metrics.hpp"
 #include "PubSubBackend/detail/Publisher.hpp"
 #include "PubSubBackend/detail/TransportDirectory.hpp"
 #include "PubSubBackend/detail/Trace.hpp"
@@ -228,7 +229,21 @@ class Drainer {
         _log_d("Drainer: publish frame " MAGIC_PUBSUB_SV_FMT "%s",
                MAGIC_PUBSUB_SV_ARG(item.header),
                ingressContext.has_value() ? " from transport ingress" : "");
-        ret.combine(_controlPlane.handle(item, ingressContext));
+        auto controlRet = _controlPlane.handle(item, ingressContext);
+        if (!controlRet.ok()) {
+            if (ingressContext.has_value() &&
+                _isRecoverableIngressError(controlRet)) {
+                _log_w("Drainer: dropping invalid control-plane ingress "
+                       MAGIC_PUBSUB_SV_FMT ": " ERR_FMT,
+                       MAGIC_PUBSUB_SV_ARG(item.header),
+                       ERR_ARG(controlRet));
+                FAIL_IF_ERR_FWD(item.ack(),
+                                "Failed to release invalid control-plane "
+                                "ingress frame");
+                return OK();
+            }
+            ret.combine(controlRet);
+        }
         ret.combine(_publisher.publishToSubscribers(item));
         std::array<TransportTarget, Spec::Limits::maxTransports> targets{};
         TransportMask pendingMask = 0;
@@ -251,6 +266,17 @@ class Drainer {
 
         auto storeResult = _storeFrame(item, pendingMask, pendingCount);
         if (!storeResult) {
+            if (storeResult.error() == ERR(Overflow)) {
+                metrics().addEgressRejectedCritical();
+                _log_w("Drainer: dropping transport fanout for "
+                       MAGIC_PUBSUB_SV_FMT
+                       " because all in-flight slots are occupied",
+                       MAGIC_PUBSUB_SV_ARG(item.header));
+                FAIL_IF_ERR_FWD(item.ack(),
+                                "Failed to release PubSub message after "
+                                "in-flight backpressure");
+                return ret;
+            }
             FAIL(storeResult.error(),
                  "Failed to store in-flight message: " ERR_FMT,
                  ERR_ARG(storeResult.error()));
@@ -281,6 +307,11 @@ class Drainer {
             }
         }
         return ret;
+    }
+
+    [[nodiscard]] static bool _isRecoverableIngressError(ReturnCode error) {
+        return error == ERR(CoreError, InvalidData) ||
+               error == ERR(InvalidData) || error == ERR(AlreadyExists);
     }
 
     ReturnCode _releaseTransportTarget(StoredFrame &frame,

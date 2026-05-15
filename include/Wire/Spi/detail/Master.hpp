@@ -234,10 +234,17 @@ class Master : public HasLifecycle<Master, MasterConfig>,
             _nextHeartbeatAtMs = nowMs + heartbeatIntervalMs;
         }
 
-        const bool pollPendingWrites =
-            !_attention.configured() && _hasPendingWrites();
+        auto *freePendingWrite = _findFreePendingWrite();
+        const bool hasPendingWrites = _hasPendingWrites();
         const bool canQueueWrite =
-            _hasQueuedWrites() && _findFreePendingWrite() != nullptr;
+            _hasQueuedWrites() && freePendingWrite != nullptr;
+        // The attention line is a fast-path wakeup, not a correctness
+        // guarantee. If an ACK edge is missed, keep bounded polling pressure so
+        // pending writes do not sit until the much larger timeout window.
+        const bool pollPendingWrites =
+            hasPendingWrites &&
+            (!_attention.configured() || freePendingWrite == nullptr ||
+             _pendingAckPollDue(nowMs));
         if (!attentionRequested && _transceiver.ready() &&
             !_transceiver.hasPendingTx() && !canQueueWrite &&
             !pollPendingWrites && !heartbeatQueued) {
@@ -293,11 +300,33 @@ class Master : public HasLifecycle<Master, MasterConfig>,
                                           });
         if (!ret.ok()) {
             if (!_transceiver.ready()) {
-                _log_w("SPI master hello transfer failed turn=%lu: " ERR_FMT,
-                       static_cast<unsigned long>(_turnCount), ERR_ARG(ret));
+                _handshakeTransferFailures++;
+                if (_handshakeTransferFailures == 1 ||
+                    _handshakeTransferFailures == 128 ||
+                    (_handshakeTransferFailures > 128 &&
+                     (_handshakeTransferFailures % 2048) == 0)) {
+                    _log_w("%s: SPI master hello transfer failed turn=%lu "
+                           "failures=%lu: " ERR_FMT,
+                           this->config().task.name,
+                           static_cast<unsigned long>(_turnCount),
+                           static_cast<unsigned long>(
+                               _handshakeTransferFailures),
+                           ERR_ARG(ret));
+                }
+                if (_isRecoverableTransferError(ret)) {
+                    return OK();
+                }
+                return ret;
             }
-            return ret == ERR(CoreError, Timeout) ? OK() : ret;
+            if (_isRecoverableTransferError(ret)) {
+                FAIL_IF_ERR_FWD(_resetLink(ret),
+                                "Failed to reset SPI master link after "
+                                "transfer error");
+                return OK();
+            }
+            return ret;
         }
+        _handshakeTransferFailures = 0;
 
         const auto receivedAtUs = ::platform::get_time_us();
         metrics().addTurn();
@@ -362,6 +391,29 @@ class Master : public HasLifecycle<Master, MasterConfig>,
             return parseRet;
         }
         if (!peerHadSlot) {
+            if (!_transceiver.ready()) {
+                _handshakeNoSlotTurns++;
+                if (_handshakeNoSlotTurns == 128 ||
+                    (_handshakeNoSlotTurns > 128 &&
+                     (_handshakeNoSlotTurns % 2048) == 0)) {
+                    _log_w("%s: SPI master handshake has no protocol slots "
+                           "turn=%lu noSlot=%lu txLen=%u txFirst=%02x "
+                           "txSecond=%02x rxLen=%u rxFirst=%02x "
+                           "rxSecond=%02x attention=%u",
+                           this->config().task.name,
+                           static_cast<unsigned long>(_turnCount),
+                           static_cast<unsigned long>(_handshakeNoSlotTurns),
+                           static_cast<unsigned>(tx.size()),
+                           std::to_integer<unsigned>(tx[0]),
+                           tx.size() > 1 ? std::to_integer<unsigned>(tx[1])
+                                         : 0U,
+                           static_cast<unsigned>(rx.size()),
+                           std::to_integer<unsigned>(rx[0]),
+                           rx.size() > 1 ? std::to_integer<unsigned>(rx[1])
+                                         : 0U,
+                           static_cast<unsigned>(attentionRequested));
+                }
+            }
             if (this->config().noSlotBackoffUs > 0) {
                 _noSlotBackoffUntilUs =
                     receivedAtUs +
@@ -369,6 +421,7 @@ class Master : public HasLifecycle<Master, MasterConfig>,
             }
             return OK();
         }
+        _handshakeNoSlotTurns = 0;
         _noSlotBackoffUntilUs = 0;
         if (wasReady &&
             _transceiver.lastReceivedSequence() != previousRxSequence) {
@@ -382,8 +435,9 @@ class Master : public HasLifecycle<Master, MasterConfig>,
         }
         if (helloResynced) {
             metrics().addLinkRecovery(LinkRecoveryReason::HelloResync);
-            _log_w("SPI master link recovery reason=%s; dropping stale "
+            _log_w("%s: SPI master link recovery reason=%s; dropping stale "
                    "pending operations",
+                   this->config().task.name,
                    link_recovery_reason_name(
                        LinkRecoveryReason::HelloResync));
             FAIL_IF_ERR_FWD(_failQueuedWrites(ERR(WireError, SequenceError)),
@@ -392,12 +446,14 @@ class Master : public HasLifecycle<Master, MasterConfig>,
                             "Failed to fail stale SPI master pending writes");
         }
         if (!_transceiver.ready()) {
-            _log_i("SPI master hello turn accepted turn=%lu state=%u",
+            _log_i("%s: SPI master hello turn accepted turn=%lu state=%u",
+                   this->config().task.name,
                    static_cast<unsigned long>(_turnCount),
                    static_cast<unsigned>(_transceiver.state()));
         }
         if (!wasReady && _transceiver.ready()) {
-            _log_i("SPI master handshake complete");
+            _log_i("%s: SPI master handshake complete",
+                   this->config().task.name);
             _recordPeerProgress(nowMs);
         }
         if (!_transceiver.ready()) {
@@ -424,6 +480,17 @@ class Master : public HasLifecycle<Master, MasterConfig>,
     [[nodiscard]] bool _hasPendingWrites() const {
         for (const auto &pending : _pendingWrites) {
             if (pending.occupied) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    [[nodiscard]] bool _pendingAckPollDue(uint32_t nowMs) const {
+        for (const auto &pending : _pendingWrites) {
+            if (pending.occupied &&
+                static_cast<uint32_t>(nowMs - pending.sentAtMs) >=
+                    pendingAckPollMs) {
                 return true;
             }
         }
@@ -665,8 +732,9 @@ class Master : public HasLifecycle<Master, MasterConfig>,
         metrics().addReset();
         const auto reason = link_recovery_reason_from_error(error);
         metrics().addLinkRecovery(reason);
-        _log_w("SPI master link reset reason=%s error=" ERR_FMT,
-               link_recovery_reason_name(reason), ERR_ARG(error));
+        _log_w("%s: SPI master link reset reason=%s error=" ERR_FMT,
+               this->config().task.name, link_recovery_reason_name(reason),
+               ERR_ARG(error));
         auto ret = OK();
         ret.combine(_failQueuedWrites(error));
         ret.combine(_failPendingWrites(error));
@@ -677,6 +745,8 @@ class Master : public HasLifecycle<Master, MasterConfig>,
         _lastHandshakeAttemptMs = ::platform::get_time();
         _nextHeartbeatAtMs = 0;
         _noSlotBackoffUntilUs = 0;
+        _handshakeNoSlotTurns = 0;
+        _handshakeTransferFailures = 0;
         _queuedWriteSinceUs.store(0, std::memory_order_relaxed);
         _missedHeartbeatResponses = 0;
         return ret;
@@ -700,7 +770,8 @@ class Master : public HasLifecycle<Master, MasterConfig>,
             return OK();
         }
 
-        _log_w("Resetting SPI master link after %u missed heartbeats",
+        _log_w("%s: resetting SPI master link after %u missed heartbeats",
+               this->config().task.name,
                static_cast<unsigned>(_missedHeartbeatResponses));
         return _resetLink(ERR(CoreError, Timeout));
     }
@@ -729,10 +800,19 @@ class Master : public HasLifecycle<Master, MasterConfig>,
 
     static constexpr uint32_t handshakeRetryMs = 500;
     static constexpr uint32_t heartbeatIntervalMs = 1000;
+    static constexpr uint32_t pendingAckPollMs = 10;
     static constexpr uint32_t pendingWriteTimeoutMs = 250;
     static constexpr uint8_t heartbeatMissLimit = 3;
     static constexpr size_t txQueueDepth = 8;
     static constexpr size_t pendingWriteDepth = 8;
+
+    [[nodiscard]] static bool _isRecoverableTransferError(ReturnCode error) {
+        return error == ERR(CoreError, Timeout) ||
+               error == ERR(CoreError, InvalidState) ||
+               error == ERR(CoreError, OperationFailed) ||
+               error == ERR(CoreError, NotFinished) ||
+               error == ERR(CoreError, Unknown);
+    }
 
     Platform::SpiMasterBus _bus{};
     Transceiver<4096> _transceiver{};
@@ -751,6 +831,8 @@ class Master : public HasLifecycle<Master, MasterConfig>,
     uint32_t _lastHandshakeAttemptMs = 0;
     uint32_t _nextHeartbeatAtMs = 0;
     uint32_t _turnCount = 0;
+    uint32_t _handshakeNoSlotTurns = 0;
+    uint32_t _handshakeTransferFailures = 0;
     uint8_t _missedHeartbeatResponses = 0;
     Totem::Wire::WriteRequestHandle _nextWriteHandle = 1;
 };

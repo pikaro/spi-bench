@@ -37,6 +37,11 @@ class SubscriptionManager {
     using Topic = typename Spec::Topic;
     using EventPool = Pool<PubSubEvent, Spec::Limits::maxMessageQueueSize>;
 
+    enum class EventSendMode : uint8_t {
+        Required,
+        BestEffortReplay,
+    };
+
     struct SubscriptionSlot {
         TopicId topic;
         std::atomic<uint8_t> subscriberCount;
@@ -185,22 +190,35 @@ class SubscriptionManager {
                 .topic = slot.topic,
                 .type = SubscribeEventType::Register,
             };
-            ret.combine(_sendPubSubEvent(event));
+            ret.combine(
+                _sendPubSubEvent(event, EventSendMode::BestEffortReplay));
         }
         return ret;
     }
 
   private:
-    ReturnCode _sendPubSubEvent(const PubSubEvent &event) {
+    ReturnCode _sendPubSubEvent(
+        const PubSubEvent &event,
+        EventSendMode mode = EventSendMode::Required) {
         _log_d(
             "SubscriptionManager: emitting control event %u for topic " SV_FMT,
             static_cast<unsigned>(event.type),
             SV_ARG(magic_enum::enum_name(static_cast<Topic>(event.topic))));
-        FAIL_IF_UNEXPECTED_FWD(messageId,
-                               _eventPool.store(
-                                   event,
-                                   _nextMessageIdCallback(_pubSubNode)),
-                               "Failed to store subscription event");
+        auto messageIdResult =
+            _eventPool.store(event, _nextMessageIdCallback(_pubSubNode));
+        if (!messageIdResult) {
+            if (mode == EventSendMode::BestEffortReplay &&
+                _isReplayBackpressure(messageIdResult.error())) {
+                _log_w("SubscriptionManager: skipped subscription replay for "
+                       "topic " SV_FMT " after local backpressure: " ERR_FMT,
+                       SV_ARG(magic_enum::enum_name(
+                           static_cast<Topic>(event.topic))),
+                       ERR_ARG(messageIdResult.error()));
+                return OK();
+            }
+            FAIL(messageIdResult.error(), "Failed to store subscription event");
+        }
+        const auto messageId = *messageIdResult;
         auto envelopeResult = Envelope::make<PubSubEvent>({
             .owner = &_eventPool,
             .topic = Topic::PubSub,
@@ -216,11 +234,31 @@ class SubscriptionManager {
             "Failed to create envelope for subscription event");
         log_trace_packet("subscriptions.publish", envelope.header,
                          "SubscriptionManager");
-        FAIL_IF_ERR_FWD(
-            _publishCallback(_pubSubNode, envelope),
-            "Failed to publish event for topic " SV_FMT,
-            SV_ARG(magic_enum::enum_name(static_cast<Topic>(event.topic))));
+        auto publishRet = _publishCallback(_pubSubNode, envelope);
+        if (!publishRet.ok()) {
+            const auto releaseRet = envelope.ack();
+            if (mode == EventSendMode::BestEffortReplay &&
+                _isReplayBackpressure(publishRet)) {
+                _log_w("SubscriptionManager: skipped subscription replay for "
+                       "topic " SV_FMT " after publish backpressure: "
+                       ERR_FMT,
+                       SV_ARG(magic_enum::enum_name(
+                           static_cast<Topic>(event.topic))),
+                       ERR_ARG(publishRet));
+                return releaseRet;
+            }
+            FAIL_IF_ERR_FWD(releaseRet,
+                            "Failed to release failed subscription event");
+            FAIL(publishRet, "Failed to publish event for topic " SV_FMT,
+                 SV_ARG(magic_enum::enum_name(
+                     static_cast<Topic>(event.topic))));
+        }
         return OK();
+    }
+
+    [[nodiscard]] static bool _isReplayBackpressure(ReturnCode error) {
+        return error == ERR(Overflow) || error == ERR(CoreError, Overflow) ||
+               error == ERR(Timeout) || error == ERR(CoreError, Timeout);
     }
 
     // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)

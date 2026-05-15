@@ -1,0 +1,159 @@
+#!/usr/bin/env python3
+
+import argparse
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+
+def repo_root() -> Path:
+    return Path(
+        subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip()
+    )
+
+
+def nm_candidates() -> list[Path]:
+    home = Path.home()
+    return [
+        home / ".platformio/packages/toolchain-xtensa-esp-elf/bin/xtensa-esp-elf-nm",
+        home / ".platformio/packages/toolchain-xtensa-esp-elf/bin/xtensa-esp32-elf-nm",
+        home / ".platformio/packages/toolchain-riscv32-esp/bin/riscv32-esp-elf-nm",
+        home / ".platformio/packages/toolchain-riscv32-esp@14.2.0+20251107/bin/riscv32-esp-elf-nm",
+    ]
+
+
+def run_nm(elf: Path) -> str:
+    for nm in nm_candidates():
+        if not nm.exists():
+            continue
+        proc = subprocess.run(
+            [str(nm), "-C", "-S", "--size-sort", "--defined-only", str(elf)],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if proc.returncode == 0:
+            return proc.stdout
+    raise RuntimeError("no supported ESP nm executable could read the firmware ELF")
+
+
+def parse_symbols(nm_output: str) -> list[tuple[int, str, str]]:
+    symbols: list[tuple[int, str, str]] = []
+    needles = (
+        "staticTaskStorage",
+        "StaticTaskStorage",
+        "taskStack",
+    )
+    for line in nm_output.splitlines():
+        parts = line.split(maxsplit=3)
+        if len(parts) < 4:
+            continue
+        _, size_hex, kind, name = parts
+        if kind not in "BbDdVvUu":
+            continue
+        if not any(needle in name for needle in needles):
+            continue
+        try:
+            size = int(size_hex, 16)
+        except ValueError:
+            continue
+        symbols.append((size, kind, name))
+    return symbols
+
+
+def parse_stack_constants(root: Path) -> dict[str, int]:
+    header = root / "include" / "StaticConfig" / "Stacks.hpp"
+    constants: dict[str, int] = {}
+    pattern = re.compile(r"inline constexpr uint32_t (\w+) = ([0-9']+);")
+    for match in pattern.finditer(header.read_text()):
+        constants[match.group(1)] = int(match.group(2).replace("'", ""))
+    return constants
+
+
+def configured_tasks(env: str) -> list[tuple[str, str]]:
+    common = [
+        ("Aggregator -> Output", "loggingAggregator"),
+        ("Logging::ErrorJournal -> LogJournal", "loggingErrorJournal"),
+        ("CommandCtrl -> Command", "command"),
+    ]
+    per_env = {
+        "master": [
+            ("Rs485::Master -> Rs485MasterTask", "rs485Master"),
+            ("Spi::Master -> SpiGpu0Task", "spiMaster"),
+            ("Spi::Master -> SpiGpu1Task", "spiMaster"),
+            ("Spi::Master -> SpiMediaTask", "spiMaster"),
+            ("PubSub::Node -> PubSubStar", "pubSubNode"),
+        ],
+        "media": [
+            ("LedPwm -> BeatLed", "ledPwm"),
+            ("Audio::FftDisplay -> FftDisplay", "audioFftDisplay"),
+            ("Audio::FftAnalyzer -> AudioFft", "audioFft"),
+            ("Spi::Slave -> SpiSlaveTask", "spiSlave"),
+            ("PubSub::Node -> PubSubStar", "pubSubNode"),
+        ],
+        "gpu0": [
+            ("LedDisplay -> LedDisplay", "ledDisplay"),
+            ("Spi::Slave -> SpiSlaveTask", "spiSlave"),
+            ("PubSub::Node -> PubSubStar", "pubSubNode"),
+        ],
+        "gpu1": [
+            ("LedDisplay -> LedDisplay", "ledDisplay"),
+            ("Spi::Slave -> SpiSlaveTask", "spiSlave"),
+            ("PubSub::Node -> PubSubStar", "pubSubNode"),
+        ],
+        "io": [
+            ("Rs485::Slave -> Rs485SlaveTask", "rs485Slave"),
+            ("LedPwm -> LedPwm", "ledPwm"),
+            ("Buttons -> Buttons", "buttons"),
+            ("PubSub::Node -> PubSubStar", "pubSubNode"),
+        ],
+    }
+    return common + per_env.get(env, [])
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Report configured static task stack reservations and, when an ELF "
+            "is available, matching firmware symbols."
+        )
+    )
+    parser.add_argument("env", help="PlatformIO environment, e.g. master")
+    args = parser.parse_args()
+
+    root = repo_root()
+    constants = parse_stack_constants(root)
+    tasks = configured_tasks(args.env)
+    if tasks:
+        total = 0
+        print(f"Configured static task stacks for {args.env}:")
+        for name, constant in tasks:
+            size = constants[constant]
+            total += size
+            print(f"{size:8d} {name}")
+        print(f"Total configured stack bytes: {total}")
+    else:
+        print(f"No configured task-stack table for {args.env}")
+
+    elf = root / ".pio" / "build" / args.env / "firmware.elf"
+    if not elf.exists():
+        print(f"\nFirmware ELF not found: {elf}")
+        return 0
+
+    symbols = parse_symbols(run_nm(elf))
+    if symbols:
+        symbol_total = sum(size for size, _, _ in symbols)
+        print(f"\nStatic task-storage symbols for {args.env}: {symbol_total} bytes")
+        for size, kind, name in sorted(symbols, reverse=True):
+            print(f"{size:8d} {kind} {name}")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(1)

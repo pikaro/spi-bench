@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Platform/PlatformSelect.hpp"
+#include "StaticConfig/Stacks.hpp"
 #include "TaskController/Interfaces/Config.hpp"
 #include "Wire/Spi/Interfaces/Types.hpp"
 #include <cstdint>
@@ -37,7 +38,7 @@ struct MasterConfig {
     Totem::TaskController::Config task{
         .name = "SpiMasterTask",
         .priority = 2,
-        .stackSize = 8192,
+        .stackSize = StaticConfig::TaskStacks::spiMaster,
         .intervalMs = 100,
         .noCatchup = true,
         .useNotify = true,

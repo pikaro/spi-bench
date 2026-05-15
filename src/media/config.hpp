@@ -7,6 +7,7 @@
 #include "Data/Peripherals.hpp"
 #include "LedPwm/Interfaces/Config.hpp"
 #include "Platform/Hardware.hpp"
+#include "StaticConfig/Stacks.hpp"
 #include "TaskController/Interfaces/Config.hpp"
 #include "Wire/I2C/Interfaces/DisplayConfig.hpp"
 #include "Wire/I2C/Interfaces/MasterConfig.hpp"
@@ -26,7 +27,7 @@ inline Totem::LedPwm::Config ledPwmConfig{
             .name = "BeatLed",
             .priority = 1,
             .core = Totem::TaskController::Config::CorePreference::specific(1),
-            .stackSize = 4096,
+            .stackSize = Totem::StaticConfig::TaskStacks::ledPwm,
             .intervalMs = 5,
             .noCatchup = true,
         },
@@ -69,7 +70,7 @@ inline Totem::Audio::FftDisplayConfig fftDisplayVisualizerConfig{
             .name = "FftDisplay",
             .priority = 1,
             .core = Totem::TaskController::Config::CorePreference::specific(1),
-            .stackSize = 3072,
+            .stackSize = Totem::StaticConfig::TaskStacks::audioFftDisplay,
             .intervalMs = 50,
             .noCatchup = true,
         },
@@ -78,8 +79,8 @@ inline Totem::Audio::FftDisplayConfig fftDisplayVisualizerConfig{
 inline Totem::Audio::AudioSourceConfig audioSourceConfig{
 #if TOTEM_AUDIO_USE_BTSTACK_A2DP
     .kind = Totem::Audio::AudioSourceKind::BtstackA2DP,
-#else
-    .kind = Totem::Audio::AudioSourceKind::A2DP,
+#els
+    .kind = Totem::Audio::AudioSourceKind::I2S,
 #endif
     .i2s =
         Totem::Audio::I2SSourceConfig{
@@ -127,7 +128,7 @@ inline Totem::Audio::FftAnalyzerConfig fftAnalyzerConfig{
             .name = "AudioFft",
             .priority = 2,
             .core = Totem::TaskController::Config::CorePreference::specific(1),
-            .stackSize = 3072,
+            .stackSize = Totem::StaticConfig::TaskStacks::audioFft,
             .intervalMs = 4,
             .noCatchup = true,
         },
@@ -150,9 +151,9 @@ inline Totem::Wire::Spi::SlaveConfig spiSlaveConfig{
     .task =
         {
             .name = "SpiSlaveTask",
-            .priority = 2,
+            .priority = 4,
             .core = Totem::TaskController::Config::CorePreference::specific(0),
-            .stackSize = 8192,
+            .stackSize = Totem::StaticConfig::TaskStacks::spiSlave,
             .intervalMs = 10,
             .noCatchup = true,
             .useNotify = true,
@@ -161,3 +162,5 @@ inline Totem::Wire::Spi::SlaveConfig spiSlaveConfig{
         },
     .attentionPin = Pin::GPIO17,
 };
+
+// statusled GPIO16

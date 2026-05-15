@@ -14,6 +14,7 @@
 #include "Services/Clock.hpp"
 #include "Services/PubSub.hpp"
 #include "Setups/PubSubTestMessage.hpp"
+#include "StaticConfig/Stacks.hpp"
 #include "TaskController/Interfaces/IRegistry.hpp"
 #include "Types/Error.hpp"
 #include <array>
@@ -32,6 +33,7 @@ using BaseTransportDeps =
     Totem::PubSubBackend::Transports::BaseTransportDependencies;
 
 inline constexpr int64_t targetLatencyUs = 10000;
+inline constexpr int64_t maxMeasuredLatencyUs = 1000000;
 inline constexpr size_t maxSubscribeTopics = 4;
 inline constexpr std::array<int64_t, 17> latencyBucketUpperUs{
     500,  1000, 2000, 3000, 4000,  5000,  6000,  7000, 8000,
@@ -91,15 +93,25 @@ inline constexpr std::array<const char *, maxSubscribeTopics>
 struct LatencyStats {
     uint32_t received = 0;
     uint32_t receivedBytes = 0;
+    uint32_t latencySamples = 0;
+    uint32_t invalidLatencySamples = 0;
     uint32_t targetMisses = 0;
     int64_t minLatencyUs = std::numeric_limits<int64_t>::max();
     int64_t maxLatencyUs = std::numeric_limits<int64_t>::min();
     int64_t totalLatencyUs = 0;
     std::array<uint32_t, latencyBucketUpperUs.size() + 1> latencyBuckets{};
 
-    void recordLatency(int64_t latencyUs, uint16_t payloadSize) {
+    void recordLatency(int64_t latencyUs, uint16_t payloadSize,
+                       bool latencyValid) {
         ++received;
         receivedBytes += payloadSize;
+        if (!latencyValid || latencyUs < 0 ||
+            latencyUs > maxMeasuredLatencyUs) {
+            ++invalidLatencySamples;
+            return;
+        }
+
+        ++latencySamples;
         if (latencyUs > targetLatencyUs) {
             ++targetMisses;
         }
@@ -122,26 +134,26 @@ struct LatencyStats {
     }
 
     [[nodiscard]] int64_t averageLatencyUs() const {
-        return received == 0
+        return latencySamples == 0
                    ? 0
-                   : totalLatencyUs / static_cast<int64_t>(received);
+                   : totalLatencyUs / static_cast<int64_t>(latencySamples);
     }
 
     [[nodiscard]] int64_t minOrZero() const {
-        return received == 0 ? 0 : minLatencyUs;
+        return latencySamples == 0 ? 0 : minLatencyUs;
     }
 
     [[nodiscard]] int64_t maxOrZero() const {
-        return received == 0 ? 0 : maxLatencyUs;
+        return latencySamples == 0 ? 0 : maxLatencyUs;
     }
 
     [[nodiscard]] int64_t percentileUs(uint32_t percentile) const {
-        if (received == 0) {
+        if (latencySamples == 0) {
             return 0;
         }
 
         auto rank =
-            static_cast<uint32_t>((static_cast<uint64_t>(received) *
+            static_cast<uint32_t>((static_cast<uint64_t>(latencySamples) *
                                        percentile +
                                    99U) /
                                   100U);
@@ -182,12 +194,13 @@ struct AppStats {
     LatencyStats unknownRoute{};
 
     void recordLatency(size_t routeIndex, int64_t latencyUs,
-                       uint16_t payloadSize) {
+                       uint16_t payloadSize, bool latencyValid) {
         if (routeIndex < routes.size()) {
-            routes[routeIndex].recordLatency(latencyUs, payloadSize);
+            routes[routeIndex].recordLatency(latencyUs, payloadSize,
+                                             latencyValid);
             return;
         }
-        unknownRoute.recordLatency(latencyUs, payloadSize);
+        unknownRoute.recordLatency(latencyUs, payloadSize, latencyValid);
     }
 };
 
@@ -211,13 +224,15 @@ struct Consumer {
 
         const auto &clock = ClockService::get();
         const auto nowUs = clock.nowUs();
-        const auto latencyUs =
-            !clock.synced() || envelope.header.timestampUs == 0
-                ? 0
-                : nowUs - static_cast<int64_t>(envelope.header.timestampUs);
+        const auto latencyValid =
+            clock.synced() && envelope.header.timestampUs != 0;
+        const auto latencyUs = latencyValid
+                                   ? nowUs - static_cast<int64_t>(
+                                                 envelope.header.timestampUs)
+                                   : 0;
         if (stats != nullptr) {
             stats->recordLatency(routeIndex(envelope), latencyUs,
-                                 envelope.header.payloadSize);
+                                 envelope.header.payloadSize, latencyValid);
         }
         return OK();
     }
@@ -263,7 +278,7 @@ inline void subscribeConfiguredTopics(
     const char *taskName, uint32_t intervalMs = 5,
     Totem::TaskController::Config::CorePreference core =
         Totem::TaskController::Config::CorePreference::any(),
-    uint32_t stackSize = 8192) {
+    uint32_t stackSize = Totem::StaticConfig::TaskStacks::pubSubNode) {
     return Totem::PubSubBackend::Config{
         .task =
             {
@@ -298,15 +313,23 @@ makeBaseDeps(PubSubNode &node, uint8_t transportId, const char *name) {
 inline void reportLatencyStats(const char *name, const char *route,
                                const LatencyStats &stats,
                                uint32_t elapsedMs) {
-    _log_i("%s route %s: rx=%" PRIu32 "/s rxBytes=%" PRIu32
-           "/s latencyUs[min/avg/p50/p90/p99/max]=%" PRId64 "/%" PRId64
-           "/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
-           " targetMiss=%" PRIu32,
+    if (stats.received > 0 && stats.latencySamples == 0) {
+        _log_i("%s route %s: rx=%" PRIu32 "/s bytes=%" PRIu32
+               "/s lat=invalid miss=%" PRIu32 " invalid=%" PRIu32,
+               name, route, ratePerSecond(stats.received, elapsedMs),
+               ratePerSecond(stats.receivedBytes, elapsedMs),
+               stats.targetMisses, stats.invalidLatencySamples);
+        return;
+    }
+
+    _log_i("%s route %s: rx=%" PRIu32 "/s bytes=%" PRIu32
+           "/s lat=%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64 "/%"
+           PRId64 "/%" PRId64 " miss=%" PRIu32 " invalid=%" PRIu32,
            name, route, ratePerSecond(stats.received, elapsedMs),
            ratePerSecond(stats.receivedBytes, elapsedMs), stats.minOrZero(),
            stats.averageLatencyUs(), stats.percentileUs(50),
            stats.percentileUs(90), stats.percentileUs(99), stats.maxOrZero(),
-           stats.targetMisses);
+           stats.targetMisses, stats.invalidLatencySamples);
 }
 
 inline void reportAppStats(const char *name, const AppStats &period,

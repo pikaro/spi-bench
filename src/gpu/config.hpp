@@ -2,6 +2,7 @@
 
 #include "Data.hpp"
 #include "Platform/Hardware.hpp"
+#include "StaticConfig/Stacks.hpp"
 #include "Wire/Spi/Interfaces/SlaveConfig.hpp"
 #include "Wire/Spi/Interfaces/Types.hpp"
 
@@ -52,8 +53,8 @@ inline Totem::Wire::Spi::SlaveConfig spiSlaveConfig{
     .task =
         {
             .name = "SpiSlaveTask",
-            .priority = 2,
-            .stackSize = 8192,
+            .priority = 4,
+            .stackSize = Totem::StaticConfig::TaskStacks::spiSlave,
             .intervalMs = 10,
             .noCatchup = true,
             .useNotify = true,
@@ -62,3 +63,5 @@ inline Totem::Wire::Spi::SlaveConfig spiSlaveConfig{
         },
     .attentionPin = gpuAttentionPin(),
 };
+
+// Strobe GPIO10

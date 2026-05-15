@@ -72,6 +72,7 @@ struct TaskRuntimeSnapshot {
     float runTimeDeltaPct;
     uint32_t stackLowestFree;
     float stackUsedPct;
+    TaskAllocation allocation = TaskAllocation::Dynamic;
     const Config *config = nullptr;
 };
 

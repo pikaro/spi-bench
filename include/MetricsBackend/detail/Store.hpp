@@ -124,7 +124,7 @@ class Store {
     getGroupKeyByName(const char *metricGroupName) const {
         auto ret = _metricGroupDirectory.snapshotKeys(
             [&](const auto & /*unused*/, const auto &entry) {
-                return (std::strcmp(entry.desc->name, metricGroupName) == 0);
+                return (std::strcmp(entry.desc.name, metricGroupName) == 0);
             },
             {.min = 1, .max = 1});
         FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(

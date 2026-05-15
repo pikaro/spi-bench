@@ -25,7 +25,8 @@
 
 #define INTERNAL_START_TASK(controllerName, taskName, configName)              \
     FAIL_IF_ERR_FWD(                                                           \
-        this->_taskController.startTask(taskName, this->config().configName),  \
+        this->_taskController.startTask(                                       \
+            taskName, this->_taskConfig(this->config().configName)),           \
         "Failed to start task for %s", controllerName);
 
 #define INTERNAL_START_TASK_DEFAULT_TASK(controllerName, configName)           \

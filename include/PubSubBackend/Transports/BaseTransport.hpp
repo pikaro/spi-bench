@@ -195,9 +195,28 @@ class BaseTransport : public HasLifecycle<BaseTransport>,
                 _log_d(SV_FMT ": sending %zu bytes for " MAGIC_PUBSUB_SV_FMT,
                        SV_ARG(_instanceName), frameSize,
                        MAGIC_PUBSUB_SV_ARG(item->envelope.header));
-                FAIL_IF_ERR_FWD(
-                    _sendCallback(_transport, item->envelope.header, frame),
-                    "Failed to process frame from send queue");
+                auto sendRet =
+                    _sendCallback(_transport, item->envelope.header, frame);
+                if (!sendRet.ok()) {
+                    _log_w(SV_FMT
+                           ": dropping PubSub message %u after send failed: "
+                           ERR_FMT,
+                           SV_ARG(_instanceName),
+                           item->envelope.header.messageId, ERR_ARG(sendRet));
+                    if (_canAckFrameHandle(item)) {
+                        auto ackRet = _ack(item->envelope);
+                        if (!ackRet.ok()) {
+                            _log_w(SV_FMT
+                                   ": failed PubSub message %u was not "
+                                   "tracked for release: " ERR_FMT,
+                                   SV_ARG(_instanceName),
+                                   item->envelope.header.messageId,
+                                   ERR_ARG(ackRet));
+                        }
+                    }
+                    ++count;
+                    continue;
+                }
                 FAIL_IF_ERR_FWD(_ack(item->envelope),
                                 "Failed to acknowledge frame with transport");
                 ++count;

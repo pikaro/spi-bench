@@ -1,5 +1,6 @@
 #pragma once
 
+#include "StaticConfig/Stacks.hpp"
 #include "TaskController/Interfaces/Config.hpp"
 #include <array>
 #include <cstddef>
@@ -81,7 +82,7 @@ struct LedDisplayConfig {
         .name = "LedDisplay",
         .priority = 3,
         .core = Totem::TaskController::Config::CorePreference::specific(1),
-        .stackSize = 8192,
+        .stackSize = Totem::StaticConfig::TaskStacks::ledDisplay,
         .intervalMs = taskIntervalMs,
         .noCatchup = true,
         .useNotify = true,

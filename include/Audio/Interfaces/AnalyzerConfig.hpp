@@ -2,6 +2,7 @@
 
 #include "Audio/Interfaces/BeatTrackerConfig.hpp"
 #include "Audio/Interfaces/Types.hpp"
+#include "StaticConfig/Stacks.hpp"
 #include "TaskController/Interfaces/Config.hpp"
 #include <cmath>
 #include <cstddef>
@@ -25,7 +26,7 @@ struct FftAnalyzerConfig {
     Totem::TaskController::Config task{
         .name = "AudioFft",
         .priority = 4,
-        .stackSize = 8192,
+        .stackSize = StaticConfig::TaskStacks::audioFft,
         .intervalMs = 2,
         .noCatchup = true,
     };

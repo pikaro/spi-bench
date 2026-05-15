@@ -1,17 +1,19 @@
 #include "Clock/Facade.hpp"
+#include "Data/Nodes.hpp"
 #include "LedDisplay/Facade.hpp"
 #include "Macros/Facade.hpp"
 #include "Platform/PlatformSelect.hpp"
+#include "Setups/ClockSync.hpp"
 #include "Setups/Core.hpp"
 #include "Setups/PubSubStarTest.hpp"
 #include "Wire/Spi/Facade.hpp"
 #include "config.hpp"
-#include <cstdint>
 
 CoreSetup core{};
 Totem::LedDisplay::Display ledDisplay{core.taskRegistry};
 Totem::Wire::Spi::Slave spiSlave{core.taskRegistry};
 Totem::Clock::Clock clockSlave{Totem::Clock::Clock::Role::Slave};
+ClockSyncSetup<Totem::Wire::Spi::Slave> clockSync{clockSlave, spiSlave};
 constexpr auto gpuStarRole() {
     using Role = PubSubStarSpiEdgeSetup<Totem::Wire::Spi::Slave>::Role;
     if constexpr (gpuNodeName == Totem::Data::NodeName::GPUNode1) {
@@ -39,27 +41,14 @@ extern "C" {
 void app_main(void);
 }
 
-uint32_t epoch = 0;
-
 void app_main() {
     setup();
     for (;;) {
         const auto nowMs = ::platform::get_time();
         (void)core.work(nowMs);
         (void)pubSubStar.work(nowMs);
-
-        if (spiSlave.ready() && (!clockSlave.synced() || epoch % 10000 == 0) &&
-            !clockSlave.syncing()) {
-            const auto syncResult = clockSlave.sync(spiSlave);
-            if (!syncResult.ok()) {
-                _log_e("Clock sync request failed: " ERR_FMT,
-                       ERR_ARG(syncResult));
-            } else {
-                _log_i("Clock sync requested");
-            }
-        }
+        (void)clockSync.work(nowMs);
 
         ::platform::delay(::platform::ms_to_ticks(1));
-        epoch++;
     }
 }

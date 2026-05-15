@@ -2,22 +2,44 @@
 
 #include "Platform/PlatformSelect.hpp"
 #include "StaticConfig/Logging.hpp"
+#include "StaticConfig/Stacks.hpp"
 #include "TaskController/Interfaces/Config.hpp"
 #include <cstddef>
 #include <cstdint>
 
 namespace Totem::LoggingBackend {
 
+enum class RingBufferAllocation : uint8_t {
+    Static,
+    Dynamic,
+};
+
 struct AggregatorConfig {
-    size_t ringBufferSize = 100;
+    static constexpr size_t maxRingBufferSize =
+        LoggingConfig::aggregatorRingBufferRecords;
+    static constexpr bool hasStaticRingBufferStorage =
+        LoggingConfig::aggregatorRingBufferStatic;
+
+    size_t ringBufferSize = maxRingBufferSize;
     ::platform::Tick sendTimeoutMs = 0;
     ::platform::Tick receiveTimeoutMs = 5;
+    RingBufferAllocation ringBufferAllocation =
+        hasStaticRingBufferStorage ? RingBufferAllocation::Static
+                                   : RingBufferAllocation::Dynamic;
 
-    [[nodiscard]] bool validate() const { return ringBufferSize > 0; }
+    [[nodiscard]] bool validate() const {
+        if (ringBufferSize == 0) {
+            return false;
+        }
+        if (ringBufferAllocation == RingBufferAllocation::Dynamic) {
+            return true;
+        }
+        return hasStaticRingBufferStorage && ringBufferSize <= maxRingBufferSize;
+    }
 
     Totem::TaskController::Config task{
         .name = "Output",
-        .stackSize = 4096,
+        .stackSize = StaticConfig::TaskStacks::loggingAggregator,
         .intervalMs = 10,
     };
 };
@@ -52,7 +74,7 @@ struct ErrorJournalConfig {
     Totem::TaskController::Config task{
         .name = "LogJournal",
         .priority = 1,
-        .stackSize = 4096,
+        .stackSize = StaticConfig::TaskStacks::loggingErrorJournal,
         .intervalMs = 1000,
         .noCatchup = true,
         .useNotify = true,

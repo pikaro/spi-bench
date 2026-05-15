@@ -1,8 +1,25 @@
 #pragma once
 
+#include "StaticConfig/Stacks.hpp"
 #include <cstdint>
 
 namespace Totem::TaskController {
+
+enum class TaskAllocation : uint8_t {
+    Static,
+    Dynamic,
+};
+
+struct StaticTaskMemory {
+    void *controlBlock = nullptr;
+    void *stack = nullptr;
+    uint32_t stackSize = 0;
+
+    [[nodiscard]] constexpr bool validFor(uint32_t requestedStackSize) const {
+        return controlBlock != nullptr && stack != nullptr &&
+               requestedStackSize > 0 && stackSize >= requestedStackSize;
+    }
+};
 
 struct Config {
     struct CorePreference {
@@ -28,6 +45,11 @@ struct Config {
     uint32_t notifyTimeoutMs = 1000;
     uint32_t endTimeoutMs = 5000;
     bool autoRestart = true;
+    TaskAllocation allocation =
+        Totem::StaticConfig::TaskStacks::defaultTaskStorageStatic
+            ? TaskAllocation::Static
+            : TaskAllocation::Dynamic;
+    StaticTaskMemory staticMemory{};
 
     [[nodiscard]] bool validate() const {
         return name != nullptr && priority > 0 && stackSize > 0 &&

@@ -8,6 +8,7 @@
 #include "Platform/PlatformSelect.hpp"
 #include "PubSubBackend/Interfaces/Envelope.hpp"
 #include "Services/PubSub.hpp"
+#include "Setups/ClockSync.hpp"
 #include "Setups/Core.hpp"
 #include "Setups/PubSubStarTest.hpp"
 #include "Types/Error.hpp"
@@ -19,6 +20,7 @@ CoreSetup core{};
 
 Totem::Wire::Rs485::Slave rs485Slave{core.taskRegistry};
 Totem::Clock::Clock clockSlave{Totem::Clock::Clock::Role::Slave};
+ClockSyncSetup<Totem::Wire::Rs485::Slave> clockSync{clockSlave, rs485Slave};
 PubSubStarRs485EdgeSetup<Totem::Wire::Rs485::Slave> pubSubStar{
     core.taskRegistry, rs485Slave};
 
@@ -53,8 +55,6 @@ void setup() {
 extern "C" {
 void app_main(void);
 }
-
-uint32_t epoch = 0;
 
 static ReturnCode
 buttonsCallback(void * /*unused*/,
@@ -102,20 +102,8 @@ void app_main() {
         const auto nowMs = ::platform::get_time();
         (void)core.work(nowMs);
         (void)pubSubStar.work(nowMs);
-
-        if (rs485Slave.ready() &&
-            (!clockSlave.synced() || epoch % 10000 == 0) &&
-            !clockSlave.syncing()) {
-            const auto syncResult = clockSlave.sync(rs485Slave);
-            if (!syncResult.ok()) {
-                _log_e("Clock sync request failed: " ERR_FMT,
-                       ERR_ARG(syncResult));
-            } else {
-                _log_i("Clock sync requested");
-            }
-        }
+        (void)clockSync.work(nowMs);
 
         ::platform::delay(::platform::ms_to_ticks(1));
-        epoch++;
     }
 }

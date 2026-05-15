@@ -12,8 +12,8 @@
 using Pin = platform::Esp32OrigPin;
 
 #elif defined(PLATFORM_ESP32S3_DEVKIT)
-#include "hardware/HardwareESP32S3.hpp"
-using Pin = platform::Esp32S3Pin;
+#include "hardware/HardwareESP32S3Devkit.hpp"
+using Pin = platform::Esp32S3DevkitPin;
 
 #elif defined(PLATFORM_ESP32S3_ZERO)
 #include "hardware/HardwareESP32S3Zero.hpp"

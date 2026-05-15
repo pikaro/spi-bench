@@ -23,7 +23,7 @@ PubSubMultiSpiStarMasterSetup<Totem::Wire::Spi::Master,
                               Totem::Wire::Rs485::Master>
     pubSubStar{core.taskRegistry, spiMasterLowSpeed, spiMasterGpu0,
                spiMasterGpu1, rs485master};
-platform::Gpio levelShifterEnable;
+platform::Gpio ledLevelShifterOutputEnable;
 
 void setup() {
     ::platform::delay(::platform::ms_to_ticks(3000));
@@ -53,8 +53,10 @@ void setup() {
 
     pubSubStar.setup();
 
-    ABORT_IF_ERR(levelShifterEnable.initOutput(levelShifterEnablePin),
-                 "Failed to initialize level shifter enable GPIO");
+    ABORT_IF_ERR(
+        ledLevelShifterOutputEnable.initOutput(
+            ledLevelShifterOutputEnablePin),
+        "Failed to initialize LED level shifter output enable GPIO");
 
     _log_i("Setup complete");
 }
@@ -63,13 +65,13 @@ extern "C" {
 void app_main(void);
 }
 
-uint32_t epoch = 0;
-
 void app_main() {
     setup();
 
-    ABORT_IF_ERR(levelShifterEnable.setLevel(false),
-                 "Failed to disable level shifter at startup");
+    ABORT_IF_ERR(
+        ledLevelShifterOutputEnable.setLevel(
+            ledLevelShifterOutputEnabledLevel),
+        "Failed to enable LED level shifter output");
 
     for (;;) {
         const auto nowMs = ::platform::get_time();
@@ -77,6 +79,5 @@ void app_main() {
         (void)pubSubStar.work(nowMs);
 
         ::platform::delay(::platform::ms_to_ticks(1));
-        epoch++;
     }
 }

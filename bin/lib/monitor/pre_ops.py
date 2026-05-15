@@ -74,16 +74,23 @@ def run_pre_ops(
     env_by_name: dict[str, dict[str, str]],
 ) -> None:
     if config.upload:
-        print("monitor-multi: uploading all requested environments", file=sys.stderr)
-        run_pio_target_stage(root, envs, "upload", env_by_name, parallel=True)
+        print(
+            "monitor-multi: uploading all requested environments sequentially",
+            file=sys.stderr,
+        )
+        run_pio_target_stage(root, envs, "upload", env_by_name)
 
     if config.uploadfs:
         print(
-            "monitor-multi: uploading filesystems for all requested environments",
+            "monitor-multi: uploading filesystems for all requested "
+            "environments sequentially",
             file=sys.stderr,
         )
-        run_pio_target_stage(root, envs, "uploadfs", env_by_name, parallel=True)
+        run_pio_target_stage(root, envs, "uploadfs", env_by_name)
 
     if config.reset:
-        print("monitor-multi: resetting all requested environments", file=sys.stderr)
-        run_pio_target_stage(root, envs, "reset", env_by_name, parallel=True)
+        print(
+            "monitor-multi: resetting all requested environments sequentially",
+            file=sys.stderr,
+        )
+        run_pio_target_stage(root, envs, "reset", env_by_name)

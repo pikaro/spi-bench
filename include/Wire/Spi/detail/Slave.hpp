@@ -273,6 +273,8 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
                         "Failed to queue SPI slave DMA transfer");
         _queuedRxSize = rx.size();
         _queuedTxSize = tx.size();
+        _queuedTxFirst = tx.size() > 0 ? std::to_integer<uint8_t>(tx[0]) : 0;
+        _queuedTxSecond = tx.size() > 1 ? std::to_integer<uint8_t>(tx[1]) : 0;
         _transferQueued = true;
         _queueCount++;
         return OK();
@@ -549,6 +551,7 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
         _transceiver.setAutoHelloResponse(true);
         _transceiver.registerResponseCallback(this, _onResponseFrame);
         _transceiver.registerAckCallback(this, _onAckFrame);
+        _handshakeNoSlotTransfers = 0;
         return ret;
     }
 
@@ -615,6 +618,7 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
         }
         auto rx = std::span<const std::byte>(_rxBuffer.data(), bytes);
         const bool wasReady = _transceiver.ready();
+        const bool peerHadSlot = _transceiver.hasProtocolPreamble(rx);
         auto ret = _transceiver.parseRx(rx, completedAtUs);
         const bool helloResynced = _transceiver.consumeHelloResynced();
         if (!ret.ok()) {
@@ -631,6 +635,30 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
                 return OK();
             }
             return ret;
+        }
+        if (!wasReady && !peerHadSlot) {
+            _handshakeNoSlotTransfers++;
+            if (_handshakeNoSlotTransfers == 128 ||
+                (_handshakeNoSlotTransfers > 128 &&
+                 (_handshakeNoSlotTransfers % 2048) == 0)) {
+                _log_w("SPI slave handshake has no protocol slots "
+                       "transfers=%lu txLen=%u txFirst=%02x txSecond=%02x "
+                       "rxLen=%u rxFirst=%02x rxSecond=%02x "
+                       "isrCompletions=%lu",
+                       static_cast<unsigned long>(
+                           _handshakeNoSlotTransfers),
+                       static_cast<unsigned>(_queuedTxSize),
+                       static_cast<unsigned>(_queuedTxFirst),
+                       static_cast<unsigned>(_queuedTxSecond),
+                       static_cast<unsigned>(bytes),
+                       std::to_integer<unsigned>(_rxBuffer[0]),
+                       bytes > 1 ? std::to_integer<unsigned>(_rxBuffer[1])
+                                 : 0U,
+                       static_cast<unsigned long>(
+                           _completionCount.load(std::memory_order_acquire)));
+            }
+        } else {
+            _handshakeNoSlotTransfers = 0;
         }
         if (helloResynced) {
             metrics().addLinkRecovery(LinkRecoveryReason::HelloResync);
@@ -692,11 +720,14 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
     Totem::TaskController::RunnerKey _task = 0;
     size_t _queuedRxSize = 0;
     size_t _queuedTxSize = 0;
+    uint8_t _queuedTxFirst = 0;
+    uint8_t _queuedTxSecond = 0;
     bool _transferQueued = false;
     bool _attentionAsserted = false;
     uint32_t _waitTimeouts = 0;
     uint32_t _completedTransfers = 0;
     uint32_t _queueCount = 0;
+    uint32_t _handshakeNoSlotTransfers = 0;
     std::atomic<uint32_t> _completionCount{0};
     std::optional<Totem::Wire::ExchangeRequest> _pendingExchange = std::nullopt;
     Totem::Wire::ExchangeRequest _activeExchange{};

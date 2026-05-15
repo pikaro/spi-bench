@@ -28,7 +28,7 @@ class MetricGroupDirectory : public MetricGroupDirectoryImpl {
     std::expected<MetricGroupKey, ReturnCode>
     add(MetricGroupKey metricGroupNameKey,
         const MetricGroupDesc &metricGroupDesc) {
-        return _addImpl(metricGroupNameKey, {.desc = &metricGroupDesc});
+        return _addImpl(metricGroupNameKey, {.desc = metricGroupDesc});
     }
 
     ReturnCode addMetricToGroup(const MetricGroupKey &groupKey) {

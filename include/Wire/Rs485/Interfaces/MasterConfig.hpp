@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Platform/Hardware.hpp"
+#include "StaticConfig/Stacks.hpp"
 #include "TaskController/Interfaces/Config.hpp"
 #include "Types/Uart.hpp"
 #include <cstddef>
@@ -14,7 +15,7 @@ struct MasterConfig {
     Totem::TaskController::Config task{
         .name = "Rs485MasterTask",
         .priority = 2,
-        .stackSize = 8192,
+        .stackSize = StaticConfig::TaskStacks::rs485Master,
         .intervalMs = 100,
         .noCatchup = true,
         .useNotify = true,

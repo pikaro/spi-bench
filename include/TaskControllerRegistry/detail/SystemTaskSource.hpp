@@ -94,6 +94,7 @@ class SystemTaskSource : public ITaskSource {
                 .runTimeDeltaPct = runTimeDeltaPct,
                 .stackLowestFree = Platform::get_stack_watermark(taskStatus),
                 .stackUsedPct = 0.0F,
+                .allocation = TaskController::TaskAllocation::Dynamic,
                 .config = nullptr,
             };
 

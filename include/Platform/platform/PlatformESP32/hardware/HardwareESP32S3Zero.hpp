@@ -2,9 +2,8 @@
 
 #pragma once
 
-#include "Macros/Facade.hpp"
-#include "Platform/platform/PlatformESP32/hardware/HardwareESP32S3.hpp"
-
+#include "Macros/internal/Hardware.hpp"
+#include "Platform/platform/PlatformESP32/hardware/HardwareESP32S3.hpp" // IWYU pragma: keep
 #include <cstdint>
 
 namespace platform {
@@ -33,6 +32,8 @@ enum class Esp32S3ZeroPin : uint8_t {
     PadGPIO40 = PIN(Esp32S3, GPIO40),
     PadGPIO41 = PIN(Esp32S3, GPIO41),
     PadGPIO42 = PIN(Esp32S3, GPIO42),
+
+    StatusLed = PIN(Esp32S3, GPIO21),
 };
 
 } // namespace platform

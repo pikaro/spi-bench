@@ -313,6 +313,10 @@ class Node : public HasLifecycle<Node, Config>,
                 header, frame, directDispatch.dispatch);
             if (enqueueRet.ok()) {
                 ++sentCount;
+                FAIL_IF_ERR_FWD_UNEXPECTED(
+                    directDispatch.transporter->send(1),
+                    "Failed to pump direct-relay target " SV_FMT,
+                    SV_ARG(directDispatch.name));
                 continue;
             }
 

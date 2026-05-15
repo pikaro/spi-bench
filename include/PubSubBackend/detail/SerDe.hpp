@@ -114,6 +114,23 @@ class SerDe {
         return header;
     }
 
+    static ReturnCode tryValidateFrame(std::span<const std::byte> frame,
+                                       const Header &header) {
+        if (encodedSize(header) != frame.size()) {
+            return ERR(CoreError, InvalidData);
+        }
+        auto crcSpan =
+            frame.subspan(frame.size() - sizeof(uint32_t), sizeof(uint32_t));
+        uint32_t expectedCrc{};
+        std::memcpy(&expectedCrc, crcSpan.data(), sizeof(expectedCrc));
+
+        auto actualCrc = _crcSum(frame.first(frame.size() - sizeof(uint32_t)));
+        if (actualCrc != expectedCrc) {
+            return ERR(CoreError, InvalidData);
+        }
+        return OK();
+    }
+
     static ReturnCode validateFrame(std::span<const std::byte> frame,
                                     const Header &header) {
         FAIL_IF(encodedSize(header) != frame.size(), ERR(CoreError, InvalidData),

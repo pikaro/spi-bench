@@ -255,8 +255,8 @@ class ErrorJournalSink
             return OK();
         }
 
-        auto startRet =
-            this->_taskController.startTask(*taskResult, this->config().task);
+        auto startRet = this->_taskController.startTask(
+            *taskResult, this->_taskConfig(this->config().task));
         if (!startRet.ok()) {
             _disableQuietly(false);
             (void)this->_endTaskController();

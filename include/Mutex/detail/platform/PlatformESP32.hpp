@@ -16,11 +16,14 @@
 namespace Totem::Mutex::detail::platform {
 
 struct Platform {
+    using MutexStorage = StaticSemaphore_t;
     using MutexHandle = ::platform::MutexHandle;
     using Tick = ::platform::Tick;
 
-    static std::expected<MutexHandle, ReturnCode> create_mutex() {
-        auto *handle = xSemaphoreCreateMutex();
+    static std::expected<MutexHandle, ReturnCode>
+    create_mutex(MutexStorage *storage = nullptr) {
+        auto *handle = storage != nullptr ? xSemaphoreCreateMutexStatic(storage)
+                                          : xSemaphoreCreateMutex();
         if (handle == nullptr) {
             _log_e("Failed to create mutex");
             return std::unexpected(ERR(CoreError, OperationFailed));

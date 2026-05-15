@@ -6,6 +6,7 @@
 #include "LedPwm/Interfaces/Types.hpp"
 #include "Macros/Facade.hpp"
 #include "Platform/PlatformSelect.hpp"
+#include "Setups/ClockSync.hpp"
 #include "Setups/Core.hpp"
 #include "Setups/PubSubStarTest.hpp"
 #include "Types/Error.hpp"
@@ -25,6 +26,7 @@ Totem::Audio::FftDisplay fftDisplayVisualizer{core.taskRegistry, fftAnalyzer,
                                               fftDisplay};
 
 Totem::Wire::Spi::Slave spiSlave{core.taskRegistry};
+ClockSyncSetup<Totem::Wire::Spi::Slave> clockSync{clockSlave, spiSlave};
 PubSubStarSpiEdgeSetup<Totem::Wire::Spi::Slave> pubSubStar{
     core.taskRegistry, spiSlave,
     PubSubStarSpiEdgeSetup<Totem::Wire::Spi::Slave>::Role::Media};
@@ -105,26 +107,13 @@ extern "C" {
 void app_main(void);
 }
 
-uint32_t epoch = 0;
-
 void app_main() {
     setup();
     for (;;) {
         const auto nowMs = ::platform::get_time();
         (void)core.work(nowMs);
         (void)pubSubStar.work(nowMs);
-
-        if (spiSlave.ready() && (!clockSlave.synced() || epoch % 10000 == 0) &&
-            !clockSlave.syncing()) {
-            const auto syncResult = clockSlave.sync(spiSlave);
-            if (!syncResult.ok()) {
-                _log_e("Clock sync request failed: " ERR_FMT,
-                       ERR_ARG(syncResult));
-            } else {
-                _log_i("Clock sync requested");
-            }
-        }
+        (void)clockSync.work(nowMs);
         ::platform::delay(::platform::ms_to_ticks(1));
-        epoch++;
     }
 }

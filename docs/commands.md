@@ -7,6 +7,7 @@ These are the primary project commands currently used in practice.
 - Build the active master target: `bin/build -e master`
 - Build the active media SPI target: `bin/build -e media`
 - Build the active GPU0 SPI target: `bin/build -e gpu0`
+- Build the active GPU1 SPI target: `bin/build -e gpu1`
 - Build the active IO RS485 target: `bin/build -e io`
 - Build and emit a compilation database: `pio run -e master -t compiledb`
 - Build LittleFS images for all active devices:
@@ -29,6 +30,8 @@ Build output notes:
     including the names of the objects required for the `bin/objsize` command
 - `bin/objsize master 'Metrics::backend()::instance'`: List sizes for all
     members of the `Metrics::backend()::instance` object
+- `bin/task-stacks master`: List static task-storage symbols in the built
+    firmware image and total their RAM cost
 - `bin/gdb master` is a wrapper which starts GDB with the correct target and
     firmware file for the `master` environment
 
@@ -81,7 +84,8 @@ arguments are only supported by the `bin/monitor` compatibility wrapper.
 `--upload` runs `pio run -e <env> --target upload` for every owned environment
 before any monitor starts. `--reset` runs `pio run -e <env> --target reset` for
 every owned environment after uploads and before any monitor starts; reset
-commands are launched as one stage so final boot timing is closely aligned.
+commands are run sequentially in the requested environment order so PlatformIO
+and ESP-IDF do not contend for dependency and build-state locks.
 `--uploadfs` uploads the LittleFS image for every owned environment before
 monitoring; for media WAV-source tests this image is built from
 `data/media/littlefs`.
@@ -150,6 +154,8 @@ Implementation notes:
     the current hardware PubSub star loop.
 - The high-speed SPI star leg uses `gpu0` and `gpu1` as peers on one physical
     bus; build both GPU environments when touching shared SPI or PubSub code.
+- PubSub stress profiles are available as `*-cross-stress`, `*-spi-stress`,
+    and `*-spi-fast-stress` variants for the same active environments.
 - `slave` is not defined in the current `platformio.ini`
 
 Use other environments only when the task explicitly involves that work

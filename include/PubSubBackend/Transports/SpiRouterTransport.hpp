@@ -72,6 +72,7 @@ class SpiRouterTransport
 
     static constexpr size_t rxQueueDepth = 8;
     static constexpr size_t inFlightDepth = 8;
+    static constexpr size_t deferredRawDepth = 8;
     static constexpr size_t pendingDepth = 8;
     static constexpr size_t bufferSize = detail::SerDe::headerSize +
                                          detail::Spec::Limits::maxPayloadSize +
@@ -81,6 +82,12 @@ class SpiRouterTransport
     struct PendingFrame;
 
     struct RxFrame {
+        std::array<std::byte, bufferSize> data{};
+        size_t size = 0;
+    };
+
+    struct RawFrame {
+        Header header{};
         std::array<std::byte, bufferSize> data{};
         size_t size = 0;
     };
@@ -155,8 +162,12 @@ class SpiRouterTransport
         std::string_view name;
         Totem::Queue::Handle rxFrameQueue{};
         Totem::Queue::Platform::Storage<RxFrame, rxQueueDepth> rxStorage{};
+        Totem::Queue::Handle rawSendQueue{};
+        Totem::Queue::Platform::Storage<RawFrame, deferredRawDepth>
+            rawSendStorage{};
         std::array<InFlightFrame, inFlightDepth> inFlight{};
         PeerStats stats{};
+        std::atomic<uint32_t> rawSendQueued{0};
     };
 
   public:
@@ -300,7 +311,7 @@ class SpiRouterTransport
             if ((targetPeers & peerBit) == 0) {
                 continue;
             }
-            auto sendRet = _queuePeerWrite(peer, header, frame, nullptr, false);
+            auto sendRet = _sendRawFrame(peer, header, frame);
             if (!sendRet.ok()) {
                 lastError = sendRet;
                 _log_w(SV_FMT ": dropped direct shared SPI target " SV_FMT
@@ -316,9 +327,21 @@ class SpiRouterTransport
 
     ReturnCode send(size_t maxCount = std::numeric_limits<size_t>::max())
         override {
-        (void)maxCount;
         FAIL_IF_INACTIVE_ERR("Cannot send with inactive SPI router transport");
-        return _observePeerAvailability();
+        FAIL_IF_ERR_FWD(_observePeerAvailability(),
+                        "Failed to observe SPI router peer availability");
+
+        size_t count = 0;
+        while (count < maxCount) {
+            bool sentRaw = false;
+            FAIL_IF_ERR_FWD(_sendDeferredRawFrame(sentRaw),
+                            "Failed to send deferred raw shared SPI frame");
+            if (!sentRaw) {
+                return OK();
+            }
+            ++count;
+        }
+        return OK();
     }
 
     ReturnCode receive(size_t maxCount = std::numeric_limits<size_t>::max())
@@ -540,6 +563,17 @@ class SpiRouterTransport
                    ERR_ARG(headerResult.error()));
             return OK();
         }
+        auto validateRet = detail::SerDe::tryValidateFrame(payload,
+                                                           *headerResult);
+        if (!validateRet.ok()) {
+            detail::metrics().addSpiDrop();
+            peer.stats.rxDropped.fetch_add(1, std::memory_order_relaxed);
+            _log_w(SV_FMT ": dropping corrupt SPI PubSub frame from " SV_FMT
+                   " of %zu bytes: " ERR_FMT,
+                   SV_ARG(_instanceName), SV_ARG(peer.name), payload.size(),
+                   ERR_ARG(validateRet));
+            return OK();
+        }
 
         RxFrame rxFrame{};
         std::memcpy(rxFrame.data.data(), payload.data(), payload.size());
@@ -619,25 +653,34 @@ class SpiRouterTransport
             return ERR(CoreError, Overflow);
         }
 
-        std::memcpy(slot->data.data(), frame.data(), frame.size());
-        slot->header = header;
-        slot->size = frame.size();
-        slot->transport = this;
-        slot->peer = &peer;
-        slot->pending = pending;
-        slot->queuedAtUs = ::platform::get_time_us();
-        slot->occupied = true;
-        slot->acknowledgeOnComplete = acknowledgeOnComplete;
+        return _startPeerWrite(peer, header, frame, pending,
+                               acknowledgeOnComplete, *slot);
+    }
+
+    ReturnCode _startPeerWrite(Peer &peer, const Header &header,
+                               std::span<const std::byte> frame,
+                               PendingFrame *pending,
+                               bool acknowledgeOnComplete,
+                               InFlightFrame &slot) {
+        std::memcpy(slot.data.data(), frame.data(), frame.size());
+        slot.header = header;
+        slot.size = frame.size();
+        slot.transport = this;
+        slot.peer = &peer;
+        slot.pending = pending;
+        slot.queuedAtUs = ::platform::get_time_us();
+        slot.occupied = true;
+        slot.acknowledgeOnComplete = acknowledgeOnComplete;
 
         auto request = Wire::WriteRequest{
-            .owner = slot,
+            .owner = &slot,
             .payloadType = Wire::PayloadType::PubSub,
-            .data = std::span<const std::byte>{slot->data.data(), slot->size},
+            .data = std::span<const std::byte>{slot.data.data(), slot.size},
             .onComplete = _onWireWriteComplete,
         };
         auto sendRet = peer.link->send(request);
         if (!sendRet.ok()) {
-            *slot = {};
+            slot = {};
             detail::metrics().addSpiFail();
             peer.stats.txFailed.fetch_add(1, std::memory_order_relaxed);
             return sendRet;
@@ -645,6 +688,117 @@ class SpiRouterTransport
         detail::metrics().addSpiTx();
         peer.stats.txQueued.fetch_add(1, std::memory_order_relaxed);
         return OK();
+    }
+
+    ReturnCode _sendRawFrame(Peer &peer, const Header &header,
+                             std::span<const std::byte> frame) {
+        FAIL_IF(frame.size() > bufferSize, ERR(CoreError, Overflow),
+                "Raw shared SPI PubSub frame exceeds transport buffer size");
+        if (peer.rawSendQueued.load(std::memory_order_relaxed) != 0) {
+            return _queueRawFrame(peer, header, frame);
+        }
+
+        auto *slot = _findFreeInFlight(peer);
+        if (slot == nullptr) {
+            peer.stats.txInFlightFull.fetch_add(1,
+                                                std::memory_order_relaxed);
+            return _queueRawFrame(peer, header, frame);
+        }
+
+        return _startRawFrame(peer, header, frame, *slot);
+    }
+
+    ReturnCode _queueRawFrame(Peer &peer, const Header &header,
+                              std::span<const std::byte> frame) {
+        FAIL_IF_ERR_FWD(_ensurePeerRawSendQueue(peer),
+                        "Failed to ensure shared SPI raw send queue for "
+                        SV_FMT,
+                        SV_ARG(peer.name));
+        RawFrame rawFrame{};
+        rawFrame.header = header;
+        std::memcpy(rawFrame.data.data(), frame.data(), frame.size());
+        rawFrame.size = frame.size();
+
+        if (Totem::Queue::Platform::spacesAvailable(peer.rawSendQueue) == 0) {
+            detail::metrics().addSpiDrop();
+            peer.stats.txInFlightFull.fetch_add(1,
+                                                std::memory_order_relaxed);
+            return ERR(CoreError, Overflow);
+        }
+
+        auto sendRet =
+            Totem::Queue::Platform::send(peer.rawSendQueue, &rawFrame, 0);
+        if (!sendRet.ok()) {
+            detail::metrics().addSpiDrop();
+            peer.stats.txInFlightFull.fetch_add(1,
+                                                std::memory_order_relaxed);
+            return sendRet;
+        }
+        peer.rawSendQueued.fetch_add(1, std::memory_order_relaxed);
+        return OK();
+    }
+
+    ReturnCode _sendDeferredRawFrame(bool &sent) {
+        sent = false;
+        for (size_t scanned = 0; scanned < PeerCount; ++scanned) {
+            const auto index = (_sendCursor + scanned) % PeerCount;
+            auto &peer = _peers[index];
+            FAIL_IF_ERR_FWD(_sendDeferredRawFrame(peer, sent),
+                            "Failed to send deferred raw shared SPI frame to "
+                            SV_FMT,
+                            SV_ARG(peer.name));
+            if (sent) {
+                _sendCursor = (index + 1) % PeerCount;
+                return OK();
+            }
+        }
+        return OK();
+    }
+
+    ReturnCode _sendDeferredRawFrame(Peer &peer, bool &sent) {
+        sent = false;
+        if (peer.rawSendQueued.load(std::memory_order_relaxed) == 0) {
+            return OK();
+        }
+
+        auto *slot = _findFreeInFlight(peer);
+        if (slot == nullptr) {
+            peer.stats.txInFlightFull.fetch_add(1,
+                                                std::memory_order_relaxed);
+            return OK();
+        }
+
+        RawFrame rawFrame{};
+        auto receiveRet =
+            Totem::Queue::Platform::receive(peer.rawSendQueue, &rawFrame, 0);
+        if (!receiveRet.ok()) {
+            if (receiveRet == ERR(Timeout)) {
+                return OK();
+            }
+            FAIL(receiveRet,
+                 "Failed to receive deferred raw shared SPI frame: " ERR_FMT,
+                 ERR_ARG(receiveRet));
+        }
+        peer.rawSendQueued.fetch_sub(1, std::memory_order_relaxed);
+        auto sendRet = _startRawFrame(
+            peer, rawFrame.header,
+            std::span<const std::byte>{rawFrame.data.data(), rawFrame.size},
+            *slot);
+        if (!sendRet.ok()) {
+            _log_w(SV_FMT
+                   ": dropping deferred raw shared SPI PubSub message %u to "
+                   SV_FMT " after enqueue failed: " ERR_FMT,
+                   SV_ARG(_instanceName), rawFrame.header.messageId,
+                   SV_ARG(peer.name), ERR_ARG(sendRet));
+        }
+        sent = true;
+        return OK();
+    }
+
+    ReturnCode _startRawFrame(Peer &peer, const Header &header,
+                              std::span<const std::byte> frame,
+                              InFlightFrame &slot) {
+        return _startPeerWrite(peer, header, frame, nullptr, false, slot);
     }
 
     static ReturnCode _onWireWriteComplete(Wire::WriteResult result) {
@@ -819,14 +973,34 @@ class SpiRouterTransport
         return ret;
     }
 
+    ReturnCode _ensurePeerRawSendQueue(Peer &peer) {
+        if (peer.rawSendQueue != nullptr) {
+            return OK();
+        }
+        auto queueResult =
+            Totem::Queue::Platform::create(peer.rawSendStorage);
+        FAIL_IF_UNEXPECTED_FWD(
+            queueHandle, queueResult,
+            "Failed to create shared SPI raw send queue for " SV_FMT,
+            SV_ARG(peer.name));
+        peer.rawSendQueue = queueHandle;
+        return OK();
+    }
+
     ReturnCode _onEnd() {
         auto ret = OK();
         for (auto &peer : _peers) {
-            if (peer.rxFrameQueue == nullptr) {
-                continue;
+            if (peer.rawSendQueue != nullptr) {
+                ret.combine(
+                    Totem::Queue::Platform::destroy(peer.rawSendQueue));
+                peer.rawSendQueue = {};
+                peer.rawSendQueued.store(0, std::memory_order_relaxed);
             }
-            ret.combine(Totem::Queue::Platform::destroy(peer.rxFrameQueue));
-            peer.rxFrameQueue = {};
+            if (peer.rxFrameQueue != nullptr) {
+                ret.combine(
+                    Totem::Queue::Platform::destroy(peer.rxFrameQueue));
+                peer.rxFrameQueue = {};
+            }
         }
         return ret;
     }
@@ -843,6 +1017,7 @@ class SpiRouterTransport
     std::array<PendingFrame, pendingDepth> _pendingFrames{};
     detail::PeerMask _knownAvailablePeers = 0;
     size_t _receiveCursor = 0;
+    size_t _sendCursor = 0;
     ::platform::Spinlock _pendingLock = ::platform::create_spinlock();
 
     static constexpr ::platform::Tick queueSendTimeoutTicks = 1;

@@ -15,6 +15,17 @@
 
 namespace Totem::Monitoring::detail {
 
+inline const char *
+task_allocation_str(TaskController::TaskAllocation allocation) {
+    switch (allocation) {
+    case TaskController::TaskAllocation::Static:
+        return "T";
+    case TaskController::TaskAllocation::Dynamic:
+        return "D";
+    }
+    return "?";
+}
+
 static constexpr const char *task_state_str(TaskController::State state) {
     switch (state) {
     case TaskController::State::Stopped:
@@ -93,25 +104,29 @@ inline static ReturnCode dump_monitoring_snaphot(const MonitoringFrame &frame) {
         if (stackSize > 0 && task.stackLowestFree <= stackSize) {
             _log_i(
                 "    %2zu: " SV_FMT " -> " SV_FMT " <%s%s%s> p%3u @ c%2d "
-                "(%5zuB / %5zuB = %6.2f%%) %6.2f%% in %8zums | %6.2f%% total",
+                "[%s] (%5zuB / %5zuB = %6.2f%%) %6.2f%% in %8zums | "
+                "%6.2f%% total",
                 i,
                 SV_ARG(task.sourceName, TaskRegistryConfig::sourceNameMaxLen),
                 SV_ARG(task.name, -TaskControllerConfig::maxTaskNameLen),
                 task.hasEverStarted ? "S" : "X", task_state_str(task.state),
                 platform_state_str(task.platformState), task.currentPriority,
-                task.coreId, stackSize - task.stackLowestFree, stackSize,
+                task.coreId, task_allocation_str(task.allocation),
+                stackSize - task.stackLowestFree, stackSize,
                 (double)task.stackUsedPct, (double)task.runTimeDeltaPct,
                 task.timestampDelta, (double)task.runTimeTotalPct);
             continue;
         }
 
         _log_i("    %2zu: " SV_FMT " -> " SV_FMT " <%s%s%s> p%3u @ c%2d "
-               "( low %5luB              ) %6.2f%% in %8zums | %6.2f%% total",
+               "[%s] ( low %5luB              ) %6.2f%% in %8zums | "
+               "%6.2f%% total",
                i, SV_ARG(task.sourceName, TaskRegistryConfig::sourceNameMaxLen),
                SV_ARG(task.name, -TaskControllerConfig::maxTaskNameLen),
                task.hasEverStarted ? "S" : "X", task_state_str(task.state),
                platform_state_str(task.platformState), task.currentPriority,
-               task.coreId, static_cast<unsigned long>(task.stackLowestFree),
+               task.coreId, task_allocation_str(task.allocation),
+               static_cast<unsigned long>(task.stackLowestFree),
                (double)task.runTimeDeltaPct, task.timestampDelta,
                (double)task.runTimeTotalPct);
     }

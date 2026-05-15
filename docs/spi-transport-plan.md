@@ -34,6 +34,11 @@ owns both SPI clocks; each current slave keeps a DMA transfer queued and asserts
 its own attention GPIO when the master should clock that link. `env:io` joins
 the same PubSub graph through RS485.
 
+For the first prototype goal, this two-peer high-speed bus is the accepted bus
+shape. The implementation should remain generic: adding future GPU peers or
+low-speed SPI peripherals should be a matter of adding logical peer links and
+router peer dependencies, not changing the PubSub routing model.
+
 Shared-bus hardware support is intentionally layered: each SPI slave still has
 a logical `Wire::Spi::Master` link with its own CS, attention pin, task, and
 in-flight table, while the ESP32 platform wrapper reuses the physical bus when
@@ -135,8 +140,10 @@ Master behavior:
 - runs a turn when the slave attention line is asserted, local TX exists,
   queued writes exist, an ACK/header response needs transmission, or heartbeat
   is due
-- with attention configured, does not poll merely because master-originated
-  writes are awaiting ACK; the slave asserts attention when ACK/data is queued
+- with attention configured, treats the attention line as the normal ACK wake
+  path, but still polls when pending ACKs age past the small bounded poll window
+  or the pending write table is full; a missed attention edge must not turn into
+  a pending-write timeout
 - batches queued writes into the current slot up to `maxOutboundSlotBytes`;
   writes that would exceed the current slot are deferred, and writes that cannot
   fit an empty configured window are nacked with overflow
@@ -221,6 +228,23 @@ Keep these properties intact unless measurement proves a better replacement:
   slot flag.
 - Do not scan a full transfer window to identify no-slot observations; checking
   the preamble is enough.
+- `Hello` control frames are request/acknowledgement pairs. A request uses
+  `responseTo=0`; the acknowledgement echoes the received frame sequence in
+  `responseTo` and is not acknowledged again. This lets an already-ready peer
+  rescue a peer that saw data but missed the original handshake without creating
+  a hello ping-pong.
+- Before the link reaches `ready`, application `Data`/`Request`/`Response`
+  frames are ignored and can only trigger a fresh hello response. L7 traffic is
+  valid only after the wire handshake has converged.
+- Direct PubSub relay on point-to-point SPI keeps its fast path when a wire
+  in-flight slot is free, but falls back to a small fixed raw-send queue during
+  short egress stalls. This preserves the cut-through path without forcing the
+  PubSub node to drop an already serialized frame just because all current SPI
+  turns are waiting for acknowledgement.
+- Shared-bus router relay follows the same rule per peer: an immediately
+  writable peer uses the cut-through send path, while a briefly backpressured
+  peer gets a bounded deferred raw frame. Persistent backpressure remains a drop
+  condition and must be visible through PubSub and transport counters.
 - Do not block slave PubSub writes behind an unrelated Clock exchange.
 - Do not clear large PubSub in-flight buffers on write completion; marking the
   slot free is sufficient.
@@ -274,7 +298,7 @@ before failing from a small local payload pool.
   millisecond-scale SPI scheduling noise, but true sub-microsecond sync would
   need hardware capture of the marker edge on both peers.
 
-## Next Measurements
+## Validation Profiles
 
 After protocol changes, measure on hardware before adding more workarounds:
 

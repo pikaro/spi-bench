@@ -38,7 +38,8 @@ struct ChannelSlot {
     ledc_timer_t timer = LEDC_TIMER_0;
 };
 
-static SemaphoreHandle_t _mutex = xSemaphoreCreateMutex();
+static StaticSemaphore_t _mutexStorage{};
+static SemaphoreHandle_t _mutex = xSemaphoreCreateMutexStatic(&_mutexStorage);
 
 struct TimerProvider {
     static constexpr const char *name = "LedPwm::TimerProvider";

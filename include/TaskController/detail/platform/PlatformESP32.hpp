@@ -15,6 +15,7 @@
 #include "freertos/projdefs.h"
 #include "portmacro.h"
 #include "sdkconfig.h"
+#include <array>
 #include <cstdint>
 #include <expected>
 
@@ -24,6 +25,25 @@ namespace Totem::TaskController::detail::platform {
 #define NOTIFY_EXIT_CLEAR_ALL 0xFFFFFFFFU
 
 using PlatformResultCreateTask = PlatformResultCreateTaskT<TaskHandle_t>;
+
+template <uint32_t StackSize> struct StaticTaskStorage {
+    StaticTaskStorage() = default;
+    StaticTaskStorage(const StaticTaskStorage &) = delete;
+    StaticTaskStorage &operator=(const StaticTaskStorage &) = delete;
+    StaticTaskStorage(StaticTaskStorage &&) = delete;
+    StaticTaskStorage &operator=(StaticTaskStorage &&) = delete;
+
+    StaticTask_t controlBlock{};
+    alignas(portBYTE_ALIGNMENT) std::array<StackType_t, StackSize> stack{};
+
+    [[nodiscard]] StaticTaskMemory memory() {
+        return StaticTaskMemory{
+            .controlBlock = &controlBlock,
+            .stack = stack.data(),
+            .stackSize = StackSize,
+        };
+    }
+};
 
 struct Platform {
     using TaskHandle = ::platform::TaskHandle;
@@ -41,19 +61,39 @@ struct Platform {
 
         auto priority = static_cast<UBaseType_t>(config.priority);
 
-        // configSTACK_DEPTH_TYPE == uint32_t, which is already the type of
-        // stackSize
+        if (config.allocation == TaskAllocation::Static) {
+            if (!config.staticMemory.validFor(config.stackSize)) {
+                _log_e("Static task %s has no storage for stack size %lu",
+                       config.name,
+                       static_cast<unsigned long>(config.stackSize));
+                return PlatformResultCreateTask{
+                    .ok = false,
+                    .handle = nullptr,
+                };
+            }
 
-        BaseType_t result;
-        if (affinity == tskNO_AFFINITY) {
-            result = xTaskCreate(taskFunction, config.name, config.stackSize,
-                                 taskParameter, priority, &handle);
-        } else {
-            result = xTaskCreatePinnedToCore(
+            auto *stack = static_cast<StackType_t *>(config.staticMemory.stack);
+            auto *controlBlock =
+                static_cast<StaticTask_t *>(config.staticMemory.controlBlock);
+            handle = xTaskCreateStaticPinnedToCore(
                 taskFunction, config.name, config.stackSize, taskParameter,
-                priority, &handle, config.core.core);
+                priority, stack, controlBlock, affinity);
+            if (handle == nullptr) {
+                return PlatformResultCreateTask{
+                    .ok = false,
+                    .handle = nullptr,
+                };
+            }
+
+            return PlatformResultCreateTask{
+                .ok = true,
+                .handle = handle,
+            };
         }
 
+        auto result = xTaskCreatePinnedToCore(taskFunction, config.name,
+                                             config.stackSize, taskParameter,
+                                             priority, &handle, affinity);
         if (result != pdPASS || handle == nullptr) {
             return PlatformResultCreateTask{
                 .ok = false,

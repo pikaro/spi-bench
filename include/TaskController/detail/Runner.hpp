@@ -158,6 +158,7 @@ class Runner {
                                        : _config.stackSize,
                 .stackUsedPct =
                     hadSnapshot ? _runtimeSnapshot.stackUsedPct : 0.0F,
+                .allocation = _config.allocation,
                 .config = &_config,
             };
             _hasSnapshot.store(true, std::memory_order_release);
@@ -204,6 +205,7 @@ class Runner {
                 static_cast<float>(_config.stackSize -
                                    platformResult->stackLowestFree) /
                 static_cast<float>(_config.stackSize),
+            .allocation = _config.allocation,
             .config = &_config,
         };
 

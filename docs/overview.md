@@ -191,6 +191,20 @@ does not permanently hide in-progress input. Console input events wake the
 command task directly; the periodic task interval is only a slow liveness
 fallback.
 
+Managed `TaskController` tasks default to ESP-IDF static task creation. Their
+TCB and stack storage are exact-size task-owner storage derived from
+`StaticConfig/Stacks.hpp`, so repo-owned task stack RAM is visible in the
+firmware image without reserving a worst-case shared pool. Individual managed
+tasks can opt back into dynamic creation through
+`TaskController::Config::allocation`; `StaticConfig::TaskStacks` also provides
+constexpr storage-mode defaults so dynamic builds can avoid compiling in unused
+static task storage without preprocessor switches. ESP-IDF, driver, and
+library-owned tasks remain outside this project abstraction. Use
+`bin/task-stacks <env>` to inspect configured task-stack RAM; when an ELF exists
+it also reports matching firmware symbols. The logging aggregator ring buffer also
+supports static or dynamic allocation; static storage is selected by the
+constexpr `LoggingConfig::aggregatorRingBufferStatic` flag.
+
 The current master board wiring uses GPIO36/GPIO37 for the low-speed SPI bus.
 Those pins overlap the ESP32-S3 OPI PSRAM signal set on the devkit-style board,
 so `env:master` deliberately disables PSRAM through `sdkconfig.stack.master`.

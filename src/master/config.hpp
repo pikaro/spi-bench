@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Platform/Hardware.hpp"
+#include "StaticConfig/Stacks.hpp"
+#include "TaskController/Interfaces/Config.hpp"
 #include "Wire/Rs485/Interfaces/MasterConfig.hpp"
 #include "Wire/Spi/Interfaces/MasterConfig.hpp"
 #include "Wire/Spi/Interfaces/Types.hpp"
@@ -26,9 +28,9 @@ inline Totem::Wire::Rs485::MasterConfig rs485MasterConfig{
     .task =
         {
             .name = "Rs485MasterTask",
-            .priority = 2,
+            .priority = 4,
             .core = Totem::TaskController::Config::CorePreference::specific(0),
-            .stackSize = 8192,
+            .stackSize = Totem::StaticConfig::TaskStacks::rs485Master,
             .intervalMs = 100,
             .noCatchup = true,
             .useNotify = true,
@@ -62,9 +64,9 @@ inline Totem::Wire::Spi::MasterConfig spiMasterBusHighSpeedConfig{
     .task =
         {
             .name = "SpiGpu0Task",
-            .priority = 2,
+            .priority = 4,
             .core = Totem::TaskController::Config::CorePreference::specific(0),
-            .stackSize = 8192,
+            .stackSize = Totem::StaticConfig::TaskStacks::spiMaster,
             .intervalMs = 10,
             .noCatchup = true,
             .useNotify = true,
@@ -114,9 +116,9 @@ inline Totem::Wire::Spi::MasterConfig spiMasterBusLowSpeedConfig{
     .task =
         {
             .name = "SpiMediaTask",
-            .priority = 2,
+            .priority = 4,
             .core = Totem::TaskController::Config::CorePreference::specific(1),
-            .stackSize = 8192,
+            .stackSize = Totem::StaticConfig::TaskStacks::spiMaster,
             .intervalMs = 10,
             .noCatchup = true,
             .useNotify = true,
@@ -133,4 +135,8 @@ inline Totem::Wire::Spi::MasterConfig spiMasterBusLowSpeedConfig{
     .attentionPin = Pin::GPIO39,
 };
 
-inline constexpr Pin levelShifterEnablePin = Pin::GPIO13;
+inline constexpr Pin ledLevelShifterOutputEnablePin = Pin::GPIO13;
+// The current 74AHCT124 LED output-enable line is active-low.
+inline constexpr bool ledLevelShifterOutputEnabledLevel = false;
+
+// Strobe GPIO6

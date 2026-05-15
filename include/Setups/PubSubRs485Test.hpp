@@ -12,6 +12,7 @@
 #include "Services/Clock.hpp"
 #include "Services/PubSub.hpp"
 #include "Setups/PubSubTestMessage.hpp"
+#include "StaticConfig/Stacks.hpp"
 #include "TaskController/Interfaces/IRegistry.hpp"
 #include "Types/Error.hpp"
 #include <cinttypes>
@@ -273,7 +274,7 @@ template <class Link> struct PubSubRs485TestSetup {
                 {
                     .name = taskName,
                     .priority = 3,
-                    .stackSize = 8192,
+                    .stackSize = Totem::StaticConfig::TaskStacks::pubSubNode,
                     .intervalMs = 10,
                     .noCatchup = true,
                     .useNotify = true,

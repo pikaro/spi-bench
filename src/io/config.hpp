@@ -4,6 +4,7 @@
 #include "Data/Facade.hpp"
 #include "LedPwm/Interfaces/Config.hpp"
 #include "Platform/Hardware.hpp"
+#include "StaticConfig/Stacks.hpp"
 #include "Types/Gpio.hpp"
 #include "Wire/Rs485/Interfaces/SlaveConfig.hpp"
 
@@ -16,6 +17,17 @@ constexpr Totem::Wire::Rs485::SlaveConfig rs485SlaveConfig{
                     .txPin = Pin::GPIO1,
                     .rxPin = Pin::GPIO0,
                 },
+        },
+    .task =
+        {
+            .name = "Rs485SlaveTask",
+            .priority = 4,
+            .stackSize = Totem::StaticConfig::TaskStacks::rs485Slave,
+            .intervalMs = 100,
+            .noCatchup = true,
+            .useNotify = true,
+            .notifyExpectTimeout = false,
+            .notifyTimeoutMs = 10,
         },
     .attentionPin = Pin::GPIO5,
 };

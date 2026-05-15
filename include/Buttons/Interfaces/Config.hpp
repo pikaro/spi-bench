@@ -3,6 +3,7 @@
 #include "Data/Peripherals.hpp"
 #include "Platform/Hardware.hpp"
 #include "StaticConfig/Button.hpp"
+#include "StaticConfig/Stacks.hpp"
 #include "TaskController/Interfaces/Config.hpp"
 #include "Types/Gpio.hpp"
 #include <array>
@@ -26,7 +27,7 @@ struct PeripheralButtonConfig {
 struct Config {
     Totem::TaskController::Config task{
         .name = "Buttons",
-        .stackSize = 4096,
+        .stackSize = StaticConfig::TaskStacks::buttons,
         .intervalMs = 100,
         .useNotify = true,
     };

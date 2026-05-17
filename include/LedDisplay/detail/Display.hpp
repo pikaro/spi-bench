@@ -117,8 +117,7 @@ class Display : public HasLifecycle<Display, Config>,
 
         auto &pubSub = PubSubService::get();
         auto animationSub = pubSub.subscribe(
-            "led-anim",
-            {.subscriber = this, .callback = _onAnimationEnvelope},
+            "led-anim", {.subscriber = this, .callback = _onAnimationEnvelope},
             PubSubService::Topic::Animation);
         if (!animationSub) {
             return animationSub.error();
@@ -201,7 +200,8 @@ class Display : public HasLifecycle<Display, Config>,
         auto *self = static_cast<Display *>(owner);
         FAIL_IF_NULL(self, ERR(CoreError, InvalidArgument),
                      "LedDisplay FFT subscriber owner is null");
-        FAIL_IF_UNEXPECTED_FWD(frame, envelope.getPayloadAs<Totem::Audio::FftFrame>(),
+        FAIL_IF_UNEXPECTED_FWD(frame,
+                               envelope.getPayloadAs<Totem::Audio::FftFrame>(),
                                "Failed to decode FFT frame");
         return self->_captureFftFrame(frame);
     }
@@ -252,8 +252,7 @@ class Display : public HasLifecycle<Display, Config>,
                 if (result == ERR(Timeout)) {
                     return OK();
                 }
-                FAIL_ERR_FWD(result,
-                             "Failed to receive LED animation command");
+                FAIL_ERR_FWD(result, "Failed to receive LED animation command");
             }
             FAIL_IF_ERR_FWD(_handleCommand(cmd, nowMs),
                             "Failed to handle LED animation command");
@@ -388,17 +387,17 @@ class Display : public HasLifecycle<Display, Config>,
     void _render(const CenterWave &animation, const ActiveAnimation &slot,
                  uint32_t nowMs) {
         const uint32_t elapsed = nowMs - slot.startMs;
-        const uint32_t duration = slot.lifetimeMs == 0 ? 1200U : slot.lifetimeMs;
+        const uint32_t duration =
+            slot.lifetimeMs == 0 ? 1200U : slot.lifetimeMs;
         auto canvas = PrimitiveCanvas{_frame};
-        drawCenterWave(canvas,
-                       PrimitiveParams{
-                           .elapsedMs = elapsed,
-                           .durationMs = duration,
-                           .hue = animation.config.hue,
-                           .saturation = animation.config.saturation,
-                           .value = animation.config.value,
-                           .width = animation.config.width,
-                       });
+        drawCenterWave(canvas, PrimitiveParams{
+                                   .elapsedMs = elapsed,
+                                   .durationMs = duration,
+                                   .hue = animation.config.hue,
+                                   .saturation = animation.config.saturation,
+                                   .value = animation.config.value,
+                                   .width = animation.config.width,
+                               });
     }
 
     void _render(const FftReactive &animation,
@@ -406,20 +405,19 @@ class Display : public HasLifecycle<Display, Config>,
         auto canvas = PrimitiveCanvas{_frame};
         const auto snapshot = _snapshotFftFrame();
         if (!snapshot.valid) {
-            drawRainbow(canvas,
-                        PrimitiveParams{
-                            .elapsedMs = nowMs,
-                            .durationMs = 2000,
-                            .hue = animation.config.baseHue,
-                            .saturation = animation.config.saturation,
-                            .value = animation.config.valueScale,
-                        });
+            drawRainbow(canvas, PrimitiveParams{
+                                    .elapsedMs = nowMs,
+                                    .durationMs = 2000,
+                                    .hue = animation.config.baseHue,
+                                    .saturation = animation.config.saturation,
+                                    .value = animation.config.valueScale,
+                                });
             return;
         }
 
         for (uint8_t radial = 0; radial < Config::ringCount; ++radial) {
-            const size_t band = (static_cast<size_t>(radial) * 8U) /
-                                Config::ringCount;
+            const size_t band =
+                (static_cast<size_t>(radial) * 8U) / Config::ringCount;
             const uint8_t bandValue =
                 Render::scale8(_fftBandValue(snapshot.frame, band),
                                animation.config.valueScale);
@@ -434,7 +432,8 @@ class Display : public HasLifecycle<Display, Config>,
     void _render(const PrimitiveDemo &animation, const ActiveAnimation &slot,
                  uint32_t nowMs) {
         const uint32_t elapsed = nowMs - slot.startMs;
-        const uint32_t duration = slot.lifetimeMs == 0 ? 2400U : slot.lifetimeMs;
+        const uint32_t duration =
+            slot.lifetimeMs == 0 ? 2400U : slot.lifetimeMs;
         auto canvas = PrimitiveCanvas{_frame};
         drawPrimitiveDemo(canvas, animation.config.primitive,
                           PrimitiveParams{
@@ -516,8 +515,8 @@ class Display : public HasLifecycle<Display, Config>,
 
     template <typename T>
     static ReturnCode _encodePayload(AnimationCommand &cmd, const T &payload) {
-        constexpr size_t size = Totem::PubSubBackend::detail::Codec<
-            T>::encodedSize();
+        constexpr size_t size =
+            Totem::PubSubBackend::detail::Codec<T>::encodedSize();
         static_assert(size <= LedDisplayConfig::animationCommandPayloadBytes,
                       "Animation config does not fit command payload");
         cmd.payloadSize = static_cast<uint8_t>(size);
@@ -528,8 +527,8 @@ class Display : public HasLifecycle<Display, Config>,
     template <typename T>
     static std::expected<T, ReturnCode>
     _decodePayload(const AnimationCommand &cmd) {
-        constexpr size_t size = Totem::PubSubBackend::detail::Codec<
-            T>::encodedSize();
+        constexpr size_t size =
+            Totem::PubSubBackend::detail::Codec<T>::encodedSize();
         FAIL_IF(cmd.payloadSize != size,
                 std::unexpected(ERR(CoreError, InvalidSize)),
                 "Unexpected animation config payload size");

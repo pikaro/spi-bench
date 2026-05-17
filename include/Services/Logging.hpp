@@ -6,6 +6,7 @@
 #include "Macros/internal/Format.hpp"
 #include "Platform/PlatformSelect.hpp"
 #include "Services/Clock.hpp"
+#include "Services/StatusLed.hpp"
 #include "StaticConfig/Logging.hpp"
 #include "Types/Error.hpp"
 #include <array>
@@ -79,8 +80,8 @@ inline constexpr auto loggingMinimumLevels = make_logging_minimum_levels(
     LoggingMinimumLevel::taskControllerRegistry, LoggingMinimumLevel::output,
     LoggingMinimumLevel::rs485, LoggingMinimumLevel::spi,
     LoggingMinimumLevel::clock, LoggingMinimumLevel::ledPwm,
-    LoggingMinimumLevel::input, LoggingMinimumLevel::esp,
-    LoggingMinimumLevel::audio);
+    LoggingMinimumLevel::statusLed, LoggingMinimumLevel::input,
+    LoggingMinimumLevel::esp, LoggingMinimumLevel::audio);
 
 static constexpr LogLevel logging_minimum_for(LogComponent component) {
     auto index = static_cast<size_t>(component);
@@ -171,6 +172,9 @@ class LoggingService {
                 return ret;
             }
             auto result = get().send(record);
+            if (result.ok() && level == LogLevel::Error) {
+                (void)StatusLedService::recordLogError();
+            }
             _recordBusy.clear(std::memory_order_release);
             return result;
         }
@@ -181,7 +185,11 @@ class LoggingService {
             !ret.ok()) {
             return ret;
         }
-        return get().send(record);
+        auto result = get().send(record);
+        if (result.ok() && level == LogLevel::Error) {
+            (void)StatusLedService::recordLogError();
+        }
+        return result;
     }
 
   private:

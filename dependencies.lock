@@ -27,5 +27,5 @@ direct_dependencies:
 - espressif/esp-dsp
 - joltwallet/littlefs
 manifest_hash: a479d9fec2967c112102de44db9797369a54c120fdbfa63aadbfd2024aeb3d5e
-target: esp32
+target: esp32s3
 version: 2.0.0

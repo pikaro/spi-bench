@@ -5,6 +5,7 @@
 #include "LedPwm/Interfaces/Config.hpp"
 #include "Platform/Hardware.hpp"
 #include "StaticConfig/Stacks.hpp"
+#include "StatusLed/Interfaces/Config.hpp"
 #include "Types/Gpio.hpp"
 #include "Wire/Rs485/Interfaces/SlaveConfig.hpp"
 
@@ -49,4 +50,8 @@ constexpr Totem::Buttons::Config buttonsConfig{
             .activeLow = false,
         },
     }},
+};
+
+inline constexpr Totem::StatusLed::Config statusLedConfig{
+    .configured = false,
 };

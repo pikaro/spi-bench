@@ -36,7 +36,7 @@ inline constexpr int64_t targetLatencyUs = 10000;
 inline constexpr int64_t maxMeasuredLatencyUs = 1000000;
 inline constexpr size_t maxSubscribeTopics = 4;
 inline constexpr std::array<int64_t, 17> latencyBucketUpperUs{
-    500,  1000, 2000, 3000, 4000,  5000,  6000,  7000, 8000,
+    500,  1000,  2000,  3000,  4000,  5000,  6000,  7000,  8000,
     9000, 10000, 12000, 15000, 20000, 30000, 50000, 100000};
 
 #ifndef PUBSUB_STAR_IO_PUBLISH_INTERVAL_MS
@@ -87,8 +87,8 @@ inline constexpr std::array<int64_t, 17> latencyBucketUpperUs{
 #define PUBSUB_STAR_GPU1_SUBSCRIBE_BEAT 1
 #endif
 
-inline constexpr std::array<const char *, maxSubscribeTopics>
-    subscriptionNames{"star-s0", "star-s1", "star-s2", "star-s3"};
+inline constexpr std::array<const char *, maxSubscribeTopics> subscriptionNames{
+    "star-s0", "star-s1", "star-s2", "star-s3"};
 
 struct LatencyStats {
     uint32_t received = 0;
@@ -152,11 +152,8 @@ struct LatencyStats {
             return 0;
         }
 
-        auto rank =
-            static_cast<uint32_t>((static_cast<uint64_t>(latencySamples) *
-                                       percentile +
-                                   99U) /
-                                  100U);
+        auto rank = static_cast<uint32_t>(
+            (static_cast<uint64_t>(latencySamples) * percentile + 99U) / 100U);
         if (rank == 0) {
             rank = 1;
         }
@@ -177,8 +174,8 @@ struct RouteDef {
     Topic topic = Topic::None;
     const char *label = "unknown";
 
-    [[nodiscard]] bool matches(const Totem::PubSubBackend::Envelope &envelope)
-        const {
+    [[nodiscard]] bool
+    matches(const Totem::PubSubBackend::Envelope &envelope) const {
         return static_cast<uint8_t>(source) == envelope.header.source &&
                static_cast<uint32_t>(topic) == envelope.header.topic;
     }
@@ -210,8 +207,8 @@ struct Consumer {
     const RouteDef *routes = nullptr;
     size_t routeCount = 0;
 
-    static ReturnCode
-    callback(void *ctx, const Totem::PubSubBackend::Envelope &envelope) {
+    static ReturnCode callback(void *ctx,
+                               const Totem::PubSubBackend::Envelope &envelope) {
         auto *self = static_cast<Consumer *>(ctx);
         return self->handle(envelope);
     }
@@ -226,10 +223,10 @@ struct Consumer {
         const auto nowUs = clock.nowUs();
         const auto latencyValid =
             clock.synced() && envelope.header.timestampUs != 0;
-        const auto latencyUs = latencyValid
-                                   ? nowUs - static_cast<int64_t>(
-                                                 envelope.header.timestampUs)
-                                   : 0;
+        const auto latencyUs =
+            latencyValid
+                ? nowUs - static_cast<int64_t>(envelope.header.timestampUs)
+                : 0;
         if (stats != nullptr) {
             stats->recordLatency(routeIndex(envelope), latencyUs,
                                  envelope.header.payloadSize, latencyValid);
@@ -250,21 +247,21 @@ struct Consumer {
 };
 
 template <class Node>
-inline void subscribeConfiguredTopics(
-    Node &node, Consumer &consumer,
-    const std::array<Topic, maxSubscribeTopics> &topics, size_t topicCount,
-    const char *consumerName) {
+inline void
+subscribeConfiguredTopics(Node &node, Consumer &consumer,
+                          const std::array<Topic, maxSubscribeTopics> &topics,
+                          size_t topicCount, const char *consumerName) {
     for (size_t i = 0; i < topicCount && i < topics.size(); ++i) {
         if (topics[i] == Topic::None) {
             continue;
         }
-        ABORT_IF_UNEXPECTED(
-            subscriptionHandle,
-            node.subscribe(subscriptionNames[i],
-                           {.subscriber = &consumer,
-                            .callback = Consumer::callback},
-                           topics[i]),
-            "Failed to subscribe %s PubSub star consumer", consumerName);
+        ABORT_IF_UNEXPECTED(subscriptionHandle,
+                            node.subscribe(subscriptionNames[i],
+                                           {.subscriber = &consumer,
+                                            .callback = Consumer::callback},
+                                           topics[i]),
+                            "Failed to subscribe %s PubSub star consumer",
+                            consumerName);
         (void)subscriptionHandle;
     }
 }
@@ -311,8 +308,7 @@ makeBaseDeps(PubSubNode &node, uint8_t transportId, const char *name) {
 }
 
 inline void reportLatencyStats(const char *name, const char *route,
-                               const LatencyStats &stats,
-                               uint32_t elapsedMs) {
+                               const LatencyStats &stats, uint32_t elapsedMs) {
     if (stats.received > 0 && stats.latencySamples == 0) {
         _log_i("%s route %s: rx=%" PRIu32 "/s bytes=%" PRIu32
                "/s lat=invalid miss=%" PRIu32 " invalid=%" PRIu32,
@@ -322,9 +318,9 @@ inline void reportLatencyStats(const char *name, const char *route,
         return;
     }
 
-    _log_i("%s route %s: rx=%" PRIu32 "/s bytes=%" PRIu32
-           "/s lat=%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64 "/%"
-           PRId64 "/%" PRId64 " miss=%" PRIu32 " invalid=%" PRIu32,
+    _log_i("%s route %s: rx=%" PRIu32 "/s bytes=%" PRIu32 "/s lat=%" PRId64
+           "/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
+           " miss=%" PRIu32 " invalid=%" PRIu32,
            name, route, ratePerSecond(stats.received, elapsedMs),
            ratePerSecond(stats.receivedBytes, elapsedMs), stats.minOrZero(),
            stats.averageLatencyUs(), stats.percentileUs(50),
@@ -335,8 +331,7 @@ inline void reportLatencyStats(const char *name, const char *route,
 inline void reportAppStats(const char *name, const AppStats &period,
                            const RouteDef *routes, size_t routeCount,
                            uint32_t elapsedMs) {
-    _log_i("%s app: pub=%" PRIu32 "/s pubFail=%" PRIu32
-           " poolFull=%" PRIu32,
+    _log_i("%s app: pub=%" PRIu32 "/s pubFail=%" PRIu32 " poolFull=%" PRIu32,
            name, ratePerSecond(period.publishAttempts, elapsedMs),
            period.publishFailures, period.publishPoolFull);
     for (size_t i = 0; i < routeCount && i < AppStats::maxRoutes; ++i) {
@@ -366,10 +361,9 @@ inline void reportTxTimingStats(const char *name, const char *transport,
         return;
     }
 
-    _log_i("%s %s timing: txTimed=%" PRIu32
-           "/s queueUs[min/avg/max]=%" PRIu32 "/%" PRIu32 "/%" PRIu32
-           " wireUs[min/avg/max]=%" PRIu32 "/%" PRIu32 "/%" PRIu32
-           " totalUs[min/avg/max]=%" PRIu32 "/%" PRIu32 "/%" PRIu32,
+    _log_i("%s %s timing: txTimed=%" PRIu32 "/s queueUs=%" PRIu32 "/%" PRIu32
+           "/%" PRIu32 " wireUs=%" PRIu32 "/%" PRIu32 "/%" PRIu32
+           " totalUs=%" PRIu32 "/%" PRIu32 "/%" PRIu32,
            name, transport, ratePerSecond(stats.txTimingSamples, elapsedMs),
            stats.txQueueWaitMinUs, stats.txQueueWaitAvgUs,
            stats.txQueueWaitMaxUs, stats.txWireMinUs, stats.txWireAvgUs,
@@ -413,8 +407,7 @@ struct PubSubStarMasterSetup {
         Totem::PubSubBackend::Transports::SpiTransportDependencies<
             HighSpeedSpiLink>;
     using Rs485Deps =
-        Totem::PubSubBackend::Transports::Rs485TransportDependencies<
-            Rs485Link>;
+        Totem::PubSubBackend::Transports::Rs485TransportDependencies<Rs485Link>;
 
     struct Config {
         uint32_t reportIntervalMs = 1000;
@@ -423,30 +416,25 @@ struct PubSubStarMasterSetup {
     PubSubStarMasterSetup(Totem::TaskController::IRegistry &taskRegistry,
                           LowSpeedSpiLink &lowSpeedSpiLink,
                           HighSpeedSpiLink &highSpeedSpiLink,
-                          Rs485Link &rs485Link,
-                          Config config = {})
+                          Rs485Link &rs485Link, Config config = {})
         : pubSubNode(taskRegistry,
-                     static_cast<PubSubStarTest::NodeId>(
-                         MasterPubSub::nodeId)),
-          config(config),
-          lowSpeedSpiTransport(
-              makeLowSpeedSpiDeps(pubSubNode, lowSpeedSpiLink)),
+                     static_cast<PubSubStarTest::NodeId>(MasterPubSub::nodeId)),
+          config(config), lowSpeedSpiTransport(
+                              makeLowSpeedSpiDeps(pubSubNode, lowSpeedSpiLink)),
           highSpeedSpiTransport(
               makeHighSpeedSpiDeps(pubSubNode, highSpeedSpiLink)),
           rs485Transport(makeRs485Deps(pubSubNode, rs485Link)) {}
 
     void setup() {
-        ABORT_IF_ERR_BEGIN(
-            pubSubNode.begin(PubSubStarTest::makePubSubConfig(
-                "PubSubStar", 5,
-                Totem::TaskController::Config::CorePreference::specific(1))));
+        ABORT_IF_ERR_BEGIN(pubSubNode.begin(PubSubStarTest::makePubSubConfig(
+            "PubSubStar", 5,
+            Totem::TaskController::Config::CorePreference::specific(1))));
 
         ABORT_IF_ERR_BEGIN(lowSpeedSpiTransport.begin());
         ABORT_IF_ERR(lowSpeedSpiTransport.registerHandler(),
                      "Failed to register low-speed SPI PubSub frame handler");
         ABORT_IF_UNEXPECTED(
-            lowSpeedHandle,
-            pubSubNode.registerTransport(lowSpeedSpiTransport),
+            lowSpeedHandle, pubSubNode.registerTransport(lowSpeedSpiTransport),
             "Failed to register low-speed SPI PubSub transport");
         (void)lowSpeedHandle;
 
@@ -462,9 +450,9 @@ struct PubSubStarMasterSetup {
         ABORT_IF_ERR_BEGIN(rs485Transport.begin());
         ABORT_IF_ERR(rs485Transport.registerHandler(),
                      "Failed to register IO RS485 PubSub frame handler");
-        ABORT_IF_UNEXPECTED(
-            rs485Handle, pubSubNode.registerTransport(rs485Transport),
-            "Failed to register IO RS485 PubSub transport");
+        ABORT_IF_UNEXPECTED(rs485Handle,
+                            pubSubNode.registerTransport(rs485Transport),
+                            "Failed to register IO RS485 PubSub transport");
         (void)rs485Handle;
 
         PubSubService::set(pubSubNode);
@@ -499,8 +487,8 @@ struct PubSubStarMasterSetup {
         };
     }
 
-    [[nodiscard]] static Rs485Deps makeRs485Deps(PubSubStarTest::PubSubNode &node,
-                                                 Rs485Link &link) {
+    [[nodiscard]] static Rs485Deps
+    makeRs485Deps(PubSubStarTest::PubSubNode &node, Rs485Link &link) {
         return Rs485Deps{
             .base = PubSubStarTest::makeBaseDeps(
                 node, static_cast<uint8_t>(Transport::RS485), "PubSub-RS485"),
@@ -562,40 +550,34 @@ struct PubSubMultiSpiStarMasterSetup {
         Totem::PubSubBackend::Transports::SpiRouterTransportDependencies<
             HighSpeedSpiLink, 2>;
     using Rs485Deps =
-        Totem::PubSubBackend::Transports::Rs485TransportDependencies<
-            Rs485Link>;
+        Totem::PubSubBackend::Transports::Rs485TransportDependencies<Rs485Link>;
 
     struct Config {
         uint32_t reportIntervalMs = 1000;
     };
 
-    PubSubMultiSpiStarMasterSetup(Totem::TaskController::IRegistry &taskRegistry,
-                                  LowSpeedSpiLink &lowSpeedSpiLink,
-                                  HighSpeedSpiLink &gpu0SpiLink,
-                                  HighSpeedSpiLink &gpu1SpiLink,
-                                  Rs485Link &rs485Link, Config config = {})
+    PubSubMultiSpiStarMasterSetup(
+        Totem::TaskController::IRegistry &taskRegistry,
+        LowSpeedSpiLink &lowSpeedSpiLink, HighSpeedSpiLink &gpu0SpiLink,
+        HighSpeedSpiLink &gpu1SpiLink, Rs485Link &rs485Link, Config config = {})
         : pubSubNode(taskRegistry,
-                     static_cast<PubSubStarTest::NodeId>(
-                         MasterPubSub::nodeId)),
-          config(config),
-          lowSpeedSpiTransport(
-              makeLowSpeedSpiDeps(pubSubNode, lowSpeedSpiLink)),
-          highSpeedSpiTransport(makeHighSpeedSpiDeps(
-              pubSubNode, gpu0SpiLink, gpu1SpiLink)),
+                     static_cast<PubSubStarTest::NodeId>(MasterPubSub::nodeId)),
+          config(config), lowSpeedSpiTransport(
+                              makeLowSpeedSpiDeps(pubSubNode, lowSpeedSpiLink)),
+          highSpeedSpiTransport(
+              makeHighSpeedSpiDeps(pubSubNode, gpu0SpiLink, gpu1SpiLink)),
           rs485Transport(makeRs485Deps(pubSubNode, rs485Link)) {}
 
     void setup() {
-        ABORT_IF_ERR_BEGIN(
-            pubSubNode.begin(PubSubStarTest::makePubSubConfig(
-                "PubSubStar", 5,
-                Totem::TaskController::Config::CorePreference::specific(1))));
+        ABORT_IF_ERR_BEGIN(pubSubNode.begin(PubSubStarTest::makePubSubConfig(
+            "PubSubStar", 5,
+            Totem::TaskController::Config::CorePreference::specific(1))));
 
         ABORT_IF_ERR_BEGIN(lowSpeedSpiTransport.begin());
         ABORT_IF_ERR(lowSpeedSpiTransport.registerHandler(),
                      "Failed to register low-speed SPI PubSub frame handler");
         ABORT_IF_UNEXPECTED(
-            lowSpeedHandle,
-            pubSubNode.registerTransport(lowSpeedSpiTransport),
+            lowSpeedHandle, pubSubNode.registerTransport(lowSpeedSpiTransport),
             "Failed to register low-speed SPI PubSub transport");
         (void)lowSpeedHandle;
 
@@ -612,9 +594,9 @@ struct PubSubMultiSpiStarMasterSetup {
         ABORT_IF_ERR_BEGIN(rs485Transport.begin());
         ABORT_IF_ERR(rs485Transport.registerHandler(),
                      "Failed to register IO RS485 PubSub frame handler");
-        ABORT_IF_UNEXPECTED(
-            rs485Handle, pubSubNode.registerTransport(rs485Transport),
-            "Failed to register IO RS485 PubSub transport");
+        ABORT_IF_UNEXPECTED(rs485Handle,
+                            pubSubNode.registerTransport(rs485Transport),
+                            "Failed to register IO RS485 PubSub transport");
         (void)rs485Handle;
 
         PubSubService::set(pubSubNode);
@@ -673,8 +655,8 @@ struct PubSubMultiSpiStarMasterSetup {
         };
     }
 
-    [[nodiscard]] static Rs485Deps makeRs485Deps(PubSubStarTest::PubSubNode &node,
-                                                 Rs485Link &link) {
+    [[nodiscard]] static Rs485Deps
+    makeRs485Deps(PubSubStarTest::PubSubNode &node, Rs485Link &link) {
         return Rs485Deps{
             .base = PubSubStarTest::makeBaseDeps(
                 node, static_cast<uint8_t>(Transport::RS485), "PubSub-RS485"),
@@ -746,8 +728,7 @@ template <class Link> struct PubSubStarSpiEdgeSetup {
         const char *consumerName = "PubSub-star-spi";
         const char *publishLabel = "spi star test";
         Topic publishTopic = Topic::None;
-        std::array<Topic, PubSubStarTest::maxSubscribeTopics>
-            subscribeTopics{};
+        std::array<Topic, PubSubStarTest::maxSubscribeTopics> subscribeTopics{};
         size_t subscribeTopicCount = 0;
         std::array<PubSubStarTest::RouteDef, AppStats::maxRoutes>
             receiveRoutes{};
@@ -769,13 +750,11 @@ template <class Link> struct PubSubStarSpiEdgeSetup {
 
     PubSubStarSpiEdgeSetup(Totem::TaskController::IRegistry &taskRegistry,
                            Link &link, Role role, Config config)
-        : pubSubNode(taskRegistry,
-                     static_cast<PubSubStarTest::NodeId>(
-                         NodeData::PubSub::nodeId)),
+        : pubSubNode(taskRegistry, static_cast<PubSubStarTest::NodeId>(
+                                       NodeData::PubSub::nodeId)),
           config(config),
           transport(makeSpiDeps(pubSubNode, link, "PubSub-SPI")),
-          messagePool(PubSubService::nextMessageId),
-          stats{},
+          messagePool(PubSubService::nextMessageId), stats{},
           consumer{this->config.consumerName, &stats,
                    this->config.receiveRoutes.data(),
                    this->config.receiveRouteCount} {}
@@ -787,9 +766,9 @@ template <class Link> struct PubSubStarSpiEdgeSetup {
         ABORT_IF_ERR_BEGIN(transport.begin());
         ABORT_IF_ERR(transport.registerHandler(),
                      "Failed to register SPI PubSub frame handler");
-        ABORT_IF_UNEXPECTED(
-            transportHandle, pubSubNode.registerTransport(transport),
-            "Failed to register SPI PubSub transport");
+        ABORT_IF_UNEXPECTED(transportHandle,
+                            pubSubNode.registerTransport(transport),
+                            "Failed to register SPI PubSub transport");
         (void)transportHandle;
         PubSubService::set(pubSubNode);
 
@@ -913,8 +892,8 @@ template <class Link> struct PubSubStarSpiEdgeSetup {
     }
 
     ReturnCode publishTestMessage() {
-        auto message = PubSubStarTest::makeMessage(++sequence,
-                                                   config.publishLabel);
+        auto message =
+            PubSubStarTest::makeMessage(++sequence, config.publishLabel);
 
         auto messageIdResult = messagePool.store(message);
         if (!messageIdResult) {
@@ -983,8 +962,8 @@ template <class Link> struct PubSubStarSpiEdgeSetup {
 };
 
 template <class Link> struct PubSubStarRs485EdgeSetup {
-    using InputOutputPubSub = Totem::Data::PubSub::PubSubData<
-        Totem::Data::NodeName::InputOutput>;
+    using InputOutputPubSub =
+        Totem::Data::PubSub::PubSubData<Totem::Data::NodeName::InputOutput>;
     using Transport = InputOutputPubSub::Transport;
     using Rs485Transport =
         Totem::PubSubBackend::Transports::Rs485Transport<Link>;
@@ -999,8 +978,7 @@ template <class Link> struct PubSubStarRs485EdgeSetup {
         const char *consumerName = "PubSub-star-io";
         const char *publishLabel = "io power to spi";
         Topic publishTopic = Topic::Power;
-        std::array<Topic, PubSubStarTest::maxSubscribeTopics>
-            subscribeTopics{};
+        std::array<Topic, PubSubStarTest::maxSubscribeTopics> subscribeTopics{};
         size_t subscribeTopicCount = 0;
         std::array<PubSubStarTest::RouteDef, AppStats::maxRoutes>
             receiveRoutes{};
@@ -1018,13 +996,11 @@ template <class Link> struct PubSubStarRs485EdgeSetup {
 
     PubSubStarRs485EdgeSetup(Totem::TaskController::IRegistry &taskRegistry,
                              Link &link, Config config)
-        : pubSubNode(taskRegistry,
-                     static_cast<PubSubStarTest::NodeId>(
-                         NodeData::PubSub::nodeId)),
+        : pubSubNode(taskRegistry, static_cast<PubSubStarTest::NodeId>(
+                                       NodeData::PubSub::nodeId)),
           config(config),
           transport(makeRs485Deps(pubSubNode, link, "PubSub-RS485")),
-          messagePool(PubSubService::nextMessageId),
-          stats{},
+          messagePool(PubSubService::nextMessageId), stats{},
           consumer{this->config.consumerName, &stats,
                    this->config.receiveRoutes.data(),
                    this->config.receiveRouteCount} {}
@@ -1037,9 +1013,9 @@ template <class Link> struct PubSubStarRs485EdgeSetup {
         ABORT_IF_ERR_BEGIN(transport.begin());
         ABORT_IF_ERR(transport.registerHandler(),
                      "Failed to register RS485 PubSub frame handler");
-        ABORT_IF_UNEXPECTED(
-            transportHandle, pubSubNode.registerTransport(transport),
-            "Failed to register RS485 PubSub transport");
+        ABORT_IF_UNEXPECTED(transportHandle,
+                            pubSubNode.registerTransport(transport),
+                            "Failed to register RS485 PubSub transport");
         (void)transportHandle;
         PubSubService::set(pubSubNode);
 
@@ -1108,8 +1084,8 @@ template <class Link> struct PubSubStarRs485EdgeSetup {
     }
 
     ReturnCode publishTestMessage() {
-        auto message = PubSubStarTest::makeMessage(++sequence,
-                                                   config.publishLabel);
+        auto message =
+            PubSubStarTest::makeMessage(++sequence, config.publishLabel);
 
         auto messageIdResult = messagePool.store(message);
         if (!messageIdResult) {

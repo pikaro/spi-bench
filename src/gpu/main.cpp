@@ -25,6 +25,7 @@ PubSubStarSpiEdgeSetup<Totem::Wire::Spi::Slave> pubSubStar{
     core.taskRegistry, spiSlave, gpuStarRole()};
 
 void setup() {
+    ABORT_IF_ERR_BEGIN(core.beginStatusLedEarly(statusLedConfig));
     ::platform::delay(::platform::ms_to_ticks(3000));
 
     core.setup();
@@ -35,6 +36,8 @@ void setup() {
     ABORT_IF_ERR_BEGIN(ledDisplay.subscribePubSub());
 
     _log_i("Setup complete");
+    ABORT_IF_ERR(StatusLedService::setTargetsReady(),
+                 "Failed to set status LED targets-ready state");
 }
 
 extern "C" {

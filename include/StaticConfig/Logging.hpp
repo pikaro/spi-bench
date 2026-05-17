@@ -17,6 +17,7 @@ struct LoggingMinimumLevel {
     static constexpr LogLevel spi = defaultMinimum;
     static constexpr LogLevel clock = defaultMinimum;
     static constexpr LogLevel ledPwm = defaultMinimum;
+    static constexpr LogLevel statusLed = defaultMinimum;
     static constexpr LogLevel input = LogLevel::Verbose;
     static constexpr LogLevel esp = LogLevel::Verbose;
     static constexpr LogLevel audio = LogLevel::Verbose;
@@ -36,6 +37,7 @@ struct LoggingDefaultLevel {
     static constexpr std::optional<LogLevel> spi = LogLevel::Verbose;
     static constexpr std::optional<LogLevel> clock = std::nullopt;
     static constexpr std::optional<LogLevel> ledPwm = std::nullopt;
+    static constexpr std::optional<LogLevel> statusLed = std::nullopt;
     static constexpr std::optional<LogLevel> input = std::nullopt;
     static constexpr std::optional<LogLevel> esp = std::nullopt;
     static constexpr std::optional<LogLevel> audio = std::nullopt;

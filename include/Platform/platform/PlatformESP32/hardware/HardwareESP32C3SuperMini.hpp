@@ -29,6 +29,8 @@ enum class Esp32C3SuperMiniPin : uint8_t {
     StrappingGPIO2 = GPIO_NUM_2,
     StrappingGPIO8 = GPIO_NUM_8,
     StrappingGPIO9 = GPIO_NUM_9,
+
+    PwmLed = GPIO_NUM_8,
 };
 
 } // namespace platform

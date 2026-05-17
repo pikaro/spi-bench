@@ -10,6 +10,7 @@
 #include "LedPwm/Interfaces/Config.hpp"
 #include "Platform/Hardware.hpp"
 #include "StaticConfig/Stacks.hpp"
+#include "StatusLed/Interfaces/Config.hpp"
 #include "TaskController/Interfaces/Config.hpp"
 #include "Wire/I2C/Interfaces/DisplayConfig.hpp"
 #include "Wire/I2C/Interfaces/MasterConfig.hpp"
@@ -211,4 +212,7 @@ inline Totem::Wire::Spi::SlaveConfig spiSlaveConfig{
     .attentionPin = Pin::GPIO17,
 };
 
-// statusled GPIO16
+inline constexpr Totem::StatusLed::Config statusLedConfig{
+    .configured = true,
+    .pin = Pin::GPIO16,
+};

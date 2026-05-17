@@ -26,6 +26,7 @@ PubSubMultiSpiStarMasterSetup<Totem::Wire::Spi::Master,
 platform::Gpio ledLevelShifterOutputEnable;
 
 void setup() {
+    ABORT_IF_ERR_BEGIN(core.beginStatusLedEarly(statusLedConfig));
     ::platform::delay(::platform::ms_to_ticks(3000));
 
     core.setup();
@@ -59,6 +60,8 @@ void setup() {
         "Failed to initialize LED level shifter output enable GPIO");
 
     _log_i("Setup complete");
+    ABORT_IF_ERR(StatusLedService::setTargetsReady(),
+                 "Failed to set status LED targets-ready state");
 }
 
 extern "C" {

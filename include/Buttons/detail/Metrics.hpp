@@ -3,6 +3,7 @@
 #include "Macros/Facade.hpp"
 #include "MetricsBackend/Interfaces/Types.hpp"
 #include "Services/Metrics.hpp" // IWYU pragma: keep
+#include <cstdint>
 
 namespace Totem::Buttons::detail {
 
@@ -95,8 +96,14 @@ struct Metrics {
         };
     }
 
-    void addIsrEvent() const { METRIC_INCR(diagnosticGroup, isrEvents, 1); }
-    void addIsrDrop() const { METRIC_INCR(coreGroup, isrDrops, 1); }
+    void addIsrEvents(uint32_t count) const {
+        METRIC_INCR(diagnosticGroup, isrEvents, count);
+    }
+    void addIsrDrops(uint32_t count) const {
+        METRIC_INCR(coreGroup, isrDrops, count);
+    }
+    void addIsrEvent() const { addIsrEvents(1); }
+    void addIsrDrop() const { addIsrDrops(1); }
     void addPollChange() const {
         METRIC_INCR(diagnosticGroup, pollChanges, 1);
     }

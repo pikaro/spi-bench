@@ -13,7 +13,9 @@
 #include "Services/Commands.hpp"
 #include "Services/FileSystem.hpp"
 #include "Services/Metrics.hpp"
+#include "Services/StatusLed.hpp"
 #include "StaticConfig/Logging.hpp"
+#include "StatusLed/Facade.hpp"
 #include "Support/CoreCommands.hpp"
 #include "TaskControllerRegistry/Facade.hpp"
 #include "Types/Error.hpp"
@@ -21,12 +23,17 @@
 
 struct CoreSetup {
     CoreSetup()
-        : metricsBinding(metricsBackend), aggregator(taskRegistry),
+        : metricsBinding(metricsBackend), statusLedBinding(statusLed),
+          aggregator(taskRegistry),
           errorJournal(taskRegistry),
           commandController(taskRegistry),
           consoleSource(commandController.store(), &commandController,
                         Totem::CommandBackend::Controller::wake),
           systemTaskSource(taskRegistry), monitoring(taskRegistry) {
+    }
+
+    ReturnCode beginStatusLedEarly(const Totem::StatusLed::Config &config) {
+        return statusLed.begin(config);
     }
 
     void setup() {
@@ -80,10 +87,13 @@ struct CoreSetup {
         ABORT_IF_ERR_BEGIN(commandController.begin());
 
         _log_i("Core setup complete");
+        ABORT_IF_ERR(StatusLedService::setCoreReady(),
+                     "Failed to set status LED core-ready state");
     }
 
-    ReturnCode work(uint32_t /*unused*/) {
+    ReturnCode work(uint32_t nowMs) {
         auto ret = OK();
+        ret.combine(StatusLedService::work(nowMs));
         if (auto reapResult = taskRegistry.reap(); !reapResult.ok()) {
             _log_e("Error during task registry reap: " ERR_FMT,
                    ERR_ARG(reapResult));
@@ -112,8 +122,16 @@ struct CoreSetup {
         }
     };
 
+    struct StatusLedBinding {
+        explicit StatusLedBinding(Totem::StatusLed::detail::IService &backend) {
+            StatusLedService::set(backend);
+        }
+    };
+
     Totem::MetricsBackend::Backend metricsBackend;
     MetricsBinding metricsBinding;
+    Totem::StatusLed::StatusLed statusLed;
+    StatusLedBinding statusLedBinding;
     Totem::TaskControllerRegistry::Registry taskRegistry;
     Totem::LoggingBackend::Aggregator aggregator;
     Totem::LoggingBackend::ConsoleSink consoleOutput;

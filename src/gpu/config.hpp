@@ -3,6 +3,7 @@
 #include "Data.hpp"
 #include "Platform/Hardware.hpp"
 #include "StaticConfig/Stacks.hpp"
+#include "StatusLed/Interfaces/Config.hpp"
 #include "Wire/Spi/Interfaces/SlaveConfig.hpp"
 #include "Wire/Spi/Interfaces/Types.hpp"
 
@@ -62,6 +63,11 @@ inline Totem::Wire::Spi::SlaveConfig spiSlaveConfig{
             .notifyTimeoutMs = 10,
         },
     .attentionPin = gpuAttentionPin(),
+};
+
+inline constexpr Totem::StatusLed::Config statusLedConfig{
+    .configured = true,
+    .pin = Pin::StatusLed,
 };
 
 // Strobe GPIO10

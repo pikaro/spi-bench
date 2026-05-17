@@ -2,6 +2,7 @@
 
 #include "Platform/Hardware.hpp"
 #include "StaticConfig/Stacks.hpp"
+#include "StatusLed/Interfaces/Config.hpp"
 #include "TaskController/Interfaces/Config.hpp"
 #include "Wire/Rs485/Interfaces/MasterConfig.hpp"
 #include "Wire/Spi/Interfaces/MasterConfig.hpp"
@@ -138,5 +139,10 @@ inline Totem::Wire::Spi::MasterConfig spiMasterBusLowSpeedConfig{
 inline constexpr Pin ledLevelShifterOutputEnablePin = Pin::GPIO13;
 // The current 74AHCT124 LED output-enable line is active-low.
 inline constexpr bool ledLevelShifterOutputEnabledLevel = false;
+
+inline constexpr Totem::StatusLed::Config statusLedConfig{
+    .configured = true,
+    .pin = Pin::StatusLed,
+};
 
 // Strobe GPIO6

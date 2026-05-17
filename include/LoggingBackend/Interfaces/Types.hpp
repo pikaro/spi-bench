@@ -53,6 +53,7 @@ enum class LogComponent : uint8_t {
     Spi,
     Clock,
     LedPwm,
+    StatusLed,
     Input,
     Esp,
     Audio,
@@ -82,6 +83,8 @@ constexpr const char *log_component_to_string(LogComponent component) {
         return "clk";
     case LogComponent::LedPwm:
         return "led";
+    case LogComponent::StatusLed:
+        return "sta";
     case LogComponent::Input:
         return "inp";
     case LogComponent::Esp:
@@ -119,6 +122,7 @@ constexpr Color log_component_to_color(LogComponent component) {
         return Color::Red;
 
     case LogComponent::LedPwm:
+    case LogComponent::StatusLed:
         return Color::BrightWhite;
 
     case LogComponent::Input:

@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "Services/StatusLed.hpp"
+
 #define INTERNAL_FAIL_IF_IMPL(cond, why, action, msg, ...)                     \
     do {                                                                       \
         if (cond) {                                                            \
@@ -28,6 +30,7 @@
 
 #define INTERNAL_ABORT_DELAYED                                                 \
     do {                                                                       \
+        (void)StatusLedService::recordCritical();                              \
         ::platform::delay(::platform::ms_to_ticks(100));                       \
         abort();                                                               \
     } while (0)

@@ -41,8 +41,8 @@ inline constexpr auto componentDefaultLogLevels = make_default_log_levels(
     LoggingDefaultLevel::taskControllerRegistry, LoggingDefaultLevel::output,
     LoggingDefaultLevel::rs485, LoggingDefaultLevel::spi,
     LoggingDefaultLevel::clock, LoggingDefaultLevel::ledPwm,
-    LoggingDefaultLevel::input, LoggingDefaultLevel::esp,
-    LoggingDefaultLevel::audio);
+    LoggingDefaultLevel::statusLed, LoggingDefaultLevel::input,
+    LoggingDefaultLevel::esp, LoggingDefaultLevel::audio);
 
 static constexpr std::optional<LogLevel>
 default_level_for(LogComponent component) {

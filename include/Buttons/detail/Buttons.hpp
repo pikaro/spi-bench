@@ -22,7 +22,9 @@
 #include "Types/Gpio.hpp"
 #include "Types/Signal.hpp"
 #include <array>
+#include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 
 namespace Totem::Buttons::detail {
@@ -102,6 +104,7 @@ class Buttons : public HasLifecycle<Buttons, Config>,
 
     ReturnCode _onEnd() {
         auto ret = OK();
+        _flushIsrMetrics();
         ret.combine(this->_endTaskController());
         for (size_t i = 0; i < config().buttons.size(); ++i) {
             if (auto deinitRet = _gpios[i].deinit(); !deinitRet) {
@@ -116,6 +119,7 @@ class Buttons : public HasLifecycle<Buttons, Config>,
 
     ReturnCode _onTaskStep() {
         auto ret = OK();
+        _flushIsrMetrics();
         GpioEvent event{};
         while (Totem::Queue::Platform::receive(_eventQueue, &event, 0).ok()) {
             ret.combine(_publishGpioEvent(event));
@@ -253,6 +257,20 @@ class Buttons : public HasLifecycle<Buttons, Config>,
         return std::nullopt;
     }
 
+    void _flushIsrMetrics() {
+        const auto isrEvents =
+            _isrEvents.exchange(0, std::memory_order_relaxed);
+        if (isrEvents != 0) {
+            metrics().addIsrEvents(isrEvents);
+        }
+
+        const auto isrDrops =
+            _isrDrops.exchange(0, std::memory_order_relaxed);
+        if (isrDrops != 0) {
+            metrics().addIsrDrops(isrDrops);
+        }
+    }
+
     static void _isrCallback(void *ctx, GpioEvent event) {
         auto *buttons = static_cast<Buttons *>(ctx);
         buttons->_handleGpioEvent(event);
@@ -262,9 +280,11 @@ class Buttons : public HasLifecycle<Buttons, Config>,
         if (_eventQueue == nullptr) {
             return;
         }
-        metrics().addIsrEvent();
+        _isrEvents.fetch_add(1, std::memory_order_relaxed);
         if (!Totem::Queue::Platform::sendFromIsr(_eventQueue, &event)) {
-            metrics().addIsrDrop();
+            _isrDrops.fetch_add(1, std::memory_order_relaxed);
+            Totem::TaskController::Controller::signalTaskFromIsr(_task,
+                                                                 Signal::Ping);
             return;
         }
         Totem::TaskController::Controller::signalTaskFromIsr(_task,
@@ -278,6 +298,8 @@ class Buttons : public HasLifecycle<Buttons, Config>,
     std::array<::platform::Gpio, ButtonConfig::maxButtons> _gpios;
     std::array<bool, ButtonConfig::maxButtons> _lastLevels{};
     std::array<bool, ButtonConfig::maxButtons> _levelsKnown{};
+    std::atomic<uint32_t> _isrEvents{0};
+    std::atomic<uint32_t> _isrDrops{0};
 
     MessagePool _messagePool;
 

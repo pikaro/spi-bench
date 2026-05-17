@@ -91,6 +91,19 @@ Component header boundaries are described in [structure.md](structure.md):
 lightweight public types that external code needs to name directly, and
 `detail/` owns implementation internals.
 
+### Status LED
+
+`include/StatusLed/` provides the global RGB status LED component exposed
+through `include/Services/StatusLed.hpp`. It is initialized from `CoreSetup`
+before the long node setup delay where a node has configured WS2812B hardware,
+shows cyan while booting, blue after core setup, and green after the node target
+setup completes. Consumers register named states through the tiny
+`StatusLed::Directory` handle and flip the returned `StateHandle`; active
+critical, error, warning, then informational states are selected in priority
+order and cycled every 500 ms. The current no-FastLED backend drives one
+WS2812B with ESP-IDF RMT and only writes the retained LED color when the
+selected RGB value changes.
+
 ### IO Lighting
 
 The current `env:io` board is an ESP32-C3 side node intended to sit inside the

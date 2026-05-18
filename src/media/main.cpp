@@ -8,7 +8,7 @@
 #include "Platform/PlatformSelect.hpp"
 #include "Setups/ClockSync.hpp"
 #include "Setups/Core.hpp"
-#include "Setups/PubSubStarTest.hpp"
+#include "Setups/PubSubNetwork.hpp"
 #include "Types/Error.hpp"
 #include "Wire/I2C/Facade.hpp"
 #include "Wire/Spi/Facade.hpp"
@@ -27,9 +27,9 @@ Totem::Audio::FftDisplay fftDisplayVisualizer{core.taskRegistry, fftAnalyzer,
 
 Totem::Wire::Spi::Slave spiSlave{core.taskRegistry};
 ClockSyncSetup<Totem::Wire::Spi::Slave> clockSync{clockSlave, spiSlave};
-PubSubStarSpiEdgeSetup<Totem::Wire::Spi::Slave> pubSubStar{
-    core.taskRegistry, spiSlave,
-    PubSubStarSpiEdgeSetup<Totem::Wire::Spi::Slave>::Role::Media};
+PubSubNetworkSpiEdgeSetup<Totem::Wire::Spi::Slave,
+                          Totem::Data::NodeName::Media>
+    pubSubNetwork{core.taskRegistry, spiSlave};
 
 namespace {
 
@@ -97,7 +97,7 @@ void setup() {
     }
 
     ABORT_IF_ERR_BEGIN(spiSlave.begin(spiSlaveConfig));
-    pubSubStar.setup();
+    pubSubNetwork.setup();
     ABORT_IF_ERR_BEGIN(beginMediaAudioSource(audioSource));
     ABORT_IF_ERR_BEGIN(fftAnalyzer.begin(fftAnalyzerConfig));
 
@@ -115,7 +115,6 @@ void app_main() {
     for (;;) {
         const auto nowMs = ::platform::get_time();
         (void)core.work(nowMs);
-        (void)pubSubStar.work(nowMs);
         (void)clockSync.work(nowMs);
         ::platform::delay(::platform::ms_to_ticks(1));
     }

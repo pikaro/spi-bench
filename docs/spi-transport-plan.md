@@ -266,10 +266,12 @@ control-plane soft state, not benchmark traffic. It prevents one missed
 subscription advertisement during link bring-up from permanently black-holing
 application data until reboot.
 
-The hardware PubSub star harness currently drives synthetic traffic from IO to
-media/GPU0/GPU1 and from media back to IO/GPU0/GPU1. The larger harness message
-pools are intentional: the test should expose transport and scheduling pressure
-before failing from a small local payload pool.
+The hardware PubSub star regression harness drives synthetic traffic from IO to
+media/GPU0/GPU1 and from media back to IO/GPU0/GPU1. Production node
+entrypoints use `include/Setups/PubSubNetwork.hpp` instead, which registers the
+same physical transports without synthetic publishers or subscribers. The
+larger harness message pools are intentional: the test should expose transport
+and scheduling pressure before failing from a small local payload pool.
 
 ## Known Limitations
 

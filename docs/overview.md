@@ -17,18 +17,24 @@ events and render their own LED segment locally.
 ## Current Scope
 
 - `env:master`, `env:media`, `env:gpu0`, `env:gpu1`, and `env:io` are active
-    targets for the current hardware PubSub star test. The master owns a
+    targets for the current hardware PubSub network. The master owns a
     low-speed SPI bus currently wired to media, a high-speed SPI bus shared by
     GPU0 and GPU1, and one RS485 link to IO.
-- The active proof routes synthetic IO power events over RS485 through the
-    master to media, GPU0, and GPU1 while media publishes synthetic beat events
-    back through the master to IO, GPU0, and GPU1.
+- Production node entrypoints use `include/Setups/PubSubNetwork.hpp`, which
+    registers the real transports and exposes `PubSubService` without starting
+    synthetic test publishers or subscribers. The synthetic multi-board
+    regression harness remains in `include/Setups/PubSubStarTest.hpp`.
 - Hardware SPI now supports multiple logical master links sharing the same
     ESP32 SPI bus. The active high-speed bus uses one PubSub SPI router
     transport with GPU0 and GPU1 peers. The low-speed bus remains a
     point-to-point media link for this prototype stage; the target topology
     still needs four GPU peers on high-speed SPI and media, LoRA radio, and GPS
     on the low-speed bus.
+- GPU LED presentation is currently synchronized by a master-driven GPIO
+    present strobe: master GPIO6 produces a 125 Hz rising-edge cadence and GPU
+    nodes receive it on GPIO10. GPU LED ownership is explicit per firmware
+    image so interleaved wiring can map `gpu0` to groups 0 and 2 and `gpu1` to
+    groups 1 and 3.
 - There is no `env:slave` in this checkout. Historical RS485 slave
     documentation may refer to that environment, but `platformio.ini` no
     longer defines it.

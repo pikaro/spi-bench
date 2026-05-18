@@ -4,6 +4,7 @@
 #include "Platform/Hardware.hpp"
 #include "StaticConfig/Stacks.hpp"
 #include "StatusLed/Interfaces/Config.hpp"
+#include "Types/Gpio.hpp"
 #include "Wire/Spi/Interfaces/SlaveConfig.hpp"
 #include "Wire/Spi/Interfaces/Types.hpp"
 
@@ -70,4 +71,5 @@ inline constexpr Totem::StatusLed::Config statusLedConfig{
     .pin = Pin::StatusLed,
 };
 
-// Strobe GPIO10
+inline constexpr Pin ledPresentStrobeInputPin = Pin::GPIO10;
+inline constexpr GpioPull ledPresentStrobeInputPull = GpioPull::Down;

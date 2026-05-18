@@ -10,7 +10,7 @@
 #include "Services/PubSub.hpp"
 #include "Setups/ClockSync.hpp"
 #include "Setups/Core.hpp"
-#include "Setups/PubSubStarTest.hpp"
+#include "Setups/PubSubNetwork.hpp"
 #include "Types/Error.hpp"
 #include "Wire/Rs485/Facade.hpp"
 #include "config.hpp"
@@ -21,7 +21,7 @@ CoreSetup core{};
 Totem::Wire::Rs485::Slave rs485Slave{core.taskRegistry};
 Totem::Clock::Clock clockSlave{Totem::Clock::Clock::Role::Slave};
 ClockSyncSetup<Totem::Wire::Rs485::Slave> clockSync{clockSlave, rs485Slave};
-PubSubStarRs485EdgeSetup<Totem::Wire::Rs485::Slave> pubSubStar{
+PubSubNetworkRs485EdgeSetup<Totem::Wire::Rs485::Slave> pubSubNetwork{
     core.taskRegistry, rs485Slave};
 
 Totem::Buttons::Buttons buttons{core.taskRegistry};
@@ -41,7 +41,7 @@ void setup() {
     ABORT_IF_ERR_BEGIN(rs485Slave.begin(rs485SlaveConfig));
 
     ABORT_IF_ERR_BEGIN(ledPwm.begin(ledPwmConfig));
-    pubSubStar.setup();
+    pubSubNetwork.setup();
     ABORT_IF_UNEXPECTED(
         _,
         PubSubService::get().subscribe(
@@ -104,7 +104,6 @@ void app_main() {
     for (;;) {
         const auto nowMs = ::platform::get_time();
         (void)core.work(nowMs);
-        (void)pubSubStar.work(nowMs);
         (void)clockSync.work(nowMs);
 
         ::platform::delay(::platform::ms_to_ticks(1));

@@ -145,4 +145,7 @@ inline constexpr Totem::StatusLed::Config statusLedConfig{
     .pin = Pin::StatusLed,
 };
 
-// Strobe GPIO6
+inline constexpr Pin ledPresentStrobeOutputPin = Pin::GPIO6;
+inline constexpr uint32_t ledPresentStrobeFps = 125;
+inline constexpr uint64_t ledPresentStrobeHalfPeriodUs =
+    1000000ULL / (static_cast<uint64_t>(ledPresentStrobeFps) * 2ULL);

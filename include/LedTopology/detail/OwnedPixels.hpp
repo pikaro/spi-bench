@@ -4,35 +4,47 @@
 #include "StaticConfig/LedDisplay.hpp"
 #include <array>
 #include <cstddef>
+#include <optional>
 
 namespace Totem::LedTopology::detail {
 
 struct OwnedPixels {
-    static constexpr PhysicalPixelIndex physicalStart =
-        static_cast<PhysicalPixelIndex>(LedDisplayConfig::ownedPixelCount *
-                                        LedDisplayConfig::ledGroupIndex);
-    static constexpr PhysicalPixelIndex physicalEnd =
-        static_cast<PhysicalPixelIndex>(physicalStart +
-                                        LedDisplayConfig::ownedPixelCount);
-
     [[nodiscard]] static constexpr bool owns(PhysicalPixelIndex pixel) {
-        return pixel >= physicalStart && pixel < physicalEnd;
+        return ownedGroupSlot(pixel).has_value();
     }
 
     [[nodiscard]] static constexpr LocalPixelIndex
     localIndex(PhysicalPixelIndex pixel) {
-        return static_cast<LocalPixelIndex>(pixel - physicalStart);
+        const auto slot = *ownedGroupSlot(pixel);
+        const auto offset = static_cast<size_t>(pixel) %
+                            LedDisplayConfig::groupPixelCount;
+        return static_cast<LocalPixelIndex>(
+            (slot * LedDisplayConfig::groupPixelCount) + offset);
     }
 
     [[nodiscard]] static constexpr PhysicalPixelIndex
     physicalIndex(LocalPixelIndex pixel) {
-        return static_cast<PhysicalPixelIndex>(physicalStart + pixel);
+        const auto slot = static_cast<size_t>(pixel) /
+                          LedDisplayConfig::groupPixelCount;
+        const auto offset = static_cast<size_t>(pixel) %
+                            LedDisplayConfig::groupPixelCount;
+        return static_cast<PhysicalPixelIndex>(
+            (LedDisplayConfig::nodeGroups[slot] *
+             LedDisplayConfig::groupPixelCount) +
+            offset);
     }
 
     [[nodiscard]] static constexpr DataLineSpan dataLine(uint8_t line) {
-        const auto localStart =
-            static_cast<LocalPixelIndex>(line *
+        const auto groupSlot =
+            static_cast<size_t>(line) / LedDisplayConfig::dataLinesPerNodeGroup;
+        const auto groupLine =
+            static_cast<size_t>(line) % LedDisplayConfig::dataLinesPerNodeGroup;
+        const auto lineOffset =
+            static_cast<LocalPixelIndex>(groupLine *
                                          LedDisplayConfig::dataLinePixelCount);
+        const auto localStart =
+            static_cast<LocalPixelIndex>(
+                (groupSlot * LedDisplayConfig::groupPixelCount) + lineOffset);
         return DataLineSpan{
             .line = line,
             .physicalStart = physicalIndex(localStart),
@@ -47,6 +59,19 @@ struct OwnedPixels {
             lines[i] = dataLine(static_cast<uint8_t>(i));
         }
         return lines;
+    }
+
+  private:
+    [[nodiscard]] static constexpr std::optional<size_t>
+    ownedGroupSlot(PhysicalPixelIndex pixel) {
+        const auto group = static_cast<size_t>(pixel) /
+                           LedDisplayConfig::groupPixelCount;
+        for (size_t i = 0; i < LedDisplayConfig::nodeGroupCount; ++i) {
+            if (LedDisplayConfig::nodeGroups[i] == group) {
+                return i;
+            }
+        }
+        return std::nullopt;
     }
 };
 

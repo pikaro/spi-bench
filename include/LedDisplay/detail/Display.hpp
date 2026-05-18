@@ -13,14 +13,17 @@
 #include "LedTopology/Facade.hpp"
 #include "Macros/Facade.hpp"
 #include "Mutex/Facade.hpp"
+#include "Platform/Gpio.hpp"
 #include "PubSubBackend/detail/Codec.hpp"
 #include "Queue/Facade.hpp"
 #include "Services/PubSub.hpp"
 #include "TaskController/Interfaces/IRegistry.hpp"
 #include "TaskController/Interfaces/TaskHooks.hpp"
 #include "Types/Error.hpp"
+#include "Types/Gpio.hpp"
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -138,11 +141,32 @@ class Display : public HasLifecycle<Display, Config>,
         return OK();
     }
 
+    ReturnCode beginPresentStrobe(Pin pin,
+                                  GpioPull pull = GpioPull::Down) {
+        FAIL_IF_INACTIVE_ERR("Cannot initialize LED present strobe before %s "
+                             "begins",
+                             name);
+        if (_presentStrobeEnabled) {
+            return OK();
+        }
+        FAIL_IF_ERR_FWD(
+            _presentStrobeGpio.initInput(pin, pull, GpioInterrupt::Rising),
+            "Failed to initialize LED present strobe input");
+        FAIL_IF_ERR_FWD(
+            _presentStrobeGpio.registerIsr(this, _onPresentStrobeIsr),
+            "Failed to register LED present strobe ISR");
+        _presentStrobeEnabled = true;
+        _log_i("LedDisplay present strobe input ready on pin " SV_FMT,
+               MAGIC_SV_ARG(pin));
+        return OK();
+    }
+
   private:
     ReturnCode _onBegin() {
         static_assert(Config::dataLineCount <= 2,
                       "FastLED output currently supports two configured lines");
         DEFAULT_TASK();
+        _renderTask = task;
         INIT_QUEUE_OR_FAIL(_commandQueue);
         FAIL_IF_ERR_FWD(_output.begin(config()),
                         "Failed to initialize LED output backend");
@@ -154,6 +178,8 @@ class Display : public HasLifecycle<Display, Config>,
 
     ReturnCode _onEnd() {
         auto ret = OK();
+        ret.combine(_presentStrobeGpio.deinit());
+        _presentStrobeEnabled = false;
         ret.combine(_unsubscribePubSub());
         ret.combine(this->_endTaskController());
         ret.combine(this->_deregisterCommands());
@@ -206,6 +232,16 @@ class Display : public HasLifecycle<Display, Config>,
         return self->_captureFftFrame(frame);
     }
 
+    static void _onPresentStrobeIsr(void *owner, GpioEvent event) {
+        auto *self = static_cast<Display *>(owner);
+        if (self == nullptr || !event.level) {
+            return;
+        }
+        self->_pendingPresentStrobes.fetch_add(1, std::memory_order_relaxed);
+        Totem::TaskController::Controller::signalTaskFromIsr(
+            self->_renderTask, Signal::Ready);
+    }
+
     ReturnCode _captureFftFrame(const Totem::Audio::FftFrame &frame) {
         Totem::Mutex::ScopedSpinlockGuard guard{_inputLock};
         _latestFftFrame = frame;
@@ -216,6 +252,9 @@ class Display : public HasLifecycle<Display, Config>,
     ReturnCode _onTaskStep() {
         const auto nowMs = ::platform::get_time();
         const auto nowUs = ::platform::get_time_us();
+        if (_presentStrobeEnabled && !_consumePresentStrobe(nowMs)) {
+            return OK();
+        }
         _checkDitherCadence(nowMs, nowUs);
 
         FAIL_IF_ERR_FWD(_drainCommands(nowMs),
@@ -231,6 +270,29 @@ class Display : public HasLifecycle<Display, Config>,
         _maxShowUs = std::max(_maxShowUs, static_cast<uint32_t>(showUs));
         ++_frames;
         return OK();
+    }
+
+    [[nodiscard]] bool _consumePresentStrobe(uint32_t nowMs) {
+        const auto pending =
+            _pendingPresentStrobes.exchange(0, std::memory_order_acq_rel);
+        if (pending == 0) {
+            return false;
+        }
+        ++_presentStrobeFrames;
+        if (pending <= 1) {
+            return true;
+        }
+
+        _missedPresentStrobes += pending - 1U;
+        if (nowMs - _lastPresentMissLogMs >= 1000U) {
+            _lastPresentMissLogMs = nowMs;
+            _log_e("LED render missed %lu present strobes; pending=%lu "
+                   "totalMissed=%lu",
+                   static_cast<unsigned long>(pending - 1U),
+                   static_cast<unsigned long>(pending),
+                   static_cast<unsigned long>(_missedPresentStrobes));
+        }
+        return true;
     }
 
     ReturnCode _enqueue(const AnimationCommand &cmd) {
@@ -573,11 +635,18 @@ class Display : public HasLifecycle<Display, Config>,
     Totem::Audio::FftFrame _latestFftFrame{};
     bool _hasFftFrame = false;
     bool _pubSubSubscribed = false;
+    bool _presentStrobeEnabled = false;
     Totem::PubSubBackend::SubscriberKey _animationSub = 0;
     Totem::PubSubBackend::SubscriberKey _fftSub = 0;
+    ::platform::Gpio _presentStrobeGpio;
+    Totem::TaskController::RunnerKey _renderTask = 0;
+    std::atomic<uint32_t> _pendingPresentStrobes{0};
     uint16_t _lastRequestId = 0;
     uint64_t _lastFrameUs = 0;
     uint32_t _lastDitherErrorMs = 0;
+    uint32_t _lastPresentMissLogMs = 0;
+    uint32_t _presentStrobeFrames = 0;
+    uint32_t _missedPresentStrobes = 0;
     uint32_t _maxShowUs = 0;
     uint32_t _frames = 0;
     mutable ::platform::Spinlock _inputLock = ::platform::create_spinlock();

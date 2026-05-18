@@ -34,21 +34,26 @@ coding the full pipeline.
   the useful pipeline concepts and rewrite the diagnostic ring, spoke, strip,
   and index patterns.
 - Current bring-up should target 100 FPS.
-- The current free-running 100 FPS render cadence is bring-up scaffolding. The
-  production cadence should be driven by a master-generated GPIO present
+- The original free-running 100 FPS render cadence was bring-up scaffolding.
+  The current production cadence is driven by a master-generated GPIO present
   strobe.
 - The present strobe is a presentation boundary, not a render start. GPU nodes
   should render ahead where possible, then present the newest complete frame on
   the strobe edge.
-- Current two-node GPU setup uses equal groups and two data lines per node.
+- Current two-node GPU setup uses four equal LED groups total, with each GPU
+  node owning two explicit groups because the physical data-line wiring is
+  interleaved.
 - GPIO1 and GPIO2 are the initial output pins for each GPU node.
 - GPU nodes receive animation requests and state/events over PubSub. Boot
   animations are also requested over PubSub after the master has completed the
   node handshake.
-- `LED_GROUP_COUNT` and `LED_GROUP_INDEX` select the equal-sized node-owned LED
-  group. LED count is assumed to be divisible by group count.
+- `LED_GROUP_COUNT` selects the total number of equal LED groups.
+  `LED_NODE_GROUP_COUNT` and `LED_NODE_GROUPn` select the explicit groups owned
+  by a GPU firmware image. `LED_GROUP_INDEX` remains as the default
+  single-group compatibility value.
 - A separate compile-time data-line configuration selects how many output lines
-  exist on the node. The owned group is split into equal sequential line spans.
+  exist on the node. The owned groups are split evenly across those lines in
+  node-group order.
 - Animation command payloads should carry an opaque `std::byte` array. Each
   animation owns a small config struct that is decoded from that byte payload
   with the existing PubSub SerDe.
@@ -299,27 +304,38 @@ does not manually subtract offsets.
 
 Node ownership and output data lines are separate compile-time concerns:
 
-- `LED_GROUP_COUNT` and `LED_GROUP_INDEX` select the equal-sized logical
-  ownership group.
+- `LED_GROUP_COUNT` selects the total number of equal-sized physical LED
+  groups.
+- `LED_NODE_GROUP_COUNT` and `LED_NODE_GROUP0` through `LED_NODE_GROUP3` select
+  the explicit physical groups owned by this firmware image. Group IDs must be
+  unique and less than `LED_GROUP_COUNT`.
+- `LED_GROUP_INDEX` remains as a compatibility default for the one-group case:
+  if no explicit node group is configured, `LED_NODE_GROUP0` defaults to
+  `LED_GROUP_INDEX`.
 - `dataLineCount` selects how many LED library controllers/RMT devices are
   instantiated on that node.
-- `ownedPixelCount = totalPixels / ledGroupCount`.
-- `linePixelCount = ownedPixelCount / dataLineCount`.
-- static validation requires both divisions to be exact.
-- per-line descriptors map each local compact sequential span to a GPIO pin.
+- `groupPixelCount = totalPixels / LED_GROUP_COUNT`.
+- `ownedPixelCount = groupPixelCount * LED_NODE_GROUP_COUNT`.
+- `dataLineCount` must be at least `LED_NODE_GROUP_COUNT` and divisible by it.
+- each owned group is split evenly across the node's data lines assigned to
+  that group.
+- per-line descriptors map each local compact sequential span to a GPIO pin and
+  to the corresponding physical start index.
 
-For the current two-node setup, each GPU node owns two complete physical strips
-and exposes two data lines. Each line maps to one contiguous strip sequence.
-The initial per-node pins are GPIO1 and GPIO2.
+For the current two-node setup, the physical wiring is interleaved. Both GPU
+nodes are built with `LED_GROUP_COUNT=4`, `LED_NODE_GROUP_COUNT=2`, and two data
+lines. `gpu0` owns groups `0, 2`; `gpu1` owns groups `1, 3`. Each owned group
+maps to one data line. The per-node output pins are GPIO1 and GPIO2.
 
-For example, with 400 total LEDs, two GPU nodes, and two data lines per node:
+For example, with 400 total LEDs, four physical groups, two GPU nodes, and two
+data lines per node:
 
-- node 0 owns 0..199, line 0 drives 0..99, line 1 drives 100..199
-- node 1 owns 200..399, line 0 drives 200..299, line 1 drives 300..399
+- node 0 owns groups 0 and 2, line 0 drives 0..99, line 1 drives 200..299
+- node 1 owns groups 1 and 3, line 0 drives 100..199, line 1 drives 300..399
 
-If the same node-owned range is split across four data lines, each line drives
-50 sequential LEDs. This assumes the physical wiring follows the configured
-sequential split.
+If a future node owns two groups but exposes four data lines, each group gets
+two lines. With 100 LEDs per group, group 0 would split into 0..49 and 50..99,
+and group 2 would split into 200..249 and 250..299.
 
 ### Buffers
 
@@ -493,6 +509,21 @@ frame clock and drives a GPIO present strobe from a hardware timer at the
 target display cadence. GPU nodes treat that edge as permission to present the
 newest complete frame, not as a request to start rendering that frame.
 
+Current wiring and bring-up implementation:
+
+- master drives GPIO6 from a GPTimer at 125 Hz rising-edge cadence
+- GPU nodes receive the strobe on GPIO10 with a pulldown
+- the GPU GPIO ISR records a pending strobe and signals the LED display task
+- the current implementation renders and presents on that task wake-up, then
+  records repeated pending strobes as missed present events
+- reset monitoring with the exact 100 Hz strobe showed measured show intervals
+  slightly above `10000 us`, so the dither-cadence error may require either
+  timing refinement or the current faster strobe after hardware measurements
+- FastLED starts with internal FPS at zero and disables controller dithering
+  until it has measured at least 100 FPS. The FastLED backend re-enables
+  dithering once measured FPS recovers and logs a state-change error if it later
+  falls below the threshold.
+
 The GPU-side split should be:
 
 - a render task pinned to core 1 owns animation stepping, layer composition,
@@ -516,10 +547,9 @@ and controller calls, and it can wait if the previous RMT refresh is still in
 flight. Treat that wait as present backpressure, not as the normal wire-time
 cost of every frame.
 
-The initial software timer cadence should remain as a disconnected bring-up
-fallback until the master strobe output and GPU strobe input are implemented.
-After that, the software cadence is only a diagnostic fallback, not the
-production timing model.
+The software task timeout remains only as a diagnostic/disconnected fallback.
+Once the GPU strobe input is enabled, the LED display task skips timeout wakes
+that did not observe a strobe edge.
 
 ## ESP32 RMT Policy
 
@@ -594,21 +624,24 @@ one layer of the system. Do not implement all abstractions up front.
 
 Current status: the GPU implementation covers phases 1 through 6 and part of
 Phase 7. It adds `LedTopology`, `LedDisplay`, compile-time group/data-line
-ownership, FastLED-backed output, a temporary free-running 100 FPS
-render/present task, fixed animation slots, opaque byte-backed animation config
-payloads, the PubSub `Animation` topic, GPU animation-command subscription,
-FFT latest-state subscription, and `/anim` PubSub publishing from every node.
-GPU-local bring-up commands remain available through `/ledwave` and `/ledprim`.
-The master-driven present strobe, fixed layer stack, and beat/wheel latest-state
-subscribers remain future work.
+ownership with explicit per-node group lists, FastLED-backed output, a
+strobe-driven 100 FPS render/present task, fixed animation slots, opaque
+byte-backed animation config payloads, the PubSub `Animation` topic, GPU
+animation-command subscription, FFT latest-state subscription, and `/anim`
+PubSub publishing from every node. GPU-local bring-up commands remain available
+through `/ledwave` and `/ledprim`. The complete render-ahead/double-buffered
+present split, fixed layer stack, and beat/wheel latest-state subscribers remain
+future work.
 
 ### Phase 1: Skeleton
 
 - Add `LedTopology`, `LedDisplay`, and `StaticConfig/LedDisplay.hpp` skeletons
   following existing component structure.
-- Add compile-time config fields for topology, group count/index, data-line
-  count, GPIO1/GPIO2 pins, target FPS, brightness, and backend selections.
-- Add PlatformIO build flags for `LED_GROUP_COUNT` and `LED_GROUP_INDEX`.
+- Add compile-time config fields for topology, group count/index, explicit
+  node group list, data-line count, GPIO1/GPIO2 pins, target FPS, brightness,
+  and backend selections.
+- Add PlatformIO build flags for `LED_GROUP_COUNT`, `LED_GROUP_INDEX`,
+  `LED_NODE_GROUP_COUNT`, and `LED_NODE_GROUPn`.
 - Add empty lifecycle/task wiring that compiles for `gpu0` and `gpu1`.
 - No FastLED output, no animations, no PubSub schema changes beyond reserved
   names if needed.
@@ -617,7 +650,8 @@ subscribers remain future work.
 
 - Implement umbrella logical-to-physical mapping.
 - Implement compile-time group ownership and local index translation.
-- Implement equal sequential data-line splitting within each owned group.
+- Implement explicit owned group lists and equal sequential data-line splitting
+  within each owned group.
 - Add compile-time validation for divisibility and line spans.
 - Verify with compile checks and simple code inspection diagnostics.
 
@@ -668,11 +702,11 @@ subscribers remain future work.
 
 ### Phase 7: Present Strobe, PubSub Integration, Layers, And Maintenance
 
-- Add the master hardware-timer GPIO present output and the GPU GPIO strobe
-  input behind `StaticConfig`.
-- Split render and present responsibilities so render runs ahead on core 1 and
-  the strobe-triggered present path only flips/selects complete frames and
-  starts FastLED/RMT output.
+- The master hardware-timer GPIO present output and GPU GPIO strobe input now
+  exist behind per-node `config.hpp` values.
+- Refine the current strobe-driven task into split render and present
+  responsibilities so render runs ahead on core 1 and the strobe-triggered
+  present path only flips/selects complete frames and starts FastLED/RMT output.
 - Keep the software timer cadence as a diagnostic fallback for disconnected
   bring-up.
 - Add strobe counters, optional target `startFrame` scheduling, and repeated
@@ -779,12 +813,12 @@ the strips to be soldered.
 - Decide when to replace the local command/test hook with the real PubSub
   `Animation` topic. Current recommendation: use the local hook through Phase 6
   if PubSub tuning is still in progress.
-- Choose the strobe GPIO and electrical fan-out details. The design assumes a
-  master-driven present strobe, but the exact pin, pull configuration, and
-  distribution wiring still need to be selected.
-- Decide whether the production strobe should be exactly 100 Hz or slightly
-  above 100 Hz if FastLED's temporal-dither threshold proves sensitive to
-  measured cadence.
+- Decide whether the final present path needs a separate high-priority present
+  task plus double buffering, or whether the current strobe-woken render/show
+  task remains sufficient after timing measurements.
+- Decide whether 125 Hz remains the production strobe cadence after visual and
+  timing measurements, or whether a different margin above FastLED's 100 FPS
+  temporal-dither threshold is preferable.
 
 ## Explicit Non-Goals For The First Port
 

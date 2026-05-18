@@ -5,7 +5,7 @@
 #include "Platform/PlatformSelect.hpp"
 #include "Setups/ClockSync.hpp"
 #include "Setups/Core.hpp"
-#include "Setups/PubSubStarTest.hpp"
+#include "Setups/PubSubNetwork.hpp"
 #include "Wire/Spi/Facade.hpp"
 #include "config.hpp"
 
@@ -14,15 +14,8 @@ Totem::LedDisplay::Display ledDisplay{core.taskRegistry};
 Totem::Wire::Spi::Slave spiSlave{core.taskRegistry};
 Totem::Clock::Clock clockSlave{Totem::Clock::Clock::Role::Slave};
 ClockSyncSetup<Totem::Wire::Spi::Slave> clockSync{clockSlave, spiSlave};
-constexpr auto gpuStarRole() {
-    using Role = PubSubStarSpiEdgeSetup<Totem::Wire::Spi::Slave>::Role;
-    if constexpr (gpuNodeName == Totem::Data::NodeName::GPUNode1) {
-        return Role::GPU1;
-    }
-    return Role::GPU0;
-}
-PubSubStarSpiEdgeSetup<Totem::Wire::Spi::Slave> pubSubStar{
-    core.taskRegistry, spiSlave, gpuStarRole()};
+PubSubNetworkSpiEdgeSetup<Totem::Wire::Spi::Slave, gpuNodeName>
+    pubSubNetwork{core.taskRegistry, spiSlave};
 
 void setup() {
     ABORT_IF_ERR_BEGIN(core.beginStatusLedEarly(statusLedConfig));
@@ -31,8 +24,10 @@ void setup() {
     core.setup();
 
     ABORT_IF_ERR_BEGIN(spiSlave.begin(spiSlaveConfig));
-    pubSubStar.setup();
+    pubSubNetwork.setup();
     ABORT_IF_ERR_BEGIN(ledDisplay.begin());
+    ABORT_IF_ERR_BEGIN(ledDisplay.beginPresentStrobe(
+        ledPresentStrobeInputPin, ledPresentStrobeInputPull));
     ABORT_IF_ERR_BEGIN(ledDisplay.subscribePubSub());
 
     _log_i("Setup complete");
@@ -49,7 +44,6 @@ void app_main() {
     for (;;) {
         const auto nowMs = ::platform::get_time();
         (void)core.work(nowMs);
-        (void)pubSubStar.work(nowMs);
         (void)clockSync.work(nowMs);
 
         ::platform::delay(::platform::ms_to_ticks(1));

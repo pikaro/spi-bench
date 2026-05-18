@@ -28,18 +28,24 @@ current five-node graph:
 
 - `master` bridges one low-speed SPI link to `media`, one high-speed shared SPI
   router with `gpu0` and `gpu1`, and one RS485 link to `io`.
-- `io` can publish power/button-class events toward the SPI nodes through the
-  master.
-- `media` can publish beat/FFT-class events toward `io`, `gpu0`, and `gpu1`
-  through the master.
-- GPU nodes share the same event interests in this prototype shape, matching
-  the intended later four-GPU bus.
+- Production entrypoints use `include/Setups/PubSubNetwork.hpp` to register the
+  real transports and expose `PubSubService`. Test publishers and synthetic
+  subscribers are not active in production.
+- `io` publishes button-class events locally through PubSub today; forwarding
+  those events into animation commands is a higher-level component concern.
+- GPU nodes subscribe through `LedDisplay` to animation and FFT-frame events.
+  They share the same event interests in this prototype shape, matching the
+  intended later four-GPU bus.
+- Media owns the audio/FFT pipeline and the low-speed SPI transport. Publishing
+  beat/FFT events into animation-capable consumers is intentionally deferred
+  until the animation command surface is ready.
 
 The accepted behavior for this stage is reliable delivery, bounded static
-storage, graceful recovery after master or edge reset, and route-level latency
-visibility. `media -> io` is the current slowest route and may miss the 10 ms
-target; treat that as a measured performance limitation rather than a
-correctness failure unless drops, backpressure, or recovery errors appear.
+storage, graceful recovery after master or edge reset, and visibility through
+transport/core metrics plus the regression harness route metrics. `media -> io`
+is the current slowest route and may miss the 10 ms target; treat that as a
+measured performance limitation rather than a correctness failure unless drops,
+backpressure, or recovery errors appear.
 
 ## Traffic Classes
 
@@ -112,7 +118,7 @@ data handler and published during the normal PubSub transport polling path.
 `PubSubBackend/Transports/SpiTransport.hpp` is the hardware point-to-point SPI
 transport used by edge nodes and by the master's low-speed media link.
 `PubSubBackend/Transports/SpiRouterTransport.hpp` fronts multiple hardware SPI
-links as one shared-bus router transport. The current master star setup keeps
+links as one shared-bus router transport. The current master setup keeps
 transport IDs named for physical buses: low-speed SPI is a media point-to-point
 link, while high-speed SPI is one router transport with GPU0 and GPU1 peers.
 Do not model the target topology as one master PubSub transport per endpoint:
@@ -145,8 +151,21 @@ they immediately release it after queueing bytes into a link. That pattern adds
 locks, scans, copies, and static storage without representing the final wire
 driver.
 
-The active hardware harness for the current multi-board stage is
-`include/Setups/PubSubStarTest.hpp`. It runs one PubSub node per MCU:
+The production hardware setup is `include/Setups/PubSubNetwork.hpp`. It runs
+one PubSub node per MCU, registers only the real transports, and lets the
+owning components register application subscriptions:
+
+- master registers low-speed SPI, high-speed SPI, and RS485 transports and only
+  bridges traffic
+- media registers one SPI edge transport
+- GPU0 and GPU1 register SPI edge transports; `LedDisplay` subscribes to
+  animation and FFT-frame topics
+- IO registers one RS485 transport; the local button/PWM path subscribes to
+  button events
+
+The multi-board regression harness remains in
+`include/Setups/PubSubStarTest.hpp`. It runs the same physical graph with
+synthetic traffic:
 
 - master registers low-speed SPI, high-speed SPI, and RS485 transports and only
   bridges traffic

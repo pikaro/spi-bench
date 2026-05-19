@@ -6,11 +6,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TextIO
 
-
-LOCK_DIR = Path("/tmp")
-BLUE = "\033[34m"
-RESET = "\033[0m"
-ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+LOCK_DIR = Path('/tmp')
+BLUE = '\033[34m'
+RESET = '\033[0m'
+ANSI_RE = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 STDIN_LINE = object()
 STDIN_DIRECT = object()
 
@@ -33,8 +32,8 @@ class Monitor:
     spool_writer: TextIO | None = None
     command_fd: int | None = None
     command_keepalive_fd: int | None = None
-    buffer: str = ""
-    command_buffer: str = ""
+    buffer: str = ''
+    command_buffer: str = ''
     line_number: int = 0
     emitted_until: int = 0
     after_remaining: int = 0
@@ -57,6 +56,7 @@ class Config:
     summary: bool
     max_lines: int | None
     log_file: Path | None
+    command: str | None
 
     @property
     def single_env(self) -> bool:
@@ -93,23 +93,23 @@ class Runtime:
 
 
 def plain_label_for(env: str, width: int) -> str:
-    return f"{env:<{width}}"
+    return f'{env:<{width}}'
 
 
 def label_for(env: str, width: int, color: bool) -> str:
     label = plain_label_for(env, width)
     if color:
-        return f"{BLUE}{label}{RESET}"
+        return f'{BLUE}{label}{RESET}'
     return label
 
 
 def safe_env_name(env: str) -> str:
-    return re.sub(r"[^A-Za-z0-9_.-]+", "_", env)
+    return re.sub(r'[^A-Za-z0-9_.-]+', '_', env)
 
 
 def spool_path_for(env: str) -> Path:
-    return LOCK_DIR / f"monitor-multi.{safe_env_name(env)}.spool"
+    return LOCK_DIR / f'monitor-multi.{safe_env_name(env)}.spool'
 
 
 def command_path_for(env: str) -> Path:
-    return LOCK_DIR / f"monitor-multi.{safe_env_name(env)}.cmd"
+    return LOCK_DIR / f'monitor-multi.{safe_env_name(env)}.cmd'

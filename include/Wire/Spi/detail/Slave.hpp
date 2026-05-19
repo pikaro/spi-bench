@@ -593,6 +593,16 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
         const auto bytes = result->bytesTransferred > 0
                                ? result->bytesTransferred
                                : _queuedRxSize;
+        if (bytes > _queuedRxSize) {
+            _log_w("SPI slave transfer exceeded queued RX window bytes=%u "
+                   "window=%u; resetting link",
+                   static_cast<unsigned>(bytes),
+                   static_cast<unsigned>(_queuedRxSize));
+            FAIL_IF_ERR_FWD(_resetLink(ERR(CoreError, Overflow)),
+                            "Failed to reset SPI slave after overlong "
+                            "transfer");
+            return OK();
+        }
         if (bytes >= _queuedTxSize) {
             _transceiver.markTxConsumed();
         }
@@ -606,8 +616,6 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
                    static_cast<unsigned long>(
                        _completionCount.load(std::memory_order_acquire)));
         }
-        FAIL_IF(bytes > _rxBuffer.size(), ERR(CoreError, Overflow),
-                "SPI slave transfer exceeded RX buffer");
         if (bytes == 0) {
             return OK();
         }

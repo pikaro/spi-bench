@@ -15,3 +15,5 @@ log
 *.pyc
 __pycache__/
 data/
+telemetry/
+docs/wifi.md

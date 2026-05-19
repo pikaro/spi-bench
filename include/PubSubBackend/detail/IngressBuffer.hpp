@@ -79,6 +79,10 @@ class IngressBuffer : public ByteArenaImpl {
             header, SerDe::peekHeader(frame),
             "Failed to peek frame header for storage");
         log_trace_packet("ingress.storeFrame", header, name);
+        if (ByteArena::contains(header)) {
+            log_trace_packet("ingress.duplicate", header, name);
+            return std::optional<Envelope>{};
+        }
         if (!_canRememberSerialized(header)) {
             FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
                 data, SerDe::deserializeRaw(frame),

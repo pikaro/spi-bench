@@ -112,21 +112,13 @@ class Controller : public HasLifecycle<Controller, Config>,
             }
 
             auto dispatchResult = _dispatch(*pollResult);
-            if (dispatchResult == ERR(CoreError, NotFound)) {
-                _log_w("Command not found for input from transport " SV_FMT,
-                       SV_ARG(transport->displayName()));
-                continue;
-            }
-            if (dispatchResult.domain == ErrorDomain::Command) {
-                _log_w("Command dispatch error from transport " SV_FMT
+            if (!dispatchResult.ok()) {
+                _log_w("Command dispatch failed for transport " SV_FMT
                        ": " ERR_FMT,
                        SV_ARG(transport->displayName()),
                        ERR_ARG(dispatchResult));
                 continue;
             }
-            FAIL_IF_ERR_FWD(dispatchResult,
-                            "Failed to dispatch command from transport " SV_FMT,
-                            SV_ARG(transport->displayName()));
         }
         return OK();
     }

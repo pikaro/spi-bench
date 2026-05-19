@@ -273,6 +273,16 @@ inline std::expected<FileStats, ReturnCode> statPath(const char *path) {
     };
 }
 
+inline ReturnCode removePath(const char *path) {
+    FAIL_IF_NULL(path, ERR(CoreError, InvalidArgument),
+                 "Cannot remove null filesystem path");
+
+    errno = 0;
+    const auto ret = std::remove(path);
+    FAIL_IF(ret != 0, mapErrnoOrFailure(errno), "Failed to remove %s", path);
+    return OK();
+}
+
 inline ReturnCode mountLittleFS(const Config &config) {
     esp_vfs_littlefs_conf_t vfsConfig{};
     vfsConfig.base_path = config.basePath;
@@ -319,6 +329,10 @@ struct Platform {
 
     static std::expected<FileStats, ReturnCode> statPath(const char *path) {
         return Totem::FileSystem::detail::platform::statPath(path);
+    }
+
+    static ReturnCode removePath(const char *path) {
+        return Totem::FileSystem::detail::platform::removePath(path);
     }
 
     static ReturnCode mountLittleFS(const Config &config) {

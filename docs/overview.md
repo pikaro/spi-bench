@@ -164,6 +164,10 @@ failures, queued/handled command counts, and opt-in task-step profiling.
     sites to `/errors.log` with fixed slots, recent context lines, and
     trailing lines queued directly to its writer task. It stays quiet during
     expected storage failures and disables itself if the filesystem is full.
+- Runtime task statistics use ESP-IDF's 64-bit FreeRTOS runtime counter in
+    `sdkconfig.stack.esp32`, because the default 32-bit microsecond counter
+    wraps after about 71 minutes and makes long-running `/monitor` totals
+    misleading.
 - PlatformIO environment-specific `board_build.cmake_extra_args` must include
     parent environment arguments when overriding the field; otherwise ESP-IDF
     component flags such as `ENABLE_SPI` are silently dropped for that

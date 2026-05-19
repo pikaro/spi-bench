@@ -126,8 +126,13 @@ class Node : public HasLifecycle<Node, Config>,
         FAIL_IF_ERR_FWD(Totem::Queue::Platform::send(_publishQueue, &envelope),
                         "Failed to enqueue publish envelope for topic " SV_FMT,
                         MAGIC_SV_ARG(Topic, envelope.header.topic));
-        FAIL_IF_ERR_FWD(wake(),
-                        "Failed to wake PubSub task after local publish");
+        const auto wakeRet = wake();
+        if (!wakeRet.ok()) {
+            _log_w("%s: queued local publish for " MAGIC_PUBSUB_SV_FMT
+                   " but failed to wake PubSub task: " ERR_FMT,
+                   name, MAGIC_PUBSUB_SV_ARG(envelope.header),
+                   ERR_ARG(wakeRet));
+        }
         return OK();
     }
 

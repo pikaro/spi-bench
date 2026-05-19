@@ -207,6 +207,28 @@ class LittleFS : public HasLifecycle<LittleFS, Totem::FileSystem::Config> {
         return file.close();
     }
 
+    ReturnCode removeFile(std::string_view path) const {
+        FAIL_IF_INACTIVE_ERR("Cannot remove file before mount");
+        FAIL_IF(path.empty() || path == "/", ERR(CoreError, InvalidArgument),
+                "Refusing to remove LittleFS root");
+
+        PathBuffer<Config::maxPathLength> fullPath{};
+        auto full = makeFullPath(fullPath, config().basePath, path);
+        if (!full) {
+            return full.error();
+        }
+
+        auto stats = Platform::statPath(fullPath.c_str());
+        if (!stats) {
+            return stats.error();
+        }
+        FAIL_IF(stats->directory, ERR(CoreError, InvalidArgument),
+                "Refusing to remove LittleFS directory: " SV_FMT,
+                SV_ARG(path));
+
+        return Platform::removePath(fullPath.c_str());
+    }
+
     template <std::size_t ChunkSize>
     ReturnCode openReader(BasicFileChunkReader<File, ChunkSize> &reader,
                           std::string_view path) const {

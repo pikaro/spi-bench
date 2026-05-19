@@ -43,7 +43,7 @@ class SystemTaskSource : public ITaskSource {
     DELETE_MOVE(SystemTaskSource)
 
     ReturnCode forEachTaskSnapshot(ISnapshotSink &sink) override {
-        uint32_t totalRuntimeCounter = 0;
+        configRUN_TIME_COUNTER_TYPE totalRuntimeCounter = 0;
         auto countResponse = Platform::get_system_task_statuses(
             _taskStatuses, totalRuntimeCounter);
         FAIL_IF_UNEXPECTED_FWD(count, countResponse,

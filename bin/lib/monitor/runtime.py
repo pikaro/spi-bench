@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import errno
 import os
 import selectors
@@ -39,13 +40,13 @@ def read_monitor(monitor: Monitor, runtime: Runtime) -> bool:
     except OSError as exc:
         if exc.errno != errno.EIO:
             raise
-        data = b""
+        data = b''
 
     if not data:
         return False
 
-    text = data.decode(errors="replace")
-    monitor.buffer += text.replace("\r\n", "\n").replace("\r", "\n")
+    text = data.decode(errors='replace')
+    monitor.buffer += text.replace('\r\n', '\n').replace('\r', '\n')
     emit_buffered_lines(monitor, runtime)
     return True
 
@@ -67,7 +68,7 @@ def poll_spool(monitor: Monitor, runtime: Runtime) -> None:
         if not line:
             return
 
-        monitor.buffer += line.replace("\r\n", "\n").replace("\r", "\n")
+        monitor.buffer += line.replace('\r\n', '\n').replace('\r', '\n')
         emit_buffered_lines(monitor, runtime)
         if runtime.stop_reason:
             return
@@ -88,10 +89,10 @@ def terminate(monitors: list[Monitor]) -> None:
             continue
         try:
             os.killpg(monitor.pid, signal.SIGTERM)
-        except (PermissionError, ProcessLookupError):
+        except PermissionError, ProcessLookupError:
             try:
                 os.kill(monitor.pid, signal.SIGTERM)
-            except (PermissionError, ProcessLookupError):
+            except PermissionError, ProcessLookupError:
                 pass
 
 
@@ -131,51 +132,51 @@ def send_command_to_env(
         try:
             write_to_monitor(monitor, command)
         except (OSError, RuntimeError) as exc:
-            print(f"monitor-multi: failed to send to {target}: {exc}", file=sys.stderr)
+            print(f'monitor-multi: failed to send to {target}: {exc}', file=sys.stderr)
             return
         if announce:
-            print(f"monitor-multi: sent to {target}: {command}", file=sys.stderr)
+            print(f'monitor-multi: sent to {target}: {command}', file=sys.stderr)
         return
 
     if target not in runtime.config.envs:
-        print(f"monitor-multi: no active monitor for {target!r}", file=sys.stderr)
+        print(f'monitor-multi: no active monitor for {target!r}', file=sys.stderr)
         return
 
     try:
         write_to_owner_fifo(target, command)
     except OSError as exc:
         print(
-            f"monitor-multi: failed to send to owner for {target}: {exc}",
+            f'monitor-multi: failed to send to owner for {target}: {exc}',
             file=sys.stderr,
         )
         return
 
     if announce:
-        print(f"monitor-multi: sent to owner for {target}: {command}", file=sys.stderr)
+        print(f'monitor-multi: sent to owner for {target}: {command}', file=sys.stderr)
 
 
 def route_command(line: str, by_fd: dict[int, Monitor], runtime: Runtime) -> None:
-    line = line.rstrip("\n")
+    line = line.rstrip('\n')
     if not line:
         return
 
-    if runtime.config.single_env and not line.startswith("!"):
+    if runtime.config.single_env and not line.startswith('!'):
         send_command_to_env(runtime.config.envs[0], line, by_fd, runtime, announce=False)
         return
 
-    if not line.startswith("!"):
+    if not line.startswith('!'):
         if not runtime.ignored_stdin_warned:
             print(
-                "monitor-multi: ignoring stdin; use !<env> <command>",
+                'monitor-multi: ignoring stdin; use !<env> <command>',
                 file=sys.stderr,
             )
             runtime.ignored_stdin_warned = True
         return
 
-    target, separator, command = line[1:].partition(" ")
+    target, separator, command = line[1:].partition(' ')
     command = command.lstrip()
     if not target or not separator or not command:
-        print("monitor-multi: command syntax is !<env> <command>", file=sys.stderr)
+        print('monitor-multi: command syntax is !<env> <command>', file=sys.stderr)
         return
 
     send_command_to_env(target, command, by_fd, runtime, announce=True)
@@ -193,16 +194,16 @@ def read_command_fifo(monitor: Monitor) -> None:
     if not data:
         return
 
-    monitor.command_buffer += data.decode(errors="replace")
-    while "\n" in monitor.command_buffer:
-        command, monitor.command_buffer = monitor.command_buffer.split("\n", 1)
+    monitor.command_buffer += data.decode(errors='replace')
+    while '\n' in monitor.command_buffer:
+        command, monitor.command_buffer = monitor.command_buffer.split('\n', 1)
         command = command.strip()
         if command:
             try:
                 write_to_monitor(monitor, command)
             except (OSError, RuntimeError) as exc:
                 print(
-                    f"monitor-multi: failed to route command to {monitor.env}: {exc}",
+                    f'monitor-multi: failed to route command to {monitor.env}: {exc}',
                     file=sys.stderr,
                 )
 
@@ -214,10 +215,8 @@ def read_stdin_line(
 ) -> None:
     line = sys.stdin.readline()
     if not line:
-        try:
+        with contextlib.suppress(KeyError):
             selector.unregister(sys.stdin)
-        except KeyError:
-            pass
         return
 
     route_command(line, by_fd, runtime)
@@ -230,23 +229,19 @@ def read_stdin_direct(
     try:
         data = os.read(sys.stdin.fileno(), 4096)
     except OSError:
-        try:
+        with contextlib.suppress(KeyError):
             selector.unregister(sys.stdin)
-        except KeyError:
-            pass
         return
 
     if not data:
-        try:
+        with contextlib.suppress(KeyError):
             selector.unregister(sys.stdin)
-        except KeyError:
-            pass
         return
 
     try:
         write_bytes_to_monitor(monitor, data)
     except (OSError, RuntimeError) as exc:
-        print(f"monitor-multi: failed to write stdin: {exc}", file=sys.stderr)
+        print(f'monitor-multi: failed to write stdin: {exc}', file=sys.stderr)
 
 
 def enable_direct_stdin(enable: bool) -> list[object] | None:
@@ -274,7 +269,7 @@ def restore_stdin(original: list[object] | None) -> None:
 def finish(monitors: list[Monitor], runtime: Runtime, code: int) -> int:
     sys.stdout.flush()
     if runtime.stop_reason:
-        print(f"monitor-multi: {runtime.stop_reason}", file=sys.stderr)
+        print(f'monitor-multi: {runtime.stop_reason}', file=sys.stderr)
 
     print_summary(runtime)
     if runtime.log is not None:
@@ -298,17 +293,11 @@ def run(monitors: list[Monitor], runtime: Runtime) -> int:
     selector = selectors.DefaultSelector()
     by_fd = {monitor.fd: monitor for monitor in monitors if monitor.fd is not None}
     by_command_fd = {
-        monitor.command_fd: monitor
-        for monitor in monitors
-        if monitor.command_fd is not None
+        monitor.command_fd: monitor for monitor in monitors if monitor.command_fd is not None
     }
     followers = [monitor for monitor in monitors if monitor.spool_reader is not None]
     exit_codes: list[int] = []
-    deadline = (
-        None
-        if runtime.config.timeout is None
-        else time.monotonic() + runtime.config.timeout
-    )
+    deadline = None if runtime.config.timeout is None else time.monotonic() + runtime.config.timeout
     direct_monitor = direct_stdin_monitor(monitors, runtime.config)
     original_stdin = None
 
@@ -326,6 +315,10 @@ def run(monitors: list[Monitor], runtime: Runtime) -> int:
             STDIN_DIRECT if direct_monitor is not None else STDIN_LINE,
         )
 
+    if runtime.config.command:
+        for target in runtime.config.envs:
+            send_command_to_env(target, runtime.config.command, by_fd, runtime, announce=True)
+
     try:
         try:
             while by_fd or followers:
@@ -333,14 +326,12 @@ def run(monitors: list[Monitor], runtime: Runtime) -> int:
                 if deadline is not None:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
-                        runtime.stop_reason = "timeout reached"
+                        runtime.stop_reason = 'timeout reached'
                         break
                     select_timeout = remaining
 
                 if followers:
-                    select_timeout = (
-                        0.1 if select_timeout is None else min(select_timeout, 0.1)
-                    )
+                    select_timeout = 0.1 if select_timeout is None else min(select_timeout, 0.1)
 
                 if selector.get_map():
                     events = selector.select(select_timeout)
@@ -392,7 +383,7 @@ def run(monitors: list[Monitor], runtime: Runtime) -> int:
                 if runtime.stop_reason:
                     break
         except KeyboardInterrupt:
-            runtime.stop_reason = "interrupted"
+            runtime.stop_reason = 'interrupted'
             terminate(list(by_fd.values()))
             reap(list(by_fd.values()))
             close_fds(list(by_fd.values()))
@@ -406,9 +397,7 @@ def run(monitors: list[Monitor], runtime: Runtime) -> int:
         close_fds(list(by_fd.values()))
         return finish(monitors, runtime, 0)
 
-    return finish(
-        monitors, runtime, next((code for code in exit_codes if code != 0), 0)
-    )
+    return finish(monitors, runtime, next((code for code in exit_codes if code != 0), 0))
 
 
 def main() -> int:
@@ -427,8 +416,8 @@ def main() -> int:
             if lock is None:
                 if config.needs_owner_pre_ops:
                     raise SystemExit(
-                        f"Cannot reset or upload {env!r}: another instance "
-                        "already owns that monitor"
+                        f'Cannot reset or upload {env!r}: another instance '
+                        'already owns that monitor',
                     )
                 continue
 
@@ -456,14 +445,13 @@ def main() -> int:
                     config.strip_ansi,
                     open_spool_writer(env),
                     env_by_name[env],
-                )
+                ),
             )
 
         return run(monitors, runtime)
     except subprocess.CalledProcessError as exc:
         print(
-            "monitor-multi: command failed "
-            f"({exc.returncode}): {command_display(exc.cmd)}",
+            f'monitor-multi: command failed ({exc.returncode}): {command_display(exc.cmd)}',
             file=sys.stderr,
         )
         return exc.returncode

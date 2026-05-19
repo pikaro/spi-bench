@@ -2,16 +2,36 @@ from __future__ import annotations
 
 import argparse
 import re
+from configparser import ConfigParser
 from pathlib import Path
 
 from .state import Config
 
 
+def _get_all_envs(root: Path | None = None) -> set[str]:
+    if root is None:
+        root = Path.cwd()
+        while not (root / 'platformio.ini').is_file():
+            if root.parent == root:
+                _err = 'platformio.ini not found in any parent directory'
+                raise FileNotFoundError(_err)
+            root = root.parent
+    config = ConfigParser()
+    config.read(root / 'platformio.ini')
+    envs = set()
+    for section in config.sections():
+        if section.startswith(('env:debug', 'env:test')):
+            continue
+        if section.startswith('env:'):
+            envs.add(section[len('env:') :])
+    return envs
+
+
 def parse_duration(value: str) -> float:
     suffixes = {
-        "ms": 0.001,
-        "s": 1.0,
-        "m": 60.0,
+        'ms': 0.001,
+        's': 1.0,
+        'm': 60.0,
     }
     raw_value = value
     value = value.strip().lower()
@@ -26,10 +46,12 @@ def parse_duration(value: str) -> float:
     try:
         duration = float(value) * multiplier
     except ValueError as exc:
-        raise argparse.ArgumentTypeError(f"invalid duration: {raw_value!r}") from exc
+        _err = f'invalid duration: {raw_value!r}'
+        raise argparse.ArgumentTypeError(_err) from exc
 
     if duration <= 0:
-        raise argparse.ArgumentTypeError("duration must be greater than zero")
+        _err = 'duration must be greater than zero'
+        raise argparse.ArgumentTypeError(_err)
 
     return duration
 
@@ -38,19 +60,20 @@ def parse_regex(value: str) -> re.Pattern[str]:
     try:
         return re.compile(value)
     except re.error as exc:
-        raise argparse.ArgumentTypeError(
-            f"invalid regular expression {value!r}: {exc}"
-        ) from exc
+        _err = f'invalid regular expression {value!r}: {exc}'
+        raise argparse.ArgumentTypeError(_err) from exc
 
 
 def parse_positive_int(value: str) -> int:
     try:
         parsed = int(value)
     except ValueError as exc:
-        raise argparse.ArgumentTypeError(f"invalid integer: {value!r}") from exc
+        _err = f'invalid integer: {value!r}'
+        raise argparse.ArgumentTypeError(_err) from exc
 
     if parsed <= 0:
-        raise argparse.ArgumentTypeError("value must be greater than zero")
+        _err = 'value must be greater than zero'
+        raise argparse.ArgumentTypeError(_err)
 
     return parsed
 
@@ -59,114 +82,123 @@ def parse_non_negative_int(value: str) -> int:
     try:
         parsed = int(value)
     except ValueError as exc:
-        raise argparse.ArgumentTypeError(f"invalid integer: {value!r}") from exc
+        _err = f'invalid integer: {value!r}'
+        raise argparse.ArgumentTypeError(_err) from exc
 
     if parsed < 0:
-        raise argparse.ArgumentTypeError("value must be zero or greater")
+        _err = 'value must be zero or greater'
+        raise argparse.ArgumentTypeError(_err)
 
     return parsed
 
 
 def parse_baud(value: str) -> str:
-    if value in {"h", "l"} or value.isdigit():
+    if value in {'h', 'l'} or value.isdigit():
         return value
 
-    raise argparse.ArgumentTypeError("baud must be 'h', 'l', or numeric")
+    _err = "baud must be 'h', 'l', or numeric"
+    raise argparse.ArgumentTypeError(_err)
 
 
 def parse_args(argv: list[str]) -> Config:
-    parser = argparse.ArgumentParser(usage="%(prog)s [options] <env...>")
+    parser = argparse.ArgumentParser(usage='%(prog)s [options] <env...>')
     parser.add_argument(
-        "-b",
-        "--baud",
+        '-b',
+        '--baud',
         type=parse_baud,
-        help="monitor baud rate; accepts h, l, or a numeric baud",
+        help='monitor baud rate; accepts h, l, or a numeric baud',
     )
     parser.add_argument(
-        "-t",
-        "--timeout",
+        '-t',
+        '--timeout',
         type=parse_duration,
-        help="stop after the given duration; supports ms, s, and m suffixes",
+        help='stop after the given duration; supports ms, s, and m suffixes',
     )
     parser.add_argument(
-        "--reset",
-        action="store_true",
-        help="run pio reset for owned boards before opening monitors",
+        '--reset',
+        action='store_true',
+        help='run pio reset for owned boards before opening monitors',
     )
     parser.add_argument(
-        "--upload",
-        action="store_true",
-        help="run pio upload for owned boards before opening monitors",
+        '--command',
+        type=str,
+        default=None,
+        help='run the given command for each environment',
     )
     parser.add_argument(
-        "--uploadfs",
-        action="store_true",
-        help="run pio uploadfs for owned boards before opening monitors",
+        '--upload',
+        action='store_true',
+        help='run pio upload for owned boards before opening monitors',
     )
     parser.add_argument(
-        "--strip-ansi",
-        action="store_true",
-        help="remove ANSI escape sequences from monitor output",
+        '--uploadfs',
+        action='store_true',
+        help='run pio uploadfs for owned boards before opening monitors',
     )
     parser.add_argument(
-        "--include",
-        action="append",
+        '--strip-ansi',
+        action='store_true',
+        help='remove ANSI escape sequences from monitor output',
+    )
+    parser.add_argument(
+        '--include',
+        action='append',
         default=[],
         type=parse_regex,
-        metavar="REGEX",
-        help="print only monitor lines matching REGEX; may be repeated",
+        metavar='REGEX',
+        help='print only monitor lines matching REGEX; may be repeated',
     )
     parser.add_argument(
-        "--exclude",
-        action="append",
+        '--exclude',
+        action='append',
         default=[],
         type=parse_regex,
-        metavar="REGEX",
-        help="suppress monitor lines matching REGEX; may be repeated",
+        metavar='REGEX',
+        help='suppress monitor lines matching REGEX; may be repeated',
     )
     parser.add_argument(
-        "--before",
+        '--before',
         type=parse_non_negative_int,
         default=0,
-        metavar="N",
-        help="print N lines before each matching monitor line",
+        metavar='N',
+        help='print N lines before each matching monitor line',
     )
     parser.add_argument(
-        "--after",
+        '--after',
         type=parse_non_negative_int,
         default=0,
-        metavar="N",
-        help="print N lines after each matching monitor line",
+        metavar='N',
+        help='print N lines after each matching monitor line',
     )
     parser.add_argument(
-        "--context",
+        '--context',
         type=parse_non_negative_int,
-        metavar="N",
-        help="print N lines before and after each matching monitor line",
+        metavar='N',
+        help='print N lines before and after each matching monitor line',
     )
     parser.add_argument(
-        "--summary",
-        action="store_true",
-        help="print the first matching line and summarize repeats at exit",
+        '--summary',
+        action='store_true',
+        help='print the first matching line and summarize repeats at exit',
     )
     parser.add_argument(
-        "--max-lines",
+        '--max-lines',
         type=parse_positive_int,
-        help="stop after printing this many monitor lines",
+        help='stop after printing this many monitor lines',
     )
     parser.add_argument(
-        "--log-file",
+        '--log-file',
         type=Path,
-        help="append the full monitor stream to PATH before filtering",
+        help='append the full monitor stream to PATH before filtering',
     )
-    parser.add_argument("envs", nargs="+", metavar="env")
+    parser.add_argument('envs', nargs='+', metavar='env')
     parsed = parser.parse_args(argv)
 
-    if parsed.envs[-1] in {"h", "l"} or parsed.envs[-1].isdigit():
-        parser.error("baud must be passed with --baud")
+    if set(parsed.envs) == {'all'}:
+        parsed.envs = sorted(_get_all_envs())
 
     if len(set(parsed.envs)) != len(parsed.envs):
-        parser.error("duplicate environments are not supported")
+        parser.error('duplicate environments are not supported')
 
     before = parsed.before
     after = parsed.after
@@ -189,4 +221,5 @@ def parse_args(argv: list[str]) -> Config:
         summary=parsed.summary,
         max_lines=parsed.max_lines,
         log_file=parsed.log_file,
+        command=parsed.command,
     )

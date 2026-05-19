@@ -49,6 +49,10 @@ template <class Implementation> class FileSystem {
         return _impl.appendFile(path, data);
     }
 
+    ReturnCode removeFile(std::string_view path) const {
+        return _impl.removeFile(path);
+    }
+
     template <std::size_t ChunkSize>
     ReturnCode openReader(ChunkReader<ChunkSize> &reader,
                           std::string_view path) const {

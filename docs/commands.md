@@ -119,6 +119,19 @@ Useful filesystem validation command:
     `!master /ls`
 - List a subdirectory:
     `!master /ls /path`
+- Dump a bounded slice of a LittleFS file:
+    `!master /cat /errors.log 0 4096`
+- Remove a LittleFS file, for example to clear the error journal:
+    `!master /rm /errors.log`
+- Download a node's LittleFS partition and unpack it outside the upload tree:
+    `bin/littlefs-download master`
+
+`bin/littlefs-download` writes to
+`data/<env>/downloaded-littlefs/<timestamp>/`, not `data/<env>/littlefs`, so
+retrieved logs are not included in later `uploadfs` images. The tool keeps the
+raw partition image as `image.bin`, attempts an `mklittlefs` unpack into
+`files/`, and writes printable-string fallback extracts if the host unpacker
+cannot mount the raw image.
 
 Useful audio-source validation command:
 

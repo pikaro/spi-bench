@@ -24,7 +24,7 @@ struct Platform {
 
     static std::expected<size_t, ReturnCode>
     get_system_task_statuses(std::span<TaskStatus> taskStatuses,
-                             uint32_t totalRuntimeCounter) {
+                             configRUN_TIME_COUNTER_TYPE &totalRuntimeCounter) {
         return uxTaskGetSystemState(taskStatuses.data(), taskStatuses.size(),
                                     &totalRuntimeCounter);
     }

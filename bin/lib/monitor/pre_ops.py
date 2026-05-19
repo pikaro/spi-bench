@@ -14,20 +14,20 @@ def run_pio_target(
     env: dict[str, str],
 ) -> subprocess.Popen[bytes]:
     command = [
-        str(root / ".venv" / "bin" / "pio"),
-        "run",
-        "-e",
+        str(root / '.venv' / 'bin' / 'pio'),
+        'run',
+        '-e',
         env_name,
-        "--target",
+        '--target',
         target,
     ]
-    print(f"{env_name}: {' '.join(command)}", file=sys.stderr)
+    print(f'{env_name}: {" ".join(command)}', file=sys.stderr)
     return subprocess.Popen(command, cwd=root, env=env)
 
 
 def command_display(command: object) -> str:
     if isinstance(command, (list, tuple)):
-        return " ".join(str(part) for part in command)
+        return ' '.join(str(part) for part in command)
     return str(command)
 
 
@@ -53,7 +53,7 @@ def run_pio_target_stage(
             failed_env, returncode = failures[0]
             raise subprocess.CalledProcessError(
                 returncode,
-                f"pio run -e {failed_env} --target {target}",
+                f'pio run -e {failed_env} --target {target}',
             )
         return
 
@@ -63,7 +63,7 @@ def run_pio_target_stage(
         if returncode != 0:
             raise subprocess.CalledProcessError(
                 returncode,
-                f"pio run -e {env_name} --target {target}",
+                f'pio run -e {env_name} --target {target}',
             )
 
 
@@ -75,22 +75,21 @@ def run_pre_ops(
 ) -> None:
     if config.upload:
         print(
-            "monitor-multi: uploading all requested environments sequentially",
+            'monitor-multi: uploading all requested environments sequentially',
             file=sys.stderr,
         )
-        run_pio_target_stage(root, envs, "upload", env_by_name)
+        run_pio_target_stage(root, envs, 'upload', env_by_name)
 
     if config.uploadfs:
         print(
-            "monitor-multi: uploading filesystems for all requested "
-            "environments sequentially",
+            'monitor-multi: uploading filesystems for all requested environments sequentially',
             file=sys.stderr,
         )
-        run_pio_target_stage(root, envs, "uploadfs", env_by_name)
+        run_pio_target_stage(root, envs, 'uploadfs', env_by_name)
 
     if config.reset:
         print(
-            "monitor-multi: resetting all requested environments sequentially",
+            'monitor-multi: resetting all requested environments in parallel',
             file=sys.stderr,
         )
-        run_pio_target_stage(root, envs, "reset", env_by_name)
+        run_pio_target_stage(root, envs, 'reset', env_by_name, parallel=True)

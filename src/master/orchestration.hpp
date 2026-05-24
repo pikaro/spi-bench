@@ -1,7 +1,8 @@
 #pragma once
 
 #include "Audio/Interfaces/Wire.hpp"
-#include "LedDisplay/Animations/Commands.hpp"
+#include "LedDisplay/Animations/CenterWaveCommands.hpp"
+#include "LedDisplay/Animations/WheelIndicatorCommands.hpp"
 #include "LedDisplay/Interfaces/AnimationCommandFactory.hpp"
 #include "Macros/Facade.hpp"
 #include "PubSubBackend/Interfaces/Envelope.hpp"
@@ -19,9 +20,11 @@ namespace MasterOrchestration {
 struct WheelMapping {
     bool publishHueOffset = true;
     bool publishRotationOffset = true;
+    bool publishIndicatorUpdate = true;
     float hueTurnsPerWheelTurn = 1.0F;
     float rotationTurnsPerWheelTurn = 1.0F;
     uint32_t publishMinIntervalMs = 20;
+    Totem::LedDisplay::Animations::WheelIndicatorConfig indicator{};
 };
 
 struct BeatWaveMapping {
@@ -66,7 +69,7 @@ inline Angle<uint8_t> scaleToCommandAngle(Angle<uint16_t> angle,
     return Angle<uint8_t>::fromTurns(angle.turns() * turnsPerTurn);
 }
 
-inline ReturnCode publishWheelOffsets() {
+inline ReturnCode publishWheelEffects() {
     if (config.wheel.publishHueOffset) {
         FAIL_IF_UNEXPECTED_FWD(
             hueCmd,
@@ -86,6 +89,19 @@ inline ReturnCode publishWheelOffsets() {
         FAIL_IF_ERR_FWD(
             Totem::LedDisplay::publishAnimationCommand(rotationCmd),
             "Failed to publish orchestrated rotation offset command");
+    }
+
+    if (config.wheel.publishIndicatorUpdate) {
+        FAIL_IF_UNEXPECTED_FWD(
+            indicatorCmd,
+            Totem::LedDisplay::Animations::WheelIndicator::makeUpdateCommand(
+                config.wheel.indicator,
+                Totem::LedDisplay::Animations::WheelIndicator::
+                    defaultRequestId),
+            "Failed to build orchestrated wheel indicator update");
+        FAIL_IF_ERR_FWD(
+            Totem::LedDisplay::publishAnimationCommand(indicatorCmd),
+            "Failed to publish orchestrated wheel indicator update");
     }
 
     return OK();
@@ -248,8 +264,8 @@ inline ReturnCode work(uint32_t nowMs) {
     }
 
     detail::lastWheelPublishMs = nowMs;
-    FAIL_IF_ERR_FWD(detail::publishWheelOffsets(),
-                    "Failed to publish orchestrated wheel offsets");
+    FAIL_IF_ERR_FWD(detail::publishWheelEffects(),
+                    "Failed to publish orchestrated wheel effects");
     detail::wheelOffsetDirty = false;
     return OK();
 }

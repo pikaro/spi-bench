@@ -96,20 +96,16 @@ class LayerStack {
         }
     }
 
-    void clearScratch(Layer layer) {
-        Compositor::clear(_layers[layerIndex(layer)].scratch);
-    }
+    void clearScratch() { Compositor::clear(_scratch); }
 
-    [[nodiscard]] std::span<HsvColor> scratch(Layer layer) {
-        return _layers[layerIndex(layer)].scratch;
-    }
+    [[nodiscard]] std::span<HsvColor> scratch() { return _scratch; }
 
     void blendScratch(Layer layer, AnimationStyle style) {
         auto &state = _layers[layerIndex(layer)];
         if (!state.config.enabled) {
             return;
         }
-        Compositor::blend({.src = state.scratch,
+        Compositor::blend({.src = _scratch,
                            .dst = state.frame,
                            .style = style});
     }
@@ -129,11 +125,11 @@ class LayerStack {
   private:
     struct LayerState {
         std::array<HsvColor, Config::ownedPixelCount> frame{};
-        std::array<HsvColor, Config::ownedPixelCount> scratch{};
         LayerConfig config{};
     };
 
     std::array<LayerState, layerCount> _layers{};
+    std::array<HsvColor, Config::ownedPixelCount> _scratch{};
 };
 
 } // namespace Totem::LedDisplay::detail

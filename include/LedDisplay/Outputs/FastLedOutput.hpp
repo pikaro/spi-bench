@@ -22,10 +22,13 @@ class FastLedOutput {
     FastLedOutput() = default;
 
     ReturnCode begin(const Config &config) {
-        (void)config;
         ::fl::FastLED.clearData();
-        ::fl::FastLED.setBrightness(Config::globalBrightness);
-        if constexpr (Config::temporalDithering) {
+        ::fl::FastLED.setBrightness(config.globalBrightness);
+        _temporalDithering = config.temporalDithering;
+        _ditherNeedsReenable = config.temporalDithering;
+        _hasMeasuredDitherCadence = false;
+
+        if (_temporalDithering) {
             ::fl::FastLED.setDither(BINARY_DITHER);
         } else {
             ::fl::FastLED.setDither(DISABLE_DITHER);
@@ -86,13 +89,13 @@ class FastLedOutput {
     }
 
     void _trackDitherCadence() {
-        if constexpr (!Config::temporalDithering) {
+        if (!_temporalDithering) {
             return;
         }
 
-        constexpr uint16_t ditherFpsThreshold = 100;
+        constexpr uint16_t fastLedTemporalDitherMinimumFps = 100;
         const auto fps = static_cast<uint16_t>(::fl::FastLED.getFPS());
-        if (fps >= ditherFpsThreshold) {
+        if (fps >= fastLedTemporalDitherMinimumFps) {
             _hasMeasuredDitherCadence = true;
             if (_ditherNeedsReenable) {
                 ::fl::FastLED.setDither(BINARY_DITHER);
@@ -110,15 +113,16 @@ class FastLedOutput {
         if (!_ditherNeedsReenable) {
             _log_e("FastLED measured FPS below dither threshold: %u < %u; "
                    "dithering will be re-enabled after recovery",
-                   fps, ditherFpsThreshold);
+                   fps, fastLedTemporalDitherMinimumFps);
         }
         _ditherNeedsReenable = true;
     }
 
     std::array<::fl::CRGB, Config::ownedPixelCount> _leds{};
     bool _configured = false;
+    bool _temporalDithering = false;
     bool _hasMeasuredDitherCadence = false;
-    bool _ditherNeedsReenable = Config::temporalDithering;
+    bool _ditherNeedsReenable = false;
 };
 
 } // namespace Totem::LedDisplay::Outputs

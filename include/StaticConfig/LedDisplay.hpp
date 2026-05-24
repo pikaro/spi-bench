@@ -1,7 +1,6 @@
 #pragma once
 
-#include "StaticConfig/Stacks.hpp"
-#include "TaskController/Interfaces/Config.hpp"
+#include "LedDisplay/Interfaces/PresentBufferMode.hpp"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -42,7 +41,7 @@
 #define LED_DISPLAY_GENERIC_RENDERER 0
 #endif
 
-struct LedDisplayConfig {
+struct LedTopologyStaticConfig {
     static constexpr size_t stripCount = 4;
     static constexpr size_t segmentsPerStrip = 4;
     static constexpr size_t ledsPerSegment = 46;
@@ -50,11 +49,12 @@ struct LedDisplayConfig {
     static constexpr size_t totalPixelCount = stripCount * ledsPerStrip;
     static constexpr size_t spokeCount = stripCount * segmentsPerStrip;
     static constexpr size_t ringCount = ledsPerSegment;
+};
 
+struct LedOwnershipStaticConfig : LedTopologyStaticConfig {
     static constexpr size_t ledGroupCount = LED_GROUP_COUNT;
     static constexpr size_t ledGroupIndex = LED_GROUP_INDEX;
     static constexpr size_t nodeGroupCount = LED_NODE_GROUP_COUNT;
-    static constexpr size_t dataLineCount = LED_DATA_LINE_COUNT;
     static constexpr std::array<size_t, nodeGroupCount> nodeGroups = [] {
         std::array<size_t, nodeGroupCount> groups{};
         constexpr std::array<size_t, 4> configuredGroups{
@@ -79,24 +79,6 @@ struct LedDisplayConfig {
                   "LED_NODE_GROUP_COUNT");
     static_assert(totalPixelCount % ledGroupCount == 0,
                   "LED count must be divisible by LED group count");
-    static_assert(dataLineCount > 0,
-                  "LED_DATA_LINE_COUNT must be greater than 0");
-    static_assert(dataLineCount >= nodeGroupCount,
-                  "Data lines must cover every explicitly owned LED group");
-    static_assert(dataLineCount % nodeGroupCount == 0,
-                  "Data line count must be divisible by owned group count");
-
-    static constexpr size_t groupPixelCount = totalPixelCount / ledGroupCount;
-    static constexpr size_t ownedPixelCount =
-        groupPixelCount * nodeGroupCount;
-    static constexpr size_t dataLinesPerNodeGroup =
-        dataLineCount / nodeGroupCount;
-
-    static_assert(groupPixelCount % dataLinesPerNodeGroup == 0,
-                  "Owned LED groups must split evenly across data lines");
-
-    static constexpr size_t dataLinePixelCount =
-        groupPixelCount / dataLinesPerNodeGroup;
 
     static_assert(
         [] consteval {
@@ -120,26 +102,29 @@ struct LedDisplayConfig {
         }(),
         "LED_NODE_GROUPn values must be unique valid group IDs");
 
-    // Transient animations intentionally overlap; keep these buffers sized for
-    // ordinary bursty command traffic.
-    static constexpr size_t commandQueueSize = 32;
-    static constexpr size_t animationPublishPoolSize = 32;
-    static constexpr size_t maxActiveAnimations = 32;
-    static constexpr size_t animationCommandPayloadBytes = 32;
+    static constexpr size_t groupPixelCount = totalPixelCount / ledGroupCount;
+    static constexpr size_t ownedPixelCount = groupPixelCount * nodeGroupCount;
+};
 
-    static constexpr uint8_t targetFps = 100;
-    static constexpr uint32_t frameIntervalMs = 1000U / targetFps;
-    // Schedule slightly faster than target so RTOS jitter does not disable
-    // FastLED temporal dithering by dropping below 100 FPS.
-    static constexpr uint32_t taskIntervalMs = frameIntervalMs - 1U;
-    static constexpr uint32_t frameBudgetUs = 1000000UL / targetFps;
-
-    static_assert(taskIntervalMs > 0,
-                  "LED task interval must be greater than 0");
-
-    static constexpr uint8_t globalBrightness = 96;
-    static constexpr bool temporalDithering = true;
+struct LedOutputStaticConfig : LedOwnershipStaticConfig {
+    static constexpr size_t dataLineCount = LED_DATA_LINE_COUNT;
     static constexpr bool genericRenderer = LED_DISPLAY_GENERIC_RENDERER != 0;
+
+    static_assert(dataLineCount > 0,
+                  "LED_DATA_LINE_COUNT must be greater than 0");
+    static_assert(dataLineCount >= nodeGroupCount,
+                  "Data lines must cover every explicitly owned LED group");
+    static_assert(dataLineCount % nodeGroupCount == 0,
+                  "Data line count must be divisible by owned group count");
+
+    static constexpr size_t dataLinesPerNodeGroup =
+        dataLineCount / nodeGroupCount;
+
+    static_assert(groupPixelCount % dataLinesPerNodeGroup == 0,
+                  "Owned LED groups must split evenly across data lines");
+
+    static constexpr size_t dataLinePixelCount =
+        groupPixelCount / dataLinesPerNodeGroup;
 
     static constexpr std::array<uint8_t, 2> outputPins{
         1,
@@ -148,18 +133,27 @@ struct LedDisplayConfig {
 
     static_assert(dataLineCount <= outputPins.size(),
                   "Add more LED output pins before increasing dataLineCount");
-
-    static constexpr Totem::TaskController::Config task{
-        .name = "LedDisplay",
-        .priority = 3,
-        .core = Totem::TaskController::Config::CorePreference::specific(1),
-        .stackSize = Totem::StaticConfig::TaskStacks::ledDisplay,
-        .intervalMs = taskIntervalMs,
-        .noCatchup = true,
-        .useNotify = true,
-        .notifyExpectTimeout = true,
-        .notifyTimeoutMs = taskIntervalMs,
-    };
-
-    [[nodiscard]] static constexpr bool validate() { return true; }
 };
+
+struct LedAnimationBounds {
+    static constexpr size_t commandQueueSize = 32;
+    static constexpr size_t animationPublishPoolSize = 32;
+    static constexpr size_t maxActiveAnimations = 32;
+    static constexpr size_t animationCommandPayloadBytes = 32;
+};
+
+struct LedPipelineBounds {
+    static constexpr Totem::LedDisplay::PresentBufferMode presentBufferMode =
+        Totem::LedDisplay::PresentBufferMode::Triple;
+    static constexpr uint8_t targetFps = 125;
+    static constexpr uint32_t frameIntervalMs = 1000U / targetFps;
+    static constexpr uint32_t taskIntervalMs = frameIntervalMs - 1U;
+    static constexpr uint32_t defaultFrameBudgetUs = 1000000UL / targetFps;
+
+    static_assert(taskIntervalMs > 0,
+                  "LED task interval must be greater than 0");
+};
+
+struct LedDisplayConfig : LedOutputStaticConfig,
+                          LedAnimationBounds,
+                          LedPipelineBounds {};

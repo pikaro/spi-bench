@@ -12,6 +12,7 @@
 #include "config.hpp"
 #include "driver/gpio.h"
 #include "driver/gptimer.h"
+#include "led_bringup.hpp"
 #include "orchestration.hpp"
 #include <cstdint>
 
@@ -147,10 +148,13 @@ void app_main() {
     ABORT_IF_ERR(
         ledLevelShifterOutputEnable.setLevel(ledLevelShifterOutputEnabledLevel),
         "Failed to enable LED level shifter output");
+    ABORT_IF_ERR(MasterLedBringup::begin(::platform::get_time()),
+                 "Failed to begin master LED bringup orchestration");
 
     for (;;) {
         const auto nowMs = ::platform::get_time();
         (void)core.work(nowMs);
+        (void)MasterLedBringup::work(nowMs);
         (void)MasterOrchestration::work(nowMs);
 
         ::platform::delay(::platform::ms_to_ticks(1));

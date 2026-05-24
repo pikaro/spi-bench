@@ -18,4 +18,10 @@
 - Use `magic_enum` functionalities for cleaner semantic code when dealing with
     enums. Prefer this over manual string conversions, Count members and similar
     patterns.
+- You may connect to the serial monitor using multi-monitor as documented at any
+    time, and you may use it to reflash the environments as needed. Make use of
+    the facilities to configure the metrics and logging thresholds in order to
+    get more detailed information if useful, but ensure that the permanent
+    performance impact is balanced by the permanent value of the information
+    obtained.
 

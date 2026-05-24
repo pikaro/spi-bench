@@ -2,6 +2,7 @@
 
 #include "Audio/Interfaces/Wire.hpp"
 #include "LedDisplay/Primitives/Canvas.hpp"
+#include "Wheel/Interfaces/Wire.hpp"
 #include <cstdint>
 
 namespace Totem::LedDisplay {
@@ -15,7 +16,9 @@ struct FrameClock {
 
 struct AnimationInputSnapshot {
     Totem::Audio::FftFrame fftFrame{};
+    Totem::Wheel::WheelState wheelState{};
     bool hasFftFrame = false;
+    bool hasWheelState = false;
 };
 
 struct AnimationRenderContext {

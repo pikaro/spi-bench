@@ -8,13 +8,16 @@
 #include "LedDisplay/Interfaces/RenderContext.hpp"
 #include "LedDisplay/Primitives/Canvas.hpp"
 #include "LedDisplay/detail/LayerStack.hpp"
+#include "LedDisplay/detail/Metrics.hpp"
 #include "LedTopology/Facade.hpp"
 #include "Macros/Facade.hpp"
 #include "Mutex/Facade.hpp"
 #include "PubSubBackend/Interfaces/Envelope.hpp"
 #include "Queue/Facade.hpp"
+#include "Services/PubSub.hpp"
 #include "Types/Angle.hpp"
 #include "Types/Error.hpp"
+#include "Wheel/Interfaces/Wire.hpp"
 #include <array>
 #include <atomic>
 #include <cstddef>
@@ -37,6 +40,7 @@ class AnimationEngine {
 
   public:
     ReturnCode begin() {
+        (void)metrics();
         INIT_QUEUE_OR_FAIL(_commandQueue);
         _rebuildLogicalToLocalMap(rotationOffset());
         return OK();
@@ -44,18 +48,81 @@ class AnimationEngine {
 
     ReturnCode end() {
         auto ret = OK();
+        ret.combine(unsubscribePubSubInputs());
         DESTROY_QUEUE(ret, _commandQueue);
         return ret;
     }
 
     ReturnCode submit(const AnimationCommand &cmd) {
-        FAIL_IF(_commandQueue == nullptr, ERR(CoreError, InvalidState),
-                "LED animation engine command queue is not ready");
-        FAIL_IF_NOT(cmd.validate(), ERR(CoreError, InvalidArgument),
-                    "Invalid LED animation command");
+        if (_commandQueue == nullptr) {
+            metrics().addQueueFailure();
+            FAIL(ERR(CoreError, InvalidState),
+                 "LED animation engine command queue is not ready");
+        }
+        if (!cmd.validate()) {
+            metrics().addBadCommand();
+            FAIL(ERR(CoreError, InvalidArgument),
+                 "Invalid LED animation command");
+        }
         auto ret = Totem::Queue::Platform::send(_commandQueue, &cmd);
-        FAIL_IF_ERR_FWD(ret, "Failed to enqueue LED animation command");
+        if (!ret.ok()) {
+            metrics().addQueueFailure();
+            FAIL_ERR_FWD(ret, "Failed to enqueue LED animation command");
+        }
+        metrics().addCommand();
         return OK();
+    }
+
+    ReturnCode subscribePubSubInputs() {
+        if (_pubSubInputSubscribed) {
+            return OK();
+        }
+        FAIL_IF_NOT(PubSubService::configured(), ERR(CoreError, InvalidState),
+                    "PubSub backend is not configured");
+
+        auto &pubSub = PubSubService::get();
+        auto fftSub = pubSub.subscribe(
+            "led-fft", {.subscriber = this, .callback = onFftEnvelope},
+            PubSubService::Topic::FftFrame);
+        if (!fftSub) {
+            return fftSub.error();
+        }
+        _fftSub = *fftSub;
+
+        auto wheelSub = pubSub.subscribe(
+            "led-wheel", {.subscriber = this, .callback = onWheelEnvelope},
+            PubSubService::Topic::Wheel);
+        if (!wheelSub) {
+            (void)pubSub.unsubscribe(_fftSub);
+            _fftSub = 0;
+            return wheelSub.error();
+        }
+        _wheelSub = *wheelSub;
+        _pubSubInputSubscribed = true;
+        _log_i("LED animation engine subscribed to FFT and wheel input topics");
+        return OK();
+    }
+
+    ReturnCode unsubscribePubSubInputs() {
+        if (!_pubSubInputSubscribed || !PubSubService::configured()) {
+            _pubSubInputSubscribed = false;
+            _fftSub = 0;
+            _wheelSub = 0;
+            return OK();
+        }
+
+        auto ret = OK();
+        auto &pubSub = PubSubService::get();
+        if (_fftSub != 0) {
+            ret.combine(pubSub.unsubscribe(_fftSub));
+        }
+        if (_wheelSub != 0) {
+            ret.combine(pubSub.unsubscribe(_wheelSub));
+        }
+        _fftSub = 0;
+        _wheelSub = 0;
+        _pubSubInputSubscribed = false;
+        return ret;
     }
 
     ReturnCode render(uint32_t nowMs, std::span<HsvColor> frame) {
@@ -75,6 +142,7 @@ class AnimationEngine {
 
         _layers.compose(frame);
         _expireAnimations(nowMs);
+        metrics().setActiveAnimations(_activeAnimationCount());
         ++_frames;
         return OK();
     }
@@ -95,10 +163,26 @@ class AnimationEngine {
         auto *self = static_cast<AnimationEngine *>(owner);
         FAIL_IF_NULL(self, ERR(CoreError, InvalidArgument),
                      "LED animation engine FFT subscriber owner is null");
-        FAIL_IF_UNEXPECTED_FWD(frame,
-                               envelope.getPayloadAs<Totem::Audio::FftFrame>(),
-                               "Failed to decode FFT frame");
-        return self->_captureFftFrame(frame);
+        auto frame = envelope.getPayloadAs<Totem::Audio::FftFrame>();
+        if (!frame) {
+            metrics().addInputFailure();
+            FAIL_ERR_FWD(frame.error(), "Failed to decode FFT frame");
+        }
+        return self->_captureFftFrame(*frame);
+    }
+
+    static ReturnCode
+    onWheelEnvelope(void *owner,
+                    const Totem::PubSubBackend::Envelope &envelope) {
+        auto *self = static_cast<AnimationEngine *>(owner);
+        FAIL_IF_NULL(self, ERR(CoreError, InvalidArgument),
+                     "LED animation engine wheel subscriber owner is null");
+        auto state = envelope.getPayloadAs<Totem::Wheel::WheelState>();
+        if (!state) {
+            metrics().addInputFailure();
+            FAIL_ERR_FWD(state.error(), "Failed to decode wheel state");
+        }
+        return self->_captureWheelState(*state);
     }
 
   private:
@@ -106,6 +190,15 @@ class AnimationEngine {
         Totem::Mutex::ScopedSpinlockGuard guard{_inputLock};
         _inputs.fftFrame = frame;
         _inputs.hasFftFrame = true;
+        metrics().addFftInput();
+        return OK();
+    }
+
+    ReturnCode _captureWheelState(const Totem::Wheel::WheelState &state) {
+        Totem::Mutex::ScopedSpinlockGuard guard{_inputLock};
+        _inputs.wheelState = state;
+        _inputs.hasWheelState = true;
+        metrics().addWheelInput();
         return OK();
     }
 
@@ -131,16 +224,22 @@ class AnimationEngine {
     }
 
     ReturnCode _handleCommand(const AnimationCommand &cmd, uint32_t nowMs) {
-        FAIL_IF_NOT(cmd.validate(), ERR(CoreError, InvalidArgument),
-                    "Invalid LED animation command");
+        if (!cmd.validate()) {
+            metrics().addBadCommand();
+            FAIL(ERR(CoreError, InvalidArgument),
+                 "Invalid LED animation command");
+        }
         switch (cmd.type) {
         case AnimationCommandType::None:
             FAIL(ERR(CoreError, InvalidArgument),
                  "LED animation command has no command type");
         case AnimationCommandType::Play:
             return _play(cmd, nowMs);
+        case AnimationCommandType::Update:
+            return _update(cmd);
         case AnimationCommandType::Stop:
             _stop(cmd.requestId);
+            metrics().addStop();
             return OK();
         case AnimationCommandType::SetHueOffset:
             return _setHueOffset(cmd);
@@ -150,6 +249,37 @@ class AnimationEngine {
             FAIL(ERR(CoreError, InvalidArgument),
                  "Unknown LED animation command type");
         }
+    }
+
+    ReturnCode _update(const AnimationCommand &cmd) {
+        FAIL_IF(cmd.payloadSize == 0, ERR(CoreError, InvalidArgument),
+                "Animation update command has no payload");
+        FAIL_IF(cmd.kind == AnimationKind::None, ERR(CoreError, InvalidArgument),
+                "Animation update command has no animation kind");
+
+        bool updated = false;
+        for (auto &slot : _animations) {
+            if (!slot.active) {
+                continue;
+            }
+            if (cmd.requestId != 0 && slot.requestId != cmd.requestId) {
+                continue;
+            }
+            if (Animations::kind(slot.payload) != cmd.kind) {
+                continue;
+            }
+            FAIL_IF_ERR_FWD(Animations::update(slot.payload, cmd),
+                            "Failed to update LED animation");
+            updated = true;
+        }
+        if (!updated) {
+            metrics().addUpdateMiss();
+            _log_w("Dropped LED animation update kind=%u request=%u: no "
+                   "matching active animation",
+                   static_cast<unsigned>(cmd.kind), cmd.requestId);
+        }
+        metrics().addUpdate();
+        return OK();
     }
 
     ReturnCode _play(const AnimationCommand &cmd, uint32_t nowMs) {
@@ -177,6 +307,7 @@ class AnimationEngine {
                "layer=%u",
                static_cast<unsigned>(cmd.kind), slot.requestId,
                cmd.lifetimeMs, static_cast<unsigned>(cmd.layer));
+        metrics().addPlay();
         return OK();
     }
 
@@ -226,11 +357,10 @@ class AnimationEngine {
 
     void _render(const ActiveAnimation &slot, uint32_t nowMs,
                  uint8_t hueOffset,
-                 const AnimationInputSnapshot &inputs) {
+        const AnimationInputSnapshot &inputs) {
         const uint32_t elapsed = nowMs - slot.startMs;
-        _layers.clearScratch(slot.layer);
-        auto canvas =
-            Primitives::Canvas{_layers.scratch(slot.layer), _logicalToLocal};
+        _layers.clearScratch();
+        auto canvas = Primitives::Canvas{_layers.scratch(), _logicalToLocal};
         auto ctx = AnimationRenderContext{
             .clock = {.nowMs = nowMs,
                       .elapsedMs = elapsed,
@@ -260,6 +390,16 @@ class AnimationEngine {
             return false;
         }
         return (nowMs - slot.startMs) >= slot.lifetimeMs;
+    }
+
+    [[nodiscard]] uint32_t _activeAnimationCount() const {
+        uint32_t count = 0;
+        for (const auto &slot : _animations) {
+            if (slot.active) {
+                ++count;
+            }
+        }
+        return count;
     }
 
     [[nodiscard]] static uint8_t
@@ -314,6 +454,9 @@ class AnimationEngine {
     std::atomic<uint8_t> _rotationOffset{0};
     uint16_t _lastRequestId = 0;
     uint32_t _frames = 0;
+    Totem::PubSubBackend::SubscriberKey _fftSub = 0;
+    Totem::PubSubBackend::SubscriberKey _wheelSub = 0;
+    bool _pubSubInputSubscribed = false;
     mutable ::platform::Spinlock _inputLock = ::platform::create_spinlock();
 
     STANDARD_QUEUE(_commandQueue, AnimationCommand, Config::commandQueueSize)

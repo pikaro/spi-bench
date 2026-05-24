@@ -7,6 +7,8 @@
 #include "LedDisplay/Interfaces/Config.hpp"
 #include "LedDisplay/Outputs/FastLedOutput.hpp"
 #include "LedDisplay/detail/AnimationEngine.hpp"
+#include "LedDisplay/detail/Metrics.hpp"
+#include "LedDisplay/detail/PresentBuffers.hpp"
 #include "Macros/Facade.hpp"
 #include "Platform/Gpio.hpp"
 #include "PubSubBackend/Interfaces/Envelope.hpp"
@@ -43,7 +45,7 @@ class Display : public HasLifecycle<Display, Config>,
     static constexpr LogComponent logComponent = LogComponent::Output;
     static constexpr uint8_t maxFastLedDataLines = 2;
     static constexpr uint32_t presentMissLogIntervalMs = 1000;
-    static constexpr uint32_t ditherErrorLogIntervalMs = 1000;
+    static constexpr uint32_t frameBudgetLogIntervalMs = 1000;
 
     ReturnCode submitAnimationCommand(const AnimationCommand &cmd) {
         FAIL_IF_INACTIVE_ERR("Cannot submit LED animation command before %s "
@@ -68,19 +70,14 @@ class Display : public HasLifecycle<Display, Config>,
         }
         _animationSub = *animationSub;
 
-        auto fftSub = pubSub.subscribe(
-            "led-fft",
-            {.subscriber = &_engine,
-             .callback = AnimationEngine::onFftEnvelope},
-            PubSubService::Topic::FftFrame);
-        if (!fftSub) {
+        auto inputSub = _engine.subscribePubSubInputs();
+        if (!inputSub.ok()) {
             (void)pubSub.unsubscribe(_animationSub);
             _animationSub = 0;
-            return fftSub.error();
+            return inputSub;
         }
-        _fftSub = *fftSub;
         _pubSubSubscribed = true;
-        _log_i("LedDisplay subscribed to animation and FFT PubSub topics");
+        _log_i("LedDisplay subscribed to animation command topic");
         return OK();
     }
 
@@ -108,6 +105,7 @@ class Display : public HasLifecycle<Display, Config>,
     ReturnCode _onBegin() {
         static_assert(Config::dataLineCount <= maxFastLedDataLines,
                       "FastLED output currently supports two configured lines");
+        (void)metrics();
         DEFAULT_TASK();
         _renderTask = task;
         FAIL_IF_ERR_FWD(_engine.begin(),
@@ -130,22 +128,19 @@ class Display : public HasLifecycle<Display, Config>,
     }
 
     ReturnCode _unsubscribePubSub() {
+        auto ret = OK();
         if (!_pubSubSubscribed || !PubSubService::configured()) {
             _pubSubSubscribed = false;
             _animationSub = 0;
-            _fftSub = 0;
-            return OK();
+            ret.combine(_engine.unsubscribePubSubInputs());
+            return ret;
         }
-        auto ret = OK();
         auto &pubSub = PubSubService::get();
+        ret.combine(_engine.unsubscribePubSubInputs());
         if (_animationSub != 0) {
             ret.combine(pubSub.unsubscribe(_animationSub));
         }
-        if (_fftSub != 0) {
-            ret.combine(pubSub.unsubscribe(_fftSub));
-        }
         _animationSub = 0;
-        _fftSub = 0;
         _pubSubSubscribed = false;
         return ret;
     }
@@ -156,9 +151,12 @@ class Display : public HasLifecycle<Display, Config>,
         auto *self = static_cast<Display *>(owner);
         FAIL_IF_NULL(self, ERR(CoreError, InvalidArgument),
                      "LedDisplay animation subscriber owner is null");
-        FAIL_IF_UNEXPECTED_FWD(cmd, envelope.getPayloadAs<AnimationCommand>(),
-                               "Failed to decode animation command");
-        return self->_engine.submit(cmd);
+        auto cmd = envelope.getPayloadAs<AnimationCommand>();
+        if (!cmd) {
+            metrics().addBadCommand();
+            FAIL_ERR_FWD(cmd.error(), "Failed to decode animation command");
+        }
+        return self->_engine.submit(*cmd);
     }
 
     static void _onPresentStrobeIsr(void *owner, GpioEvent event) {
@@ -173,20 +171,73 @@ class Display : public HasLifecycle<Display, Config>,
 
     ReturnCode _onTaskStep() {
         const auto nowMs = ::platform::get_time();
-        const auto nowUs = ::platform::get_time_us();
         if (_presentStrobeEnabled && !_consumePresentStrobe(nowMs)) {
             return OK();
         }
-        _checkDitherCadence(nowMs, nowUs);
 
-        FAIL_IF_ERR_FWD(_engine.render(nowMs, _frame),
-                        "Failed to render LED animation frame");
+        const auto frameStartUs = ::platform::get_time_us();
+        auto ret = _runFrameStep(nowMs);
+        const auto frameUs =
+            static_cast<uint32_t>(::platform::get_time_us() - frameStartUs);
+        metrics().recordFrameDuration(frameUs);
+        if (frameUs > this->config().frameBudgetUs) {
+            metrics().addOverBudgetFrame();
+            _logOverBudgetFrame(nowMs, frameUs);
+        }
+        return ret;
+    }
+
+    ReturnCode _runFrameStep(uint32_t nowMs) {
+        if constexpr (Config::presentBufferMode == PresentBufferMode::None) {
+            FAIL_IF_ERR_FWD(_renderFrame(nowMs),
+                            "Failed to render LED animation frame");
+            return _presentFrame();
+        }
+
+        if (!_presentBuffers.hasPresentedFrame()) {
+            FAIL_IF_ERR_FWD(_renderFrame(nowMs),
+                            "Failed to render initial LED animation frame");
+        }
+
+        FAIL_IF_ERR_FWD(_presentFrame(),
+                        "Failed to present LED animation frame");
+        FAIL_IF_ERR_FWD(_renderFrame(::platform::get_time()),
+                        "Failed to render next LED animation frame");
+        return OK();
+    }
+
+    ReturnCode _renderFrame(uint32_t nowMs) {
+        const auto renderStartUs = ::platform::get_time_us();
+        auto ret = _engine.render(nowMs, _presentBuffers.renderTarget());
+        const auto renderUs = static_cast<uint32_t>(
+            ::platform::get_time_us() - renderStartUs);
+        metrics().recordRenderDuration(renderUs);
+        if (!ret.ok()) {
+            metrics().addRenderFailure();
+            FAIL_ERR_FWD(ret, "Failed to render LED animation frame");
+        }
+        _presentBuffers.publishRenderedFrame();
+        return OK();
+    }
+
+    ReturnCode _presentFrame() {
+        const auto frame = _presentBuffers.selectForPresent();
+        FAIL_IF(frame.frame.empty(), ERR(CoreError, InvalidState),
+                "No LED frame is ready for presentation");
+        if (frame.repeated) {
+            ++_repeatedPresentFrames;
+            metrics().addRepeatedPresent();
+        }
 
         const auto showStartUs = ::platform::get_time_us();
-        FAIL_IF_ERR_FWD(_output.show(_frame),
-                        "Failed to show LED output frame");
+        auto ret = _output.show(frame.frame);
         const auto showUs = ::platform::get_time_us() - showStartUs;
         _maxShowUs = std::max(_maxShowUs, static_cast<uint32_t>(showUs));
+        metrics().recordShowDuration(static_cast<uint32_t>(showUs));
+        if (!ret.ok()) {
+            metrics().addShowFailure();
+            FAIL_ERR_FWD(ret, "Failed to show LED output frame");
+        }
         ++_frames;
         return OK();
     }
@@ -203,6 +254,7 @@ class Display : public HasLifecycle<Display, Config>,
         }
 
         _missedPresentStrobes += pending - 1U;
+        metrics().addMissedStrobes(pending - 1U);
         if (nowMs - _lastPresentMissLogMs >= presentMissLogIntervalMs) {
             _lastPresentMissLogMs = nowMs;
             _log_e("LED render missed %lu present strobes; pending=%lu "
@@ -214,44 +266,30 @@ class Display : public HasLifecycle<Display, Config>,
         return true;
     }
 
-    void _checkDitherCadence(uint32_t nowMs, uint64_t nowUs) {
-        if constexpr (!Config::temporalDithering) {
+    void _logOverBudgetFrame(uint32_t nowMs, uint32_t frameUs) {
+        if (nowMs - _lastFrameBudgetLogMs < frameBudgetLogIntervalMs) {
             return;
         }
-        if (_lastFrameUs == 0) {
-            _lastFrameUs = nowUs;
-            return;
-        }
-
-        const auto elapsedUs = nowUs - _lastFrameUs;
-        _lastFrameUs = nowUs;
-        if (elapsedUs <= Config::frameBudgetUs) {
-            return;
-        }
-        if (nowMs - _lastDitherErrorMs < ditherErrorLogIntervalMs) {
-            return;
-        }
-        _lastDitherErrorMs = nowMs;
-        _log_e("LED frame cadence below dither threshold: %llu us > %lu us",
-               static_cast<unsigned long long>(elapsedUs),
-               static_cast<unsigned long>(Config::frameBudgetUs));
+        _lastFrameBudgetLogMs = nowMs;
+        _log_e("LED frame work exceeded frame budget: %lu us > %lu us",
+               static_cast<unsigned long>(frameUs),
+               static_cast<unsigned long>(this->config().frameBudgetUs));
     }
 
     Outputs::FastLedOutput _output;
     AnimationEngine _engine{};
-    std::array<HsvColor, Config::ownedPixelCount> _frame{};
+    PresentBuffers _presentBuffers{};
     bool _pubSubSubscribed = false;
     bool _presentStrobeEnabled = false;
     Totem::PubSubBackend::SubscriberKey _animationSub = 0;
-    Totem::PubSubBackend::SubscriberKey _fftSub = 0;
     ::platform::Gpio _presentStrobeGpio;
     Totem::TaskController::RunnerKey _renderTask = 0;
     std::atomic<uint32_t> _pendingPresentStrobes{0};
-    uint64_t _lastFrameUs = 0;
-    uint32_t _lastDitherErrorMs = 0;
+    uint32_t _lastFrameBudgetLogMs = 0;
     uint32_t _lastPresentMissLogMs = 0;
     uint32_t _presentStrobeFrames = 0;
     uint32_t _missedPresentStrobes = 0;
+    uint32_t _repeatedPresentFrames = 0;
     uint32_t _maxShowUs = 0;
     uint32_t _frames = 0;
 };

@@ -116,6 +116,12 @@ Useful LED animation commands:
     `!master /anim wave`
     `!master /anim wave 1200 144 180 2 1 5`
     Wave arguments are `durationMs`, `hue`, `value`, `rise`, `peak`, `wake`.
+    `!master /anim wheel`
+    `!master /anim wheel 0 160 96 3 1`
+    Wheel arguments are `durationMs`, `hue`, `value`, `spokes`, `falloff`.
+    `!master /anim wheel-update 160 96 3 1 1`
+    Wheel-update arguments are `hue`, `value`, `spokes`, `falloff`,
+    `requestId`.
     `!gpu0 /anim stop`
 - Publish global LED display offsets over PubSub:
     `!master /anim hue 32`

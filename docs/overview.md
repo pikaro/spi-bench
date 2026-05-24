@@ -10,7 +10,7 @@ events; four ESP32-S3 GPU nodes render LED frame segments; side nodes over
 RS485, I2C, and BLE provide sensors, bulbs, and future peripherals.
 
 The system is event-driven because full LED frame data is too expensive to
-publish at the target 100 fps. Nodes publish compact events such as FFT frames,
+publish at the target 125 fps. Nodes publish compact events such as FFT frames,
 beats, bell strikes, warnings, errors, and metrics. GPU nodes subscribe to those
 events and render their own LED segment locally.
 
@@ -86,7 +86,7 @@ organized as follows:
 - `include/LedTopology/` and `include/LedDisplay/`: GPU-node logical LED
     topology, compile-time ownership, FastLED-backed output, local animation
     playback, primitive drawing helpers, and PubSub animation commands; see
-    [animation-pipeline-port-plan.md](animation-pipeline-port-plan.md)
+    [animation-pipeline.md](animation-pipeline.md)
 - `include/Generated/Wire/`: generated wire-format support code
 - `include/Wire/Rs485/`: point-to-point RS485 wire layer; see
     [wire-rs485.md](wire-rs485.md)
@@ -102,6 +102,9 @@ organized as follows:
     subscribes to compact events such as wheel movement and emits existing LED
     animation commands; mappings are intentionally plain C++ config-as-code,
     not a shared semantic configuration layer.
+- `src/master/led_bringup.hpp`: master-local LED bring-up probes. It publishes
+    generic animation commands after boot so mapping checks and persistent
+    indicator startup use the same path as runtime animation requests.
 - `env:io` targets the ESP32-C3 SuperMini board variant in this repository and
     uses the 4 MiB flash layout under `partitions/esp32_4mib.csv`.
     Its runtime command console is the USB Serial/JTAG console; native UART0

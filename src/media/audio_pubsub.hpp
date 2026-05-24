@@ -39,6 +39,22 @@ inline Totem::PubSubBackend::Pool<Totem::Audio::FftFrame, fftPublishPoolSize>
     fftPool{PubSubService::nextMessageId};
 inline Totem::PubSubBackend::Pool<Totem::Audio::BeatEvent, beatPublishPoolSize>
     beatPool{PubSubService::nextMessageId};
+inline uint32_t droppedBackpressurePayloads = 0;
+
+inline bool isBackpressure(ReturnCode ret) {
+    return ret == ERR(Overflow) || ret == ERR(CoreError, Overflow);
+}
+
+inline void noteBackpressureDrop(NodeData::PubSub::Topic topic,
+                                 ReturnCode reason) {
+    const auto dropped = ++droppedBackpressurePayloads;
+    if (dropped == 1 || (dropped % 64U) == 0) {
+        _log_w("Dropping noncritical media PubSub payload for topic 0x%08lx "
+               "after backpressure: " ERR_FMT " (dropped=%lu)",
+               static_cast<unsigned long>(topic), ERR_ARG(reason),
+               static_cast<unsigned long>(dropped));
+    }
+}
 
 inline uint8_t clampU8(float value) {
     if (!std::isfinite(value) || value <= 0.0F) {
@@ -78,20 +94,27 @@ inline ReturnCode publish(T payload, NodeData::PubSub::Topic topic,
     FAIL_IF_NOT(PubSubService::configured(), ERR(CoreError, InvalidState),
                 "PubSub backend is not configured for media audio publish");
 
-    FAIL_IF_UNEXPECTED_FWD(messageId, pool.store(payload),
-                           "Failed to store media audio PubSub payload");
+    auto stored = pool.store(payload);
+    if (!stored) {
+        if (isBackpressure(stored.error())) {
+            noteBackpressureDrop(topic, stored.error());
+            return OK();
+        }
+        FAIL_ERR_FWD(stored.error(),
+                     "Failed to store media audio PubSub payload");
+    }
 
     auto envelopeResult = Totem::PubSubBackend::Envelope::make<T>({
         .owner = static_cast<void *>(&pool),
         .topic = topic,
-        .messageId = messageId,
+        .messageId = *stored,
         .getPayloadPtr = Totem::PubSubBackend::Pool<T, PoolSize>::getPtr,
         .encodePayload = Totem::PubSubBackend::Pool<T, PoolSize>::encodePayload,
         .release = Totem::PubSubBackend::Pool<T, PoolSize>::release,
         .requireSyncedClock = false,
     });
     if (!envelopeResult) {
-        (void)pool.release({.header = {.messageId = messageId}});
+        (void)pool.release({.header = {.messageId = *stored}});
         FAIL_ERR_FWD(envelopeResult.error(),
                      "Failed to create media audio PubSub envelope");
     }
@@ -99,6 +122,10 @@ inline ReturnCode publish(T payload, NodeData::PubSub::Topic topic,
     auto publishResult = PubSubService::get().publish(*envelopeResult);
     if (!publishResult.ok()) {
         (void)pool.release(*envelopeResult);
+        if (isBackpressure(publishResult)) {
+            noteBackpressureDrop(topic, publishResult);
+            return OK();
+        }
         FAIL_ERR_FWD(publishResult,
                      "Failed to publish media audio PubSub envelope");
     }

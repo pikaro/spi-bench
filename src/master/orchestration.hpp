@@ -25,10 +25,9 @@ struct WheelMapping {
 
 struct BeatWaveMapping {
     bool publishCenterWave = true;
-    std::array<uint8_t, Totem::Audio::beatGroupCount> hueByGroup{
-        {144, 96, 32}};
-    uint16_t lifetimeMs = 900;
-    uint8_t value = 180;
+    std::array<uint8_t, Totem::Audio::beatGroupCount> hueByGroup{{144, 96, 32}};
+    uint16_t lifetimeMs = 2000;
+    uint8_t value = 200;
     uint8_t width = 5;
     uint32_t minIntervalMs = 120;
 };
@@ -71,9 +70,8 @@ inline ReturnCode publishWheelOffsets() {
             Totem::LedDisplay::makeHueOffsetCommand(scaleToCommandAngle(
                 wheelOffset, config.wheel.hueTurnsPerWheelTurn)),
             "Failed to build orchestrated hue offset command");
-        FAIL_IF_ERR_FWD(
-            Totem::LedDisplay::publishAnimationCommand(hueCmd),
-            "Failed to publish orchestrated hue offset command");
+        FAIL_IF_ERR_FWD(Totem::LedDisplay::publishAnimationCommand(hueCmd),
+                        "Failed to publish orchestrated hue offset command");
     }
 
     if (config.wheel.publishRotationOffset) {
@@ -90,8 +88,9 @@ inline ReturnCode publishWheelOffsets() {
     return OK();
 }
 
-inline ReturnCode onWheelEnvelope(
-    void * /*unused*/, const Totem::PubSubBackend::Envelope &envelope) {
+inline ReturnCode
+onWheelEnvelope(void * /*unused*/,
+                const Totem::PubSubBackend::Envelope &envelope) {
     FAIL_IF_UNEXPECTED_FWD(state,
                            envelope.getPayloadAs<Totem::Wheel::WheelState>(),
                            "Failed to decode orchestrated wheel state");
@@ -108,8 +107,9 @@ inline ReturnCode onWheelEnvelope(
     return OK();
 }
 
-inline ReturnCode onBeatEnvelope(
-    void * /*unused*/, const Totem::PubSubBackend::Envelope &envelope) {
+inline ReturnCode
+onBeatEnvelope(void * /*unused*/,
+               const Totem::PubSubBackend::Envelope &envelope) {
     FAIL_IF_UNEXPECTED_FWD(event,
                            envelope.getPayloadAs<Totem::Audio::BeatEvent>(),
                            "Failed to decode orchestrated beat event");
@@ -199,14 +199,15 @@ inline ReturnCode handleBeat(const Totem::Audio::BeatEvent &event,
         return OK();
     }
 
+    auto options = Totem::LedDisplay::AnimationCommandOptions{};
+    options.kind = Totem::LedDisplay::AnimationKind::CenterWave;
+    options.lifetimeMs = config.beatWave.lifetimeMs;
+    options.hue = config.beatWave.hueByGroup[groupIndex];
+    options.value = config.beatWave.value;
+    options.param = config.beatWave.width;
+
     detail::lastBeatWaveMs[groupIndex] = nowMs;
-    return Totem::LedDisplay::publishAnimation({
-        .kind = Totem::LedDisplay::AnimationKind::CenterWave,
-        .lifetimeMs = config.beatWave.lifetimeMs,
-        .hue = config.beatWave.hueByGroup[groupIndex],
-        .value = config.beatWave.value,
-        .param = config.beatWave.width,
-    });
+    return Totem::LedDisplay::publishAnimation(options);
 }
 
 inline ReturnCode work(uint32_t nowMs) {

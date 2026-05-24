@@ -108,6 +108,9 @@ class Drainer {
         Envelope item;
         auto ret = OK();
         while (ret.ok()) {
+            if (_freeInFlightSlots() == 0) {
+                return OK();
+            }
             ret.combine(
                 Totem::Queue::Platform::receive(*_publishQueue, &item, 0));
             if (ret.ok()) {
@@ -148,12 +151,17 @@ class Drainer {
             "Failed to snapshot PubSub transporters for polling");
         auto ret = OK();
         for (size_t i = 0; i < snapshot.count; ++i) {
+            const auto freeSlots = _freeInFlightSlots();
+            if (freeSlots == 0) {
+                return ret;
+            }
             const auto &entry = snapshot.entries[i];
             auto ctx = PublishContext{
                 .self = this,
                 .transportId = entry.transportId,
             };
-            ret.combine(entry.transporter->pollInto(&ctx, &_publishCallback));
+            ret.combine(
+                entry.transporter->pollInto(&ctx, &_publishCallback, freeSlots));
         }
         return ret;
     }
@@ -183,6 +191,17 @@ class Drainer {
                stored, static_cast<unsigned>(mask), pendingCount,
                MAGIC_PUBSUB_SV_ARG(envelope.header));
         return &_inFlightFrames[static_cast<size_t>(stored)];
+    }
+
+    [[nodiscard]] size_t _freeInFlightSlots() {
+        Mutex::ScopedSpinlockGuard guard{_inFlightLock};
+        size_t freeSlots = 0;
+        for (const auto &frame : _inFlightFrames) {
+            if (frame.pendingCount == 0) {
+                ++freeSlots;
+            }
+        }
+        return freeSlots;
     }
 
     std::expected<size_t, ReturnCode>

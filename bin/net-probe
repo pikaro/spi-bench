@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import argparse
+import platform
+import socket
+import subprocess
+import sys
+import time
+from dataclasses import dataclass
+
+
+DEFAULT_TIMEOUT_S = 10.0
+DEFAULT_BYTES = 512
+
+
+@dataclass(frozen=True)
+class Payload:
+    data: bytes
+
+    @staticmethod
+    def from_args(text: str | None, hex_text: str | None) -> 'Payload':
+        if text is not None and hex_text is not None:
+            raise ValueError('use either --payload or --hex-payload, not both')
+        if hex_text is not None:
+            return Payload(bytes.fromhex(hex_text))
+        if text is None:
+            text = 'hello'
+        return Payload(text.encode('utf-8'))
+
+
+def set_timeout(sock: socket.socket, timeout_s: float) -> None:
+    if timeout_s < 0:
+        raise ValueError('timeout must be >= 0')
+    sock.settimeout(timeout_s)
+
+
+def udp_send(args: argparse.Namespace) -> int:
+    payload = Payload.from_args(args.payload, args.hex_payload).data
+    if args.count < 1:
+        raise ValueError('count must be >= 1')
+    if args.interval < 0:
+        raise ValueError('interval must be >= 0')
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        if args.bind_host is not None or args.bind_port is not None:
+            sock.bind((args.bind_host or '', args.bind_port or 0))
+        set_timeout(sock, args.timeout)
+        for index in range(args.count):
+            sent = sock.sendto(payload, (args.host, args.port))
+            print(
+                f'udp-sent bytes={sent} target={args.host}:{args.port} '
+                f'index={index + 1}/{args.count}',
+                flush=True,
+            )
+            if index + 1 < args.count:
+                time.sleep(args.interval)
+    return 0
+
+
+def udp_recv(args: argparse.Namespace) -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.bind((args.bind_host, args.port))
+        set_timeout(sock, args.timeout)
+        print(f'udp-listening bind={args.bind_host}:{args.port}', flush=True)
+        data, peer = sock.recvfrom(args.max_bytes)
+        print_payload('udp-received', peer, data)
+        if args.echo:
+            sent = sock.sendto(data, peer)
+            print(f'udp-echoed bytes={sent} peer={peer[0]}:{peer[1]}')
+    return 0
+
+
+def tcp_listen(args: argparse.Namespace) -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind((args.bind_host, args.port))
+        listener.listen(1)
+        set_timeout(listener, args.timeout)
+        print(f'tcp-listening bind={args.bind_host}:{args.port}', flush=True)
+        conn, peer = listener.accept()
+        with conn:
+            set_timeout(conn, args.timeout)
+            data = conn.recv(args.max_bytes)
+            print_payload('tcp-received', peer, data)
+            if args.echo:
+                conn.sendall(data)
+                print(f'tcp-echoed bytes={len(data)} peer={peer[0]}:{peer[1]}')
+    return 0
+
+
+def tcp_connect(args: argparse.Namespace) -> int:
+    payload = Payload.from_args(args.payload, args.hex_payload).data
+    with socket.create_connection((args.host, args.port), timeout=args.timeout) as sock:
+        set_timeout(sock, args.timeout)
+        sock.sendall(payload)
+        print(f'tcp-sent bytes={len(payload)} target={args.host}:{args.port}')
+        if args.recv:
+            data = sock.recv(args.max_bytes)
+            print_payload('tcp-received', (args.host, args.port), data)
+    return 0
+
+
+def route_get(args: argparse.Namespace) -> int:
+    system = platform.system().lower()
+    if system == 'darwin':
+        command = ['route', '-n', 'get', args.host]
+    elif system == 'linux':
+        command = ['ip', 'route', 'get', args.host]
+    else:
+        raise ValueError(f'unsupported platform for route lookup: {system}')
+
+    proc = subprocess.run(command, check=False, text=True, capture_output=True)
+    if proc.stdout:
+        print(proc.stdout, end='')
+    if proc.stderr:
+        print(proc.stderr, end='', file=sys.stderr)
+    return proc.returncode
+
+
+def print_payload(prefix: str, peer: tuple[str, int], data: bytes) -> None:
+    text = data.decode('utf-8', errors='replace')
+    print(
+        f'{prefix} bytes={len(data)} peer={peer[0]}:{peer[1]} '
+        f'hex={data.hex()} text={text!r}',
+    )
+
+
+def add_payload_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument('--payload', help='UTF-8 payload text')
+    parser.add_argument('--hex-payload', help='Payload bytes as hexadecimal')
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description='Small UDP/TCP diagnostic sender/receiver.',
+    )
+    sub = parser.add_subparsers(dest='command', required=True)
+
+    udp_send_parser = sub.add_parser('udp-send', help='send one UDP datagram')
+    udp_send_parser.add_argument('host')
+    udp_send_parser.add_argument('port', type=int)
+    udp_send_parser.add_argument('--bind-host')
+    udp_send_parser.add_argument('--bind-port', type=int)
+    udp_send_parser.add_argument('--timeout', type=float, default=DEFAULT_TIMEOUT_S)
+    udp_send_parser.add_argument('--count', type=int, default=1)
+    udp_send_parser.add_argument('--interval', type=float, default=0.5)
+    add_payload_args(udp_send_parser)
+    udp_send_parser.set_defaults(func=udp_send)
+
+    udp_recv_parser = sub.add_parser('udp-recv', help='receive one UDP datagram')
+    udp_recv_parser.add_argument('port', type=int)
+    udp_recv_parser.add_argument('--bind-host', default='')
+    udp_recv_parser.add_argument('--timeout', type=float, default=DEFAULT_TIMEOUT_S)
+    udp_recv_parser.add_argument('--max-bytes', type=int, default=DEFAULT_BYTES)
+    udp_recv_parser.add_argument('--echo', action='store_true')
+    udp_recv_parser.set_defaults(func=udp_recv)
+
+    tcp_listen_parser = sub.add_parser(
+        'tcp-listen',
+        help='accept one TCP client and optionally echo the received payload',
+    )
+    tcp_listen_parser.add_argument('port', type=int)
+    tcp_listen_parser.add_argument('--bind-host', default='')
+    tcp_listen_parser.add_argument('--timeout', type=float, default=DEFAULT_TIMEOUT_S)
+    tcp_listen_parser.add_argument('--max-bytes', type=int, default=DEFAULT_BYTES)
+    tcp_listen_parser.add_argument('--echo', action='store_true')
+    tcp_listen_parser.set_defaults(func=tcp_listen)
+
+    tcp_connect_parser = sub.add_parser(
+        'tcp-connect',
+        help='connect to a TCP server and send one payload',
+    )
+    tcp_connect_parser.add_argument('host')
+    tcp_connect_parser.add_argument('port', type=int)
+    tcp_connect_parser.add_argument('--timeout', type=float, default=DEFAULT_TIMEOUT_S)
+    tcp_connect_parser.add_argument('--max-bytes', type=int, default=DEFAULT_BYTES)
+    tcp_connect_parser.add_argument('--recv', action='store_true')
+    add_payload_args(tcp_connect_parser)
+    tcp_connect_parser.set_defaults(func=tcp_connect)
+
+    route_parser = sub.add_parser(
+        'route-get',
+        help='show the OS route selected for a destination host',
+    )
+    route_parser.add_argument('host')
+    route_parser.set_defaults(func=route_get)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        return args.func(args)
+    except (OSError, ValueError, TimeoutError) as exc:
+        print(f'net-probe error: {exc}', file=sys.stderr)
+        return 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

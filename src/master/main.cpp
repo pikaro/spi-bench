@@ -1,10 +1,12 @@
 #include "Clock/Facade.hpp"
 #include "Macros/Facade.hpp"
+#include "Network/Facade.hpp"
 #include "Platform/Gpio.hpp"
 #include "Platform/PlatformSelect.hpp"
 #include "Services/Clock.hpp"
 #include "Setups/Core.hpp"
 #include "Setups/PubSubNetwork.hpp"
+#include "Wifi/Facade.hpp"
 #include "Wheel/Interfaces/Wire.hpp"
 #include "Wire/Rs485/Facade.hpp"
 #include "Wire/Spi/Facade.hpp"
@@ -81,6 +83,7 @@ Totem::Wire::Spi::Master spiMasterGpu0{core.taskRegistry};
 Totem::Wire::Spi::Master spiMasterGpu1{core.taskRegistry};
 Totem::Wire::Spi::Master spiMasterLowSpeed{core.taskRegistry};
 Totem::Clock::Clock clockMaster{Totem::Clock::Clock::Role::Master};
+Totem::Wifi::Wifi wifi;
 PubSubNetworkMasterSetup<Totem::Wire::Spi::Master, Totem::Wire::Spi::Master,
                          Totem::Wire::Rs485::Master>
     pubSubNetwork{core.taskRegistry, spiMasterLowSpeed, spiMasterGpu0,
@@ -98,6 +101,12 @@ void setup() {
     ClockService::set(clockMaster);
 
     _log_d("Current clock time: %uus", clockMaster.nowUs());
+
+    ABORT_IF_ERR_BEGIN(wifi.begin(wifiConfig));
+    ABORT_IF_ERR(Totem::Wifi::Commands::registerCommands(wifi),
+                 "Failed to register WiFi commands");
+    ABORT_IF_ERR(Totem::Network::Commands::registerCommands(),
+                 "Failed to register network diagnostic commands");
 
     ABORT_IF_ERR_BEGIN(rs485master.begin(rs485MasterConfig));
 

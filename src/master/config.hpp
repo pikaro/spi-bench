@@ -2,11 +2,35 @@
 
 #include "Platform/Hardware.hpp"
 #include "StaticConfig/Stacks.hpp"
+#include "StaticConfig/Wifi.hpp"
 #include "StatusLed/Interfaces/Config.hpp"
 #include "TaskController/Interfaces/Config.hpp"
+#include "Wifi/Facade.hpp"
 #include "Wire/Rs485/Interfaces/MasterConfig.hpp"
 #include "Wire/Spi/Interfaces/MasterConfig.hpp"
 #include "Wire/Spi/Interfaces/Types.hpp"
+
+#if __has_include("wifi_credentials.hpp")
+#include "wifi_credentials.hpp"
+inline constexpr bool masterWifiCredentialsConfigured = true;
+#else
+namespace MasterWifiCredentials {
+
+struct Station {
+    inline static constexpr const char *ssid = "";
+    inline static constexpr const char *password = "";
+};
+
+struct AccessPoint {
+    inline static constexpr const char *ssid = "";
+    inline static constexpr const char *password = "";
+};
+
+inline constexpr Totem::Wifi::Mode mode = Totem::Wifi::Mode::Disabled;
+
+} // namespace MasterWifiCredentials
+inline constexpr bool masterWifiCredentialsConfigured = false;
+#endif
 
 #ifndef PUBSUB_STAR_MASTER_HIGH_SPI_CLOCK_HZ
 #define PUBSUB_STAR_MASTER_HIGH_SPI_CLOCK_HZ 10000000
@@ -143,6 +167,34 @@ inline constexpr bool ledLevelShifterOutputEnabledLevel = false;
 inline constexpr Totem::StatusLed::Config statusLedConfig{
     .configured = true,
     .pin = Pin::StatusLed,
+};
+
+inline constexpr Totem::Wifi::Config wifiConfig{
+    .mode = MasterWifiCredentials::mode,
+    .station =
+        {
+            .credentials =
+                {
+                    .ssid = MasterWifiCredentials::Station::ssid,
+                    .password = MasterWifiCredentials::Station::password,
+                },
+            .reconnect = Totem::StaticConfig::Wifi::defaultStationReconnect,
+            .maxReconnectAttempts =
+                Totem::StaticConfig::Wifi::defaultStationMaxReconnectAttempts,
+        },
+    .accessPoint =
+        {
+            .credentials =
+                {
+                    .ssid = MasterWifiCredentials::AccessPoint::ssid,
+                    .password = MasterWifiCredentials::AccessPoint::password,
+                },
+            .channel = Totem::StaticConfig::Wifi::defaultApChannel,
+            .hidden = false,
+            .maxConnections =
+                Totem::StaticConfig::Wifi::defaultApMaxConnections,
+        },
+    .disableNvsStorage = true,
 };
 
 inline constexpr Pin ledPresentStrobeOutputPin = Pin::GPIO6;

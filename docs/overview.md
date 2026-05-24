@@ -24,6 +24,10 @@ events and render their own LED segment locally.
     registers the real transports and exposes `PubSubService` without starting
     synthetic test publishers or subscribers. The synthetic multi-board
     regression harness remains in `include/Setups/PubSubStarTest.hpp`.
+- The master firmware has optional WiFi enabled through the `Wifi` component.
+    Current operation is either station mode or access-point mode, selected by
+    ignored local master credentials/config; combined AP+STA mode is not part
+    of the active runtime shape.
 - Hardware SPI now supports multiple logical master links sharing the same
     ESP32 SPI bus. The active high-speed bus uses one PubSub SPI router
     transport with GPU0 and GPU1 peers. The low-speed bus remains a
@@ -67,6 +71,10 @@ organized as follows:
 - `include/FileSystem/`: static-memory filesystem wrapper selected through the
     component detail layer; the current backend is ESP-IDF LittleFS mounted at
     `/littlefs`
+- `include/Wifi/`: ESP32 WiFi lifecycle wrapper with bounded project-owned
+    config, status reporting, and master command integration
+- `include/Network/`: thin lwIP UDP/TCP socket wrappers and diagnostic commands
+    for one-shot network probes
 - `include/Audio/`: media-node compile-time selected I2S, LittleFS WAV,
     Bluedroid A2DP, or BTstack A2DP audio input, FFT analysis, magnitude
     scaling, and beat detection; see
@@ -172,6 +180,10 @@ failures, queued/handled command counts, and opt-in task-step profiling.
     parent environment arguments when overriding the field; otherwise ESP-IDF
     component flags such as `ENABLE_SPI` are silently dropped for that
     environment.
+- Master WiFi credentials are not tracked. Create
+    `src/master/wifi_credentials.hpp` from
+    `src/master/wifi_credentials.example.hpp` for local station/AP credentials;
+    the firmware falls back to disabled WiFi when that ignored file is absent.
 - Top-level `CMakeLists.txt` requires `SRC_ROOT` and maps it to the selected
     source subtree
 - `src/CMakeLists.txt` maps PlatformIO environments to source roots through
@@ -316,6 +328,10 @@ Meaningful verification currently means:
 - the relevant build passes
 - the changed code path is reviewed in context
 - the result looks correct at first glance for the intended embedded use
+
+For master WiFi/socket work, `bin/net-probe` provides host-side UDP/TCP
+send/receive helpers and route lookup. It is a diagnostic utility, not a
+replacement for future unit tests or a `PLATFORM_HOST` build.
 
 Service facades are intended to stay lightweight. In particular, `Services/*`
 headers should not pull full backend implementations into unrelated subsystems.

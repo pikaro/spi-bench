@@ -1,0 +1,44 @@
+#!/run/current-system/sw/bin/bash
+
+ROOT="$(git rev-parse --show-toplevel)"
+
+cd "${ROOT}" || exit 1
+source .venv/bin/activate
+
+declare -A FOUND
+declare -A DEVICES
+
+_color() {
+    local color="$1"
+    shift
+    case "$color" in
+    red) echo -e "\033[31m$*\033[0m" ;;
+    green) echo -e "\033[32m$*\033[0m" ;;
+    yellow) echo -e "\033[33m$*\033[0m" ;;
+    *) echo "$*" ;;
+    esac
+}
+
+while read -r env; do
+    unset ESPTOOL_PORT
+    eval "$("${ROOT}/bin/select_port.py" "${env}")"
+    if [ -n "${ESPTOOL_PORT}" ]; then
+        FOUND["${env}"]="$(_color green "Found")"
+        DEVICES["${env}"]="${ESPTOOL_PORT}"
+    else
+        FOUND["${env}"]="$(_color red "Missing")"
+        DEVICES["${env}"]="N/A"
+    fi
+done < <(/usr/bin/grep -Eo '^\[env:[a-z0-9]+\]$' "${ROOT}/platformio.ini" | sed 's/^\[env:\(.*\)\]$/\1/')
+
+echo
+echo "Device Check Results:"
+echo
+
+{
+    echo "Environment Status Device"
+    echo "----------- ------ ------"
+    for env in "${!FOUND[@]}"; do
+        echo "${env} ${FOUND[${env}]} ${DEVICES[${env}]}"
+    done
+} | column -ts ' | '

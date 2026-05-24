@@ -2,3 +2,11 @@
 # builds those pins are part of the external memory bus, so PSRAM must stay
 # disabled for this board wiring.
 CONFIG_SPIRAM=n
+
+# Master owns WiFi/network participation. The shared ESP32 stack disables these
+# to keep the other nodes small, so enable them only in the master overlay.
+CONFIG_ESP_NETIF_TCPIP_LWIP=y
+CONFIG_LWIP_ENABLE=y
+CONFIG_ESP_WIFI_ENABLED=y
+CONFIG_ESP_WIFI_SOFTAP_SUPPORT=y
+CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=n

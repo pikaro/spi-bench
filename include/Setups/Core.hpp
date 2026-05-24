@@ -53,7 +53,7 @@ struct CoreSetup {
         ABORT_IF_ERR_BEGIN(metricsBackend.begin());
         (void)Totem::Mutex::detail::metrics();
 
-        ABORT_IF_ERR(register_core_commands(),
+        ABORT_IF_ERR(register_core_commands(commandController.store()),
                      "Failed to register core commands to command controller");
 
         ABORT_IF_ERR_BEGIN(aggregator.begin());

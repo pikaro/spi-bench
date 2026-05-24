@@ -22,7 +22,7 @@ enum class Topic : uint32_t {
     None = 0,
     Heartbeat = 1U << 0,
     PubSub = 1U << 1,
-    Sensor = 1U << 2,
+    Wheel = 1U << 2,
     Beat = 1U << 3,
     FftFrame = 1U << 4,
     Power = 1U << 5,

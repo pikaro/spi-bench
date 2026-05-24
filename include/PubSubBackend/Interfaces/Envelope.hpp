@@ -117,7 +117,7 @@ struct Envelope {
     }
 
     template <class T>
-        requires detail::is_wire_message_v<T>
+        requires detail::is_wire_codec_type_v<T>
     static std::expected<Envelope, ReturnCode> make(const EnvelopeDef &def) {
         constexpr auto payloadSize = detail::Codec<T>::encodedSize();
         static_assert(

@@ -11,6 +11,10 @@ namespace Totem::Buttons::detail {
 class Buttons;
 } // namespace Totem::Buttons::detail
 
+namespace Totem::Bluetooth::detail {
+class Central;
+} // namespace Totem::Bluetooth::detail
+
 namespace Totem::CommandBackend::detail {
 class Controller;
 } // namespace Totem::CommandBackend::detail
@@ -54,6 +58,7 @@ inline constexpr uint32_t command = 6144;
 inline constexpr uint32_t ledPwm = 4096;
 inline constexpr uint32_t ledDisplay = 8192;
 inline constexpr uint32_t buttons = 4096;
+inline constexpr uint32_t bluetooth = 4096;
 inline constexpr uint32_t pubSubNode = 8192;
 inline constexpr uint32_t spiMaster = 8192;
 inline constexpr uint32_t spiSlave = 8192;
@@ -87,6 +92,12 @@ struct StaticStackSize<Totem::Audio::detail::FftDisplay> {
 template <>
 struct StaticStackSize<Totem::Buttons::detail::Buttons> {
     static constexpr uint32_t value = Totem::StaticConfig::TaskStacks::buttons;
+};
+
+template <>
+struct StaticStackSize<Totem::Bluetooth::detail::Central> {
+    static constexpr uint32_t value =
+        Totem::StaticConfig::TaskStacks::bluetooth;
 };
 
 template <>

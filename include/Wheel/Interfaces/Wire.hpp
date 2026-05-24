@@ -1,13 +1,14 @@
 #pragma once
 
 #include "Macros/internal/Markers.hpp"
+#include "Types/Angle.hpp"
 #include <cstdint>
 
 namespace Totem::Wheel {
 
 struct WIRE_MSG WheelState {
-    uint16_t position;
-    uint8_t delta;
+    Angle<uint16_t> position;
+    Angle<uint16_t> delta;
 };
 
 } // namespace Totem::Wheel

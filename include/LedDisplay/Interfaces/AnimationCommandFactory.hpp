@@ -16,7 +16,7 @@
 namespace Totem::LedDisplay {
 
 struct AnimationCommandOptions {
-    AnimationKind kind = AnimationKind::CenterWave;
+    AnimationKind kind = AnimationKind::None;
     PrimitiveKind primitive = PrimitiveKind::Explosion;
     uint16_t requestId = 0;
     uint16_t lifetimeMs = 1200;
@@ -49,6 +49,9 @@ makeAnimationCommand(AnimationCommandOptions options) {
     };
 
     switch (options.kind) {
+    case AnimationKind::None:
+        FAIL(std::unexpected(ERR(CoreError, InvalidArgument)),
+             "Animation command options have no animation kind");
     case AnimationKind::DiagnosticFill:
         FAIL_IF_ERR_FWD_UNEXPECTED(encodeAnimationPayload(
                                        cmd, DiagnosticFillConfig{
@@ -105,12 +108,40 @@ makeAnimationCommand(AnimationCommandOptions options) {
 inline AnimationCommand makeStopAnimationCommand(uint16_t requestId = 0) {
     return AnimationCommand{
         .type = AnimationCommandType::Stop,
-        .kind = AnimationKind::CenterWave,
+        .kind = AnimationKind::None,
         .requestId = requestId,
         .layer = Layer::Main,
         .lifetimeMs = 0,
         .payloadSize = 0,
     };
+}
+
+inline std::expected<AnimationCommand, ReturnCode>
+makeHueOffsetCommand(Angle<uint8_t> offset, uint16_t requestId = 0) {
+    auto cmd = AnimationCommand{
+        .type = AnimationCommandType::SetHueOffset,
+        .kind = AnimationKind::None,
+        .requestId = requestId,
+        .layer = Layer::Main,
+        .lifetimeMs = 0,
+    };
+    FAIL_IF_ERR_FWD_UNEXPECTED(encodeAnimationPayload(cmd, offset),
+                               "Failed to encode LED hue offset");
+    return cmd;
+}
+
+inline std::expected<AnimationCommand, ReturnCode>
+makeRotationOffsetCommand(Angle<uint8_t> offset, uint16_t requestId = 0) {
+    auto cmd = AnimationCommand{
+        .type = AnimationCommandType::SetRotationOffset,
+        .kind = AnimationKind::None,
+        .requestId = requestId,
+        .layer = Layer::Main,
+        .lifetimeMs = 0,
+    };
+    FAIL_IF_ERR_FWD_UNEXPECTED(encodeAnimationPayload(cmd, offset),
+                               "Failed to encode LED rotation offset");
+    return cmd;
 }
 
 inline ReturnCode publishAnimationCommand(AnimationCommand cmd) {

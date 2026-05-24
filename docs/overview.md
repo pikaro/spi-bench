@@ -75,6 +75,10 @@ organized as follows:
     config, status reporting, and master command integration
 - `include/Network/`: thin lwIP UDP/TCP socket wrappers and diagnostic commands
     for one-shot network probes
+- `include/Bluetooth/`: fixed-capacity BLE central abstraction with an ESP-IDF
+    NimBLE backend for node-local device profiles
+- `include/Wheel/`: BLE wheel device-profile driver and wire payload used by
+    `io` to publish wheel rotation events
 - `include/Audio/`: media-node compile-time selected I2S, LittleFS WAV,
     Bluedroid A2DP, or BTstack A2DP audio input, FFT analysis, magnitude
     scaling, and beat detection; see
@@ -94,6 +98,10 @@ organized as follows:
 - `src/master/`, `src/media/`, `src/gpu/`, and `src/io/`:
     environment-specific execution roots selected by build configuration.
     Both GPU PlatformIO environments currently map to `src/gpu/`.
+- `src/master/orchestration.hpp`: master-local show orchestration. It
+    subscribes to compact events such as wheel movement and emits existing LED
+    animation commands; mappings are intentionally plain C++ config-as-code,
+    not a shared semantic configuration layer.
 - `env:io` targets the ESP32-C3 SuperMini board variant in this repository and
     uses the 4 MiB flash layout under `partitions/esp32_4mib.csv`.
     Its runtime command console is the USB Serial/JTAG console; native UART0
@@ -221,10 +229,11 @@ must match the active console transport.
 The command console is a small line editor over the same runtime console:
 slash-prefixed commands can be edited with Backspace/DEL, Tab completes
 registered commands and subcommands, Up/Down navigate the last five accepted
-commands, and each input byte redraws the current command buffer so log output
-does not permanently hide in-progress input. Console input events wake the
-command task directly; the periodic task interval is only a slow liveness
-fallback.
+commands, and `/help` emits the commands registered on the current node,
+including subcommands and arguments. Each input byte redraws the current command
+buffer so log output does not permanently hide in-progress input. Console input
+events wake the command task directly; the periodic task interval is only a slow
+liveness fallback.
 
 Managed `TaskController` tasks default to ESP-IDF static task creation. Their
 TCB and stack storage are exact-size task-owner storage derived from

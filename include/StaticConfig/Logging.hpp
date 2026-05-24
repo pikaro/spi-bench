@@ -49,7 +49,9 @@ struct LoggingConfig {
     static constexpr bool aggregatorRingBufferStatic = true;
     static constexpr std::size_t aggregatorRingBufferRecords = 100;
 
-    static constexpr bool errorJournalEnabled = true;
+    // FIXME: Causes crashes due to flash writes under interrupt context
+    // pressure -> wdt resets
+    static constexpr bool errorJournalEnabled = false;
     static constexpr std::size_t errorJournalHistoryRecords = 5;
     static constexpr std::size_t errorJournalTrailingRecords = 5;
     static constexpr std::size_t errorJournalSlots = 5;
@@ -57,6 +59,5 @@ struct LoggingConfig {
     static constexpr std::size_t errorJournalQueueRecords = 12;
     static constexpr std::size_t errorJournalMessageLength = 96;
 
-    static constexpr std::size_t maxSinks =
-        1 + (errorJournalEnabled ? 1 : 0);
+    static constexpr std::size_t maxSinks = 1 + (errorJournalEnabled ? 1 : 0);
 };

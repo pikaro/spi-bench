@@ -16,16 +16,45 @@
 
 namespace Totem::PubSubBackend::detail {
 
+template <typename T>
+using decay_field_t = std::remove_cv_t<std::remove_reference_t<T>>;
+
 template <typename T, typename = void>
-struct IsWireMessage : std::false_type {};
+struct IsGeneratedWireMessage : std::false_type {};
 
 template <typename T>
-struct IsWireMessage<
+struct IsGeneratedWireMessage<
     T, std::void_t<decltype(Generated::Wire::FieldList<T>::fields)>>
     : std::true_type {};
 
 template <typename T>
-inline constexpr bool is_wire_message_v = IsWireMessage<T>::value;
+inline constexpr bool is_wire_message_v = IsGeneratedWireMessage<T>::value;
+
+template <typename T>
+using value_member_ref_t = decltype(std::declval<decay_field_t<T> &>().value);
+
+template <typename T>
+using value_member_t = decay_field_t<value_member_ref_t<T>>;
+
+template <typename T, typename = void>
+struct IsTransparentValueWrapper : std::false_type {};
+
+template <typename T>
+struct IsTransparentValueWrapper<T, std::void_t<value_member_ref_t<T>>>
+    : std::bool_constant<
+          std::is_class_v<decay_field_t<T>> &&
+          std::is_aggregate_v<decay_field_t<T>> &&
+          std::is_trivially_copyable_v<decay_field_t<T>> &&
+          !std::is_const_v<std::remove_reference_t<value_member_ref_t<T>>> &&
+          sizeof(decay_field_t<T>) == sizeof(value_member_t<T>)> {};
+
+template <typename T>
+inline constexpr bool is_transparent_value_wrapper_v =
+    IsTransparentValueWrapper<T>::value;
+
+template <typename T>
+inline constexpr bool is_wire_codec_type_v =
+    is_wire_message_v<T> || is_transparent_value_wrapper_v<T>;
 
 namespace wire {
 
@@ -42,9 +71,6 @@ struct MemberPointerTraits<MemberPtr> {
     using Class = ClassT;
     using Field = FieldT;
 };
-
-template <typename T>
-using decay_field_t = std::remove_cv_t<std::remove_reference_t<T>>;
 
 template <typename T> struct is_std_array : std::false_type {};
 
@@ -276,6 +302,8 @@ template <typename T> constexpr size_t encoded_size() {
             decay_field_t<decltype(Generated::Wire::FieldList<CleanT>::fields)>;
         return encoded_size_from_fields<FieldsT>(
             std::make_index_sequence<std::tuple_size_v<FieldsT>>{});
+    } else if constexpr (is_transparent_value_wrapper_v<CleanT>) {
+        return encoded_size<value_member_t<CleanT>>();
     } else {
         static_assert(always_false<CleanT>::value,
                       "Unsupported wire field type");
@@ -313,6 +341,8 @@ constexpr ReturnCode encode_value(const T &value, std::span<std::byte> out,
         return encode_fields(
             value, fields, out, offset,
             std::make_index_sequence<std::tuple_size_v<FieldsT>>{});
+    } else if constexpr (is_transparent_value_wrapper_v<CleanT>) {
+        return encode_value(value.value, out, offset);
     } else {
         static_assert(always_false<CleanT>::value,
                       "Unsupported wire field type");
@@ -354,6 +384,14 @@ std::expected<T, ReturnCode> decode_value(DecodeCursor &cursor) {
         return decode_fields<CleanT>(
             fields, cursor,
             std::make_index_sequence<std::tuple_size_v<FieldsT>>{});
+    } else if constexpr (is_transparent_value_wrapper_v<CleanT>) {
+        auto decoded = decode_value<value_member_t<CleanT>>(cursor);
+        if (!decoded) {
+            return std::unexpected(decoded.error());
+        }
+        CleanT value{};
+        value.value = *decoded;
+        return value;
     } else {
         static_assert(always_false<CleanT>::value,
                       "Unsupported wire field type");
@@ -367,7 +405,9 @@ template <typename T> struct Codec {
     using Reader = wire::Reader;
     using SpanReader = wire::SpanReader;
 
-    static_assert(is_wire_message_v<T>, "No generated wire metadata for T");
+    static_assert(is_wire_codec_type_v<T>,
+                  "No generated wire metadata or transparent value member for "
+                  "T");
 
     static constexpr size_t encodedSize() { return wire::encoded_size<T>(); }
 

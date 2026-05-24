@@ -1,18 +1,18 @@
 #include "Clock/Facade.hpp"
 #include "Macros/Facade.hpp"
-#include "Network/Facade.hpp"
+// #include "Network/Facade.hpp"
 #include "Platform/Gpio.hpp"
 #include "Platform/PlatformSelect.hpp"
 #include "Services/Clock.hpp"
 #include "Setups/Core.hpp"
 #include "Setups/PubSubNetwork.hpp"
-#include "Wifi/Facade.hpp"
-#include "Wheel/Interfaces/Wire.hpp"
+// #include "Wifi/Facade.hpp"
 #include "Wire/Rs485/Facade.hpp"
 #include "Wire/Spi/Facade.hpp"
 #include "config.hpp"
 #include "driver/gpio.h"
 #include "driver/gptimer.h"
+#include "orchestration.hpp"
 #include <cstdint>
 
 namespace {
@@ -48,8 +48,7 @@ class LedPresentStrobeOutput {
         FAIL_IF_PLATFORM_FWD(gptimer_start(_timer),
                              "Failed to start LED present strobe timer");
 
-        _log_i("LED present strobe output ready on pin " SV_FMT
-               " at %lu FPS",
+        _log_i("LED present strobe output ready on pin " SV_FMT " at %lu FPS",
                MAGIC_SV_ARG(pin),
                static_cast<unsigned long>(ledPresentStrobeFps));
         return OK();
@@ -83,7 +82,7 @@ Totem::Wire::Spi::Master spiMasterGpu0{core.taskRegistry};
 Totem::Wire::Spi::Master spiMasterGpu1{core.taskRegistry};
 Totem::Wire::Spi::Master spiMasterLowSpeed{core.taskRegistry};
 Totem::Clock::Clock clockMaster{Totem::Clock::Clock::Role::Master};
-Totem::Wifi::Wifi wifi;
+// Totem::Wifi::Wifi wifi;
 PubSubNetworkMasterSetup<Totem::Wire::Spi::Master, Totem::Wire::Spi::Master,
                          Totem::Wire::Rs485::Master>
     pubSubNetwork{core.taskRegistry, spiMasterLowSpeed, spiMasterGpu0,
@@ -102,11 +101,11 @@ void setup() {
 
     _log_d("Current clock time: %uus", clockMaster.nowUs());
 
-    ABORT_IF_ERR_BEGIN(wifi.begin(wifiConfig));
-    ABORT_IF_ERR(Totem::Wifi::Commands::registerCommands(wifi),
-                 "Failed to register WiFi commands");
-    ABORT_IF_ERR(Totem::Network::Commands::registerCommands(),
-                 "Failed to register network diagnostic commands");
+    // ABORT_IF_ERR_BEGIN(wifi.begin(wifiConfig));
+    // ABORT_IF_ERR(Totem::Wifi::Commands::registerCommands(wifi),
+    //              "Failed to register WiFi commands");
+    // ABORT_IF_ERR(Totem::Network::Commands::registerCommands(),
+    //              "Failed to register network diagnostic commands");
 
     ABORT_IF_ERR_BEGIN(rs485master.begin(rs485MasterConfig));
 
@@ -125,13 +124,13 @@ void setup() {
                  "Failed to register RS485 clock handler");
 
     pubSubNetwork.setup();
+    ABORT_IF_ERR(MasterOrchestration::begin(),
+                 "Failed to begin master orchestration");
 
     ABORT_IF_ERR(
-        ledLevelShifterOutputEnable.initOutput(
-            ledLevelShifterOutputEnablePin),
+        ledLevelShifterOutputEnable.initOutput(ledLevelShifterOutputEnablePin),
         "Failed to initialize LED level shifter output enable GPIO");
-    ABORT_IF_ERR_BEGIN(
-        ledPresentStrobeOutput.begin(ledPresentStrobeOutputPin));
+    ABORT_IF_ERR_BEGIN(ledPresentStrobeOutput.begin(ledPresentStrobeOutputPin));
 
     _log_i("Setup complete");
     ABORT_IF_ERR(StatusLedService::setTargetsReady(),
@@ -146,13 +145,13 @@ void app_main() {
     setup();
 
     ABORT_IF_ERR(
-        ledLevelShifterOutputEnable.setLevel(
-            ledLevelShifterOutputEnabledLevel),
+        ledLevelShifterOutputEnable.setLevel(ledLevelShifterOutputEnabledLevel),
         "Failed to enable LED level shifter output");
 
     for (;;) {
         const auto nowMs = ::platform::get_time();
         (void)core.work(nowMs);
+        (void)MasterOrchestration::work(nowMs);
 
         ::platform::delay(::platform::ms_to_ticks(1));
     }

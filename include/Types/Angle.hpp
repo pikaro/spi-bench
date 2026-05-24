@@ -5,7 +5,10 @@
 #include <type_traits>
 
 template <typename T>
-    requires std::is_integral_v<T> && std::is_unsigned_v<T>
+concept AngleType = std::is_integral_v<T> && std::is_unsigned_v<T>;
+
+template <typename T>
+    requires AngleType<T>
 struct Angle {
     T value{};
 
@@ -48,4 +51,10 @@ struct Angle {
     static Angle fromRad(float radians) { return fromTurns(radians / twoPi); }
 
     static Angle fromDeg(float degrees) { return fromTurns(degrees / 360.0F); }
+
+    template <typename U>
+        requires AngleType<U>
+    [[nodiscard]] constexpr Angle<U> cast() const {
+        return Angle<U>::fromTurns(turns());
+    }
 };

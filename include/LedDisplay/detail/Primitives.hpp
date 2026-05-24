@@ -7,13 +7,31 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 
 namespace Totem::LedDisplay::detail {
 
+static_assert(Config::totalPixelCount ==
+                  (Config::spokeCount * Config::ringCount),
+              "Logical LED map must cover every display pixel");
+
 class PrimitiveCanvas {
   public:
-    explicit PrimitiveCanvas(std::span<HsvColor> frame) : _frame(frame) {}
+    static constexpr LedTopology::LocalPixelIndex invalidLocalPixel =
+        std::numeric_limits<LedTopology::LocalPixelIndex>::max();
+
+    using LogicalToLocalMap =
+        std::span<const LedTopology::LocalPixelIndex, Config::totalPixelCount>;
+
+    explicit PrimitiveCanvas(std::span<HsvColor> frame,
+                             LogicalToLocalMap logicalToLocal)
+        : _frame(frame), _logicalToLocal(logicalToLocal) {}
+
+    [[nodiscard]] static constexpr size_t logicalIndex(uint8_t spoke,
+                                                       uint8_t radial) {
+        return (static_cast<size_t>(spoke) * Config::ringCount) + radial;
+    }
 
     void fill(HsvColor color, BlendOp op = BlendOp::Replace) {
         for (auto &pixel : _frame) {
@@ -23,8 +41,12 @@ class PrimitiveCanvas {
 
     void pixel(uint8_t spoke, uint8_t radial, HsvColor color,
                BlendOp op = BlendOp::MaxValue) {
-        const auto physical = LedTopology::Umbrella::physicalFor(spoke, radial);
-        physicalPixel(physical, color, op);
+        const auto local = _logicalToLocal[logicalIndex(spoke, radial)];
+        if (local == invalidLocalPixel) {
+            return;
+        }
+        auto &dst = _frame[static_cast<size_t>(local)];
+        dst = Render::blend(dst, color, op);
     }
 
     void physicalPixel(LedTopology::PhysicalPixelIndex physical,
@@ -79,6 +101,7 @@ class PrimitiveCanvas {
 
   private:
     std::span<HsvColor> _frame;
+    LogicalToLocalMap _logicalToLocal;
 };
 
 struct PrimitiveParams {
@@ -178,16 +201,18 @@ inline void drawTheaterChase(PrimitiveCanvas &canvas,
     const uint8_t phase =
         static_cast<uint8_t>((params.elapsedMs / stepMs) % spacing);
 
-    for (size_t local = 0; local < Config::ownedPixelCount; ++local) {
-        const auto physical = LedTopology::OwnedPixels::physicalIndex(
-            static_cast<LedTopology::LocalPixelIndex>(local));
-        if (static_cast<uint8_t>((physical + phase) % spacing) != 0U) {
-            continue;
+    for (uint8_t spoke = 0; spoke < Config::spokeCount; ++spoke) {
+        for (uint8_t radial = 0; radial < Config::ringCount; ++radial) {
+            const auto logical =
+                PrimitiveCanvas::logicalIndex(spoke, radial);
+            if (static_cast<uint8_t>((logical + phase) % spacing) != 0U) {
+                continue;
+            }
+            canvas.pixel(spoke, radial,
+                         HsvColor{.hue = params.hue,
+                                  .saturation = params.saturation,
+                                  .value = params.value});
         }
-        canvas.physicalPixel(
-            physical, HsvColor{.hue = params.hue,
-                               .saturation = params.saturation,
-                               .value = params.value});
     }
 }
 
@@ -316,7 +341,8 @@ inline void drawComet(PrimitiveCanvas &canvas, const PrimitiveParams &params) {
 }
 
 inline void drawRainbow(PrimitiveCanvas &canvas, const PrimitiveParams &params) {
-    const uint8_t baseHue = static_cast<uint8_t>(params.elapsedMs / 12U);
+    const uint8_t baseHue =
+        static_cast<uint8_t>(params.hue + (params.elapsedMs / 12U));
     for (uint8_t spoke = 0; spoke < Config::spokeCount; ++spoke) {
         for (uint8_t radial = 0; radial < Config::ringCount; ++radial) {
             canvas.pixel(spoke, radial,

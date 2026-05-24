@@ -89,6 +89,13 @@ Forwarding paths can reuse those bytes without decoding and reserializing. Full
 CRC validation is deferred until local payload access, so the active invariant
 is: payload access implies frame validation.
 
+`PubSubBackend/detail/Codec.hpp` encodes `WIRE_MSG` structs through generated
+field metadata. It also treats trivially-copyable aggregate wrappers with a
+public `value` member and no extra storage as transparent wire values, so
+types like `Angle<uint16_t>` use the same scalar encoding as their stored
+value. Use generated `WIRE_MSG` metadata for multi-field payloads or wrappers
+whose field is not named `value`.
+
 When an ingress frame has no local subscriber interest and is not control-plane
 traffic, the node may cut through by inspecting only the header and forwarding
 the original serialized frame directly to interested egress transports. Hardware

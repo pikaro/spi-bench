@@ -27,6 +27,8 @@ enum class MetricComponent : uint8_t {
     I2C,
     LedPwm,
     Buttons,
+    Bluetooth,
+    Wheel,
 };
 
 enum class MetricLevel : uint8_t {

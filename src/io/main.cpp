@@ -1,5 +1,6 @@
 #include "Buttons/Facade.hpp"
 #include "Buttons/Interfaces/Wire.hpp"
+#include "Bluetooth/Facade.hpp"
 #include "Clock/Facade.hpp"
 #include "Data/Peripherals.hpp"
 #include "LedPwm/Facade.hpp"
@@ -12,6 +13,7 @@
 #include "Setups/Core.hpp"
 #include "Setups/PubSubNetwork.hpp"
 #include "Types/Error.hpp"
+#include "Wheel/Facade.hpp"
 #include "Wire/Rs485/Facade.hpp"
 #include "config.hpp"
 #include <cstdint>
@@ -26,6 +28,8 @@ PubSubNetworkRs485EdgeSetup<Totem::Wire::Rs485::Slave> pubSubNetwork{
 
 Totem::Buttons::Buttons buttons{core.taskRegistry};
 Totem::LedPwm::LedPwm ledPwm{core.taskRegistry};
+Totem::Wheel::BleWheel wheel{};
+Totem::Bluetooth::Central bluetooth{core.taskRegistry};
 
 static ReturnCode
 buttonsCallback(void * /*unused*/,
@@ -42,6 +46,8 @@ void setup() {
 
     ABORT_IF_ERR_BEGIN(ledPwm.begin(ledPwmConfig));
     pubSubNetwork.setup();
+    ABORT_IF_ERR_BEGIN(wheel.begin(wheelConfig));
+    ABORT_IF_ERR_BEGIN(bluetooth.begin(makeBluetoothConfig(wheel)));
     ABORT_IF_UNEXPECTED(
         _,
         PubSubService::get().subscribe(

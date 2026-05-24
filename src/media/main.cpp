@@ -12,6 +12,7 @@
 #include "Types/Error.hpp"
 #include "Wire/I2C/Facade.hpp"
 #include "Wire/Spi/Facade.hpp"
+#include "audio_pubsub.hpp"
 #include "config.hpp"
 #include <cstdint>
 
@@ -98,6 +99,8 @@ void setup() {
 
     ABORT_IF_ERR_BEGIN(spiSlave.begin(spiSlaveConfig));
     pubSubNetwork.setup();
+    ABORT_IF_ERR(MediaAudioPubSub::begin(fftAnalyzer),
+                 "Failed to begin media audio PubSub bridge");
     ABORT_IF_ERR_BEGIN(beginMediaAudioSource(audioSource));
     ABORT_IF_ERR_BEGIN(fftAnalyzer.begin(fftAnalyzerConfig));
 
@@ -116,6 +119,7 @@ void app_main() {
         const auto nowMs = ::platform::get_time();
         (void)core.work(nowMs);
         (void)clockSync.work(nowMs);
+        (void)MediaAudioPubSub::work();
         ::platform::delay(::platform::ms_to_ticks(1));
     }
 }

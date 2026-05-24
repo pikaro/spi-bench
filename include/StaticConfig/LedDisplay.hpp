@@ -120,9 +120,11 @@ struct LedDisplayConfig {
         }(),
         "LED_NODE_GROUPn values must be unique valid group IDs");
 
-    static constexpr size_t commandQueueSize = 6;
-    static constexpr size_t animationPublishPoolSize = 6;
-    static constexpr size_t maxActiveAnimations = 4;
+    // Transient animations intentionally overlap; keep these buffers sized for
+    // ordinary bursty command traffic.
+    static constexpr size_t commandQueueSize = 32;
+    static constexpr size_t animationPublishPoolSize = 32;
+    static constexpr size_t maxActiveAnimations = 32;
     static constexpr size_t animationCommandPayloadBytes = 32;
 
     static constexpr uint8_t targetFps = 100;

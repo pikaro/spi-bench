@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Bluetooth/Interfaces/Config.hpp"
 #include "Buttons/Interfaces/Config.hpp"
 #include "Data/Facade.hpp"
 #include "LedPwm/Interfaces/Config.hpp"
@@ -7,6 +8,7 @@
 #include "StaticConfig/Stacks.hpp"
 #include "StatusLed/Interfaces/Config.hpp"
 #include "Types/Gpio.hpp"
+#include "Wheel/Interfaces/Config.hpp"
 #include "Wire/Rs485/Interfaces/SlaveConfig.hpp"
 
 constexpr Totem::Wire::Rs485::SlaveConfig rs485SlaveConfig{
@@ -55,3 +57,15 @@ constexpr Totem::Buttons::Config buttonsConfig{
 inline constexpr Totem::StatusLed::Config statusLedConfig{
     .configured = false,
 };
+
+inline constexpr Totem::Wheel::BleWheelConfig wheelConfig{};
+
+inline Totem::Bluetooth::Config
+makeBluetoothConfig(Totem::Bluetooth::IDeviceDriver &wheelDriver) {
+    auto config = Totem::Bluetooth::Config{};
+    config.drivers[0] = &wheelDriver;
+    config.driverCount = 1;
+    config.scanInterval = 160;
+    config.scanWindow = 160;
+    return config;
+}

@@ -415,8 +415,20 @@ Keep animation playback commands under one PubSub topic if possible. The
 initial simple shape should be a generated fixed-size wire message:
 
 ```cpp
-enum class AnimationCommandType : uint8_t { Play, Stop, SetParam };
-enum class AnimationKind : uint8_t { DiagnosticFill, FftReactive, CenterWave };
+enum class AnimationCommandType : uint8_t {
+    None = 0,
+    Play,
+    Stop,
+    SetHueOffset,
+    SetRotationOffset,
+};
+enum class AnimationKind : uint8_t {
+    None = 0,
+    DiagnosticFill,
+    CenterWave,
+    FftReactive,
+    PrimitiveDemo,
+};
 
 struct AnimationCommand {
     AnimationCommandType type;
@@ -428,6 +440,8 @@ struct AnimationCommand {
     std::array<std::byte, animationCommandPayloadBytes> payload;
 };
 ```
+
+Commands that do not play an animation set `kind` to `AnimationKind::None`.
 
 The master can expose typed helpers such as `playCenterWave(...)`, while the
 wire schema stays one topic and one fixed message. Each helper encodes an

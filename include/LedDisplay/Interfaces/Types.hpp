@@ -2,6 +2,7 @@
 
 #include "Macros/internal/Markers.hpp"
 #include "StaticConfig/LedDisplay.hpp"
+#include "Types/Angle.hpp"
 #include "Types/Error.hpp"
 #include <array>
 #include <cstddef>
@@ -30,12 +31,16 @@ enum class BlendOp : uint8_t {
 };
 
 enum class AnimationCommandType : uint8_t {
-    Play = 0,
+    None = 0,
+    Play,
     Stop,
+    SetHueOffset,
+    SetRotationOffset,
 };
 
 enum class AnimationKind : uint8_t {
-    DiagnosticFill = 0,
+    None = 0,
+    DiagnosticFill,
     CenterWave,
     FftReactive,
     PrimitiveDemo,
@@ -87,8 +92,8 @@ struct WIRE_MSG PrimitiveDemoConfig {
 };
 
 struct WIRE_MSG AnimationCommand {
-    AnimationCommandType type = AnimationCommandType::Play;
-    AnimationKind kind = AnimationKind::CenterWave;
+    AnimationCommandType type = AnimationCommandType::None;
+    AnimationKind kind = AnimationKind::None;
     uint16_t requestId = 0;
     Layer layer = Layer::Main;
     uint16_t lifetimeMs = 1200;

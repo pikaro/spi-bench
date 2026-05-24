@@ -84,8 +84,10 @@ arguments are only supported by the `bin/monitor` compatibility wrapper.
 `--upload` runs `pio run -e <env> --target upload` for every owned environment
 before any monitor starts. `--reset` runs `pio run -e <env> --target reset` for
 every owned environment after uploads and before any monitor starts; reset
-commands are run sequentially in the requested environment order so PlatformIO
-and ESP-IDF do not contend for dependency and build-state locks.
+commands are run in parallel. The reset target defaults to `upload_protocol`,
+but an environment can set `custom_reset_protocol` when reset uses a different
+tool from upload, such as nRF serial DFU upload with J-Link reset. nRF serial
+DFU bootloader entry is a separate `reset-bootloader` target.
 `--uploadfs` uploads the LittleFS image for every owned environment before
 monitoring; for media WAV-source tests this image is built from
 `data/media/littlefs`.
@@ -96,6 +98,12 @@ When running multiple environments interactively, send a command to a specific
 board with `!<env> <command>`, for example `!master /monitor`. If the current
 instance is only attached to another instance's spool, the command is forwarded
 through a per-environment command FIFO to the owner process.
+
+Runtime command discovery:
+
+- List the commands currently registered on a node, including subcommands and
+    arguments:
+    `!master /help`
 
 Useful GPU LED bring-up commands:
 
@@ -112,6 +120,11 @@ Useful GPU LED bring-up commands:
     `!master /anim wave`
     `!io /anim prim Comet`
     `!gpu0 /anim stop`
+- Publish global LED display offsets over PubSub:
+    `!master /anim hue 32`
+    `!master /anim rot 90`
+    Hue offset is the raw `Angle<uint8_t>` value, 0-255. Rotation offset is in
+    degrees; with the current 16 spokes, about 23 degrees advances one spoke.
 
 Useful filesystem validation command:
 

@@ -1,0 +1,36 @@
+{
+  "build": {
+    "cpu": "cortex-m4",
+    "f_cpu": "64000000L",
+    "mcu": "nrf52840",
+    "zephyr": {
+      "variant": "xiao_ble/nrf52840/sense"
+    }
+  },
+  "connectivity": [
+    "bluetooth"
+  ],
+  "debug": {
+    "jlink_device": "nRF52840_xxAA",
+    "openocd_target": "nrf52.cfg",
+    "svd_path": "nrf52840.svd"
+  },
+  "frameworks": [
+    "zephyr"
+  ],
+  "name": "Seeed XIAO BLE Sense Zephyr",
+  "upload": {
+    "maximum_ram_size": 262144,
+    "maximum_size": 1048576,
+    "protocol": "nrfutil",
+    "protocols": [
+      "nrfutil",
+      "jlink",
+      "nrfjprog",
+      "cmsis-dap",
+      "blackmagic"
+    ]
+  },
+  "url": "https://wiki.seeedstudio.com/XIAO_BLE",
+  "vendor": "Seeed Studio"
+}

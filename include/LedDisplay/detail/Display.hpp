@@ -49,7 +49,7 @@ class Display : public HasLifecycle<Display, Config>,
         uint16_t requestId = 0;
         uint32_t startMs = 0;
         uint16_t lifetimeMs = 0;
-        AnimationKind kind = AnimationKind::DiagnosticFill;
+        AnimationKind kind = AnimationKind::None;
         AnimationPayload payload{DiagnosticFill{}};
     };
 
@@ -111,6 +111,44 @@ class Display : public HasLifecycle<Display, Config>,
         return OK();
     }
 
+    ReturnCode setHueOffset(Angle<uint8_t> offset) {
+        auto cmd = AnimationCommand{
+            .type = AnimationCommandType::SetHueOffset,
+            .kind = AnimationKind::None,
+            .requestId = _nextRequestId(),
+            .layer = Layer::Main,
+            .lifetimeMs = 0,
+        };
+        FAIL_IF_ERR_FWD(_encodePayload(cmd, offset),
+                        "Failed to encode LED hue offset command");
+        FAIL_IF_ERR_FWD(_enqueue(cmd), "Failed to enqueue LED hue offset");
+        return OK();
+    }
+
+    [[nodiscard]] Angle<uint8_t> hueOffset() const {
+        return Angle<uint8_t>::fromRaw(
+            _hueOffset.load(std::memory_order_relaxed));
+    }
+
+    ReturnCode setRotationOffset(Angle<uint8_t> offset) {
+        auto cmd = AnimationCommand{
+            .type = AnimationCommandType::SetRotationOffset,
+            .kind = AnimationKind::None,
+            .requestId = _nextRequestId(),
+            .layer = Layer::Main,
+            .lifetimeMs = 0,
+        };
+        FAIL_IF_ERR_FWD(_encodePayload(cmd, offset),
+                        "Failed to encode LED rotation offset command");
+        FAIL_IF_ERR_FWD(_enqueue(cmd), "Failed to enqueue LED rotation offset");
+        return OK();
+    }
+
+    [[nodiscard]] Angle<uint8_t> rotationOffset() const {
+        return Angle<uint8_t>::fromRaw(
+            _rotationOffset.load(std::memory_order_relaxed));
+    }
+
     ReturnCode subscribePubSub() {
         if (_pubSubSubscribed) {
             return OK();
@@ -168,6 +206,7 @@ class Display : public HasLifecycle<Display, Config>,
         DEFAULT_TASK();
         _renderTask = task;
         INIT_QUEUE_OR_FAIL(_commandQueue);
+        _rebuildLogicalToLocalMap(rotationOffset());
         FAIL_IF_ERR_FWD(_output.begin(config()),
                         "Failed to initialize LED output backend");
         FAIL_IF_ERR_FWD(this->_registerCommands(),
@@ -257,6 +296,7 @@ class Display : public HasLifecycle<Display, Config>,
         }
         _checkDitherCadence(nowMs, nowUs);
 
+        _expireAnimations(nowMs);
         FAIL_IF_ERR_FWD(_drainCommands(nowMs),
                         "Failed to drain LED animation commands");
 
@@ -325,11 +365,18 @@ class Display : public HasLifecycle<Display, Config>,
         FAIL_IF_NOT(cmd.validate(), ERR(CoreError, InvalidArgument),
                     "Invalid LED animation command");
         switch (cmd.type) {
+        case AnimationCommandType::None:
+            FAIL(ERR(CoreError, InvalidArgument),
+                 "LED animation command has no command type");
         case AnimationCommandType::Play:
             return _play(cmd, nowMs);
         case AnimationCommandType::Stop:
             _stop(cmd.requestId);
             return OK();
+        case AnimationCommandType::SetHueOffset:
+            return _setHueOffset(cmd);
+        case AnimationCommandType::SetRotationOffset:
+            return _setRotationOffset(cmd);
         default:
             FAIL(ERR(CoreError, InvalidArgument),
                  "Unknown LED animation command type");
@@ -350,6 +397,10 @@ class Display : public HasLifecycle<Display, Config>,
         slot.kind = cmd.kind;
 
         switch (cmd.kind) {
+        case AnimationKind::None:
+            slot.active = false;
+            FAIL(ERR(CoreError, InvalidArgument),
+                 "Animation play command has no animation kind");
         case AnimationKind::DiagnosticFill: {
             FAIL_IF_UNEXPECTED_FWD(config,
                                    _decodePayload<DiagnosticFillConfig>(cmd),
@@ -410,21 +461,46 @@ class Display : public HasLifecycle<Display, Config>,
         }
     }
 
+    ReturnCode _setHueOffset(const AnimationCommand &cmd) {
+        FAIL_IF_UNEXPECTED_FWD(offset, _decodePayload<Angle<uint8_t>>(cmd),
+                               "Failed to decode LED hue offset");
+        _hueOffset.store(offset.value, std::memory_order_relaxed);
+        _log_i("Set LED hue offset raw=%u", static_cast<unsigned>(offset.value));
+        return OK();
+    }
+
+    ReturnCode _setRotationOffset(const AnimationCommand &cmd) {
+        FAIL_IF_UNEXPECTED_FWD(offset, _decodePayload<Angle<uint8_t>>(cmd),
+                               "Failed to decode LED rotation offset");
+        _rotationOffset.store(offset.value, std::memory_order_relaxed);
+        _rebuildLogicalToLocalMap(offset);
+        _log_i("Set LED rotation offset raw=%u spokeOffset=%u",
+               static_cast<unsigned>(offset.value),
+               static_cast<unsigned>(_rotationSpokeOffset(offset)));
+        return OK();
+    }
+
     void _renderAnimations(uint32_t nowMs) {
+        const auto hueOffset = _hueOffset.load(std::memory_order_relaxed);
         for (auto &slot : _animations) {
             if (!slot.active) {
                 continue;
             }
-            if (_expired(slot, nowMs)) {
-                slot.active = false;
-                ++slot.generation;
-                continue;
-            }
             std::visit(
-                [this, &slot, nowMs](const auto &animation) {
-                    _render(animation, slot, nowMs);
+                [this, &slot, nowMs, hueOffset](const auto &animation) {
+                    _render(animation, slot, nowMs, hueOffset);
                 },
                 slot.payload);
+        }
+    }
+
+    void _expireAnimations(uint32_t nowMs) {
+        for (auto &slot : _animations) {
+            if (!slot.active || !_expired(slot, nowMs)) {
+                continue;
+            }
+            slot.active = false;
+            ++slot.generation;
         }
     }
 
@@ -437,25 +513,28 @@ class Display : public HasLifecycle<Display, Config>,
     }
 
     void _render(const DiagnosticFill &animation,
-                 const ActiveAnimation & /*unused*/, uint32_t /*unused*/) {
-        const auto color = HsvColor{.hue = animation.config.hue,
-                                    .saturation = animation.config.saturation,
-                                    .value = animation.config.value};
+                 const ActiveAnimation & /*unused*/, uint32_t /*unused*/,
+                 uint8_t hueOffset) {
+        const auto color = HsvColor{
+            .hue = static_cast<uint8_t>(animation.config.hue + hueOffset),
+            .saturation = animation.config.saturation,
+            .value = animation.config.value};
         for (auto &pixel : _frame) {
             pixel = color;
         }
     }
 
     void _render(const CenterWave &animation, const ActiveAnimation &slot,
-                 uint32_t nowMs) {
+                 uint32_t nowMs, uint8_t hueOffset) {
         const uint32_t elapsed = nowMs - slot.startMs;
         const uint32_t duration =
             slot.lifetimeMs == 0 ? 1200U : slot.lifetimeMs;
-        auto canvas = PrimitiveCanvas{_frame};
+        auto canvas = PrimitiveCanvas{_frame, _logicalToLocal};
         drawCenterWave(canvas, PrimitiveParams{
                                    .elapsedMs = elapsed,
                                    .durationMs = duration,
-                                   .hue = animation.config.hue,
+                                   .hue = static_cast<uint8_t>(
+                                       animation.config.hue + hueOffset),
                                    .saturation = animation.config.saturation,
                                    .value = animation.config.value,
                                    .width = animation.config.width,
@@ -463,14 +542,17 @@ class Display : public HasLifecycle<Display, Config>,
     }
 
     void _render(const FftReactive &animation,
-                 const ActiveAnimation & /*unused*/, uint32_t nowMs) {
-        auto canvas = PrimitiveCanvas{_frame};
+                 const ActiveAnimation & /*unused*/, uint32_t nowMs,
+                 uint8_t hueOffset) {
+        auto canvas = PrimitiveCanvas{_frame, _logicalToLocal};
+        const auto baseHue =
+            static_cast<uint8_t>(animation.config.baseHue + hueOffset);
         const auto snapshot = _snapshotFftFrame();
         if (!snapshot.valid) {
             drawRainbow(canvas, PrimitiveParams{
                                     .elapsedMs = nowMs,
                                     .durationMs = 2000,
-                                    .hue = animation.config.baseHue,
+                                    .hue = baseHue,
                                     .saturation = animation.config.saturation,
                                     .value = animation.config.valueScale,
                                 });
@@ -485,23 +567,24 @@ class Display : public HasLifecycle<Display, Config>,
                                animation.config.valueScale);
             canvas.ring(radial,
                         HsvColor{.hue = static_cast<uint8_t>(
-                                     animation.config.baseHue + band * 24U),
+                                     baseHue + band * 24U),
                                  .saturation = animation.config.saturation,
                                  .value = bandValue});
         }
     }
 
     void _render(const PrimitiveDemo &animation, const ActiveAnimation &slot,
-                 uint32_t nowMs) {
+                 uint32_t nowMs, uint8_t hueOffset) {
         const uint32_t elapsed = nowMs - slot.startMs;
         const uint32_t duration =
             slot.lifetimeMs == 0 ? 2400U : slot.lifetimeMs;
-        auto canvas = PrimitiveCanvas{_frame};
+        auto canvas = PrimitiveCanvas{_frame, _logicalToLocal};
         drawPrimitiveDemo(canvas, animation.config.primitive,
                           PrimitiveParams{
                               .elapsedMs = elapsed,
                               .durationMs = duration,
-                              .hue = animation.config.hue,
+                              .hue = static_cast<uint8_t>(
+                                  animation.config.hue + hueOffset),
                               .saturation = animation.config.saturation,
                               .value = animation.config.value,
                               .width = animation.config.width,
@@ -512,8 +595,13 @@ class Display : public HasLifecycle<Display, Config>,
 
     void _writeLogical(uint8_t spoke, uint8_t radial, HsvColor color,
                        BlendOp op) {
-        const auto physical = LedTopology::Umbrella::physicalFor(spoke, radial);
-        _writePhysical(physical, color, op);
+        const auto local =
+            _logicalToLocal[PrimitiveCanvas::logicalIndex(spoke, radial)];
+        if (local == PrimitiveCanvas::invalidLocalPixel) {
+            return;
+        }
+        auto &dst = _frame[static_cast<size_t>(local)];
+        dst = Render::blend(dst, color, op);
     }
 
     void _writePhysical(LedTopology::PhysicalPixelIndex physical,
@@ -529,6 +617,38 @@ class Display : public HasLifecycle<Display, Config>,
     }
 
     void _clearFrame() { _frame.fill(HsvColor{}); }
+
+    [[nodiscard]] static uint8_t
+    _rotationSpokeOffset(Angle<uint8_t> offset) {
+        constexpr uint32_t angleSteps = 256U;
+        const auto scaled =
+            (static_cast<uint32_t>(offset.value) * Config::spokeCount) +
+            (angleSteps / 2U);
+        return static_cast<uint8_t>((scaled / angleSteps) % Config::spokeCount);
+    }
+
+    void _rebuildLogicalToLocalMap(Angle<uint8_t> rotationOffset) {
+        const auto spokeOffset = _rotationSpokeOffset(rotationOffset);
+        for (uint8_t spoke = 0; spoke < Config::spokeCount; ++spoke) {
+            const auto rotatedSpoke = static_cast<uint8_t>(
+                (static_cast<uint32_t>(spoke) + spokeOffset) %
+                Config::spokeCount);
+            for (uint8_t radial = 0; radial < Config::ringCount; ++radial) {
+                const auto physical =
+                    LedTopology::Umbrella::physicalFor(rotatedSpoke, radial);
+                auto local = PrimitiveCanvas::invalidLocalPixel;
+                if constexpr (Config::ledGroupCount > 1) {
+                    if (LedTopology::OwnedPixels::owns(physical)) {
+                        local = LedTopology::OwnedPixels::localIndex(physical);
+                    }
+                } else {
+                    local = LedTopology::OwnedPixels::localIndex(physical);
+                }
+                _logicalToLocal[PrimitiveCanvas::logicalIndex(spoke, radial)] =
+                    local;
+            }
+        }
+    }
 
     struct FftSnapshot {
         Totem::Audio::FftFrame frame{};
@@ -631,6 +751,8 @@ class Display : public HasLifecycle<Display, Config>,
 
     Outputs::FastLedOutput _output;
     std::array<HsvColor, Config::ownedPixelCount> _frame{};
+    std::array<LedTopology::LocalPixelIndex, Config::totalPixelCount>
+        _logicalToLocal{};
     std::array<ActiveAnimation, Config::maxActiveAnimations> _animations{};
     Totem::Audio::FftFrame _latestFftFrame{};
     bool _hasFftFrame = false;
@@ -641,6 +763,8 @@ class Display : public HasLifecycle<Display, Config>,
     ::platform::Gpio _presentStrobeGpio;
     Totem::TaskController::RunnerKey _renderTask = 0;
     std::atomic<uint32_t> _pendingPresentStrobes{0};
+    std::atomic<uint8_t> _hueOffset{0};
+    std::atomic<uint8_t> _rotationOffset{0};
     uint16_t _lastRequestId = 0;
     uint64_t _lastFrameUs = 0;
     uint32_t _lastDitherErrorMs = 0;

@@ -82,7 +82,12 @@ environment prefix only in multi-environment mode. `--before`, `--after`, and
 non-default monitor baud rates in `bin/monitor-multi`; trailing positional baud
 arguments are only supported by the `bin/monitor` compatibility wrapper.
 `--upload` runs `pio run -e <env> --target upload` for every owned environment
-before any monitor starts. `--reset` runs `pio run -e <env> --target reset` for
+before any monitor starts. Avoid relying on `--upload` with multiple
+environments for validation: ESP32-C3/S3 USB and reset races can make the
+combined pre-op fail even when separate uploads or already-built same-chip
+reuploads happen to work. Prefer uploading environments one at a time, then
+attach `bin/monitor-multi` without `--upload` for observation and routed
+commands. `--reset` runs `pio run -e <env> --target reset` for
 every owned environment after uploads and before any monitor starts; reset
 commands are run in parallel. The reset target defaults to `upload_protocol`,
 but an environment can set `custom_reset_protocol` when reset uses a different
@@ -105,20 +110,12 @@ Runtime command discovery:
     arguments:
     `!master /help`
 
-Useful GPU LED bring-up commands:
+Useful LED animation commands:
 
-- Trigger the default center-to-edge LED animation on one GPU:
-    `!gpu0 /ledwave`
-- Trigger it on both active GPU nodes:
-    `!gpu0 /ledwave`
-    `!gpu1 /ledwave`
-- Trigger a local primitive demo on a GPU without PubSub:
-    `!gpu0 /ledprim Explosion`
-    `!gpu0 /ledprim Twinkle`
-    `!gpu0 /ledprim Fire`
 - Publish animation commands over PubSub from any node:
     `!master /anim wave`
-    `!io /anim prim Comet`
+    `!master /anim wave 1200 144 180 2 1 5`
+    Wave arguments are `durationMs`, `hue`, `value`, `rise`, `peak`, `wake`.
     `!gpu0 /anim stop`
 - Publish global LED display offsets over PubSub:
     `!master /anim hue 32`

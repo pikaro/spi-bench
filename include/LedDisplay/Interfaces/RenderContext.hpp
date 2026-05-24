@@ -1,0 +1,28 @@
+#pragma once
+
+#include "Audio/Interfaces/Wire.hpp"
+#include "LedDisplay/Primitives/Canvas.hpp"
+#include <cstdint>
+
+namespace Totem::LedDisplay {
+
+struct FrameClock {
+    uint32_t nowMs = 0;
+    uint32_t elapsedMs = 0;
+    uint32_t durationMs = 0;
+    uint32_t frame = 0;
+};
+
+struct AnimationInputSnapshot {
+    Totem::Audio::FftFrame fftFrame{};
+    bool hasFftFrame = false;
+};
+
+struct AnimationRenderContext {
+    FrameClock clock{};
+    uint8_t hueOffset = 0;
+    Primitives::Canvas canvas;
+    const AnimationInputSnapshot &inputs;
+};
+
+} // namespace Totem::LedDisplay

@@ -1,6 +1,7 @@
 #pragma once
 
-#include "LedDisplay/Interfaces/Types.hpp"
+#include "LedDisplay/Interfaces/Blend.hpp"
+#include "LedDisplay/Interfaces/Color.hpp"
 #include "LedDisplay/detail/FastLedCompat.hpp"
 #include <FastLED.h>
 
@@ -27,6 +28,8 @@ struct FastLedRenderer {
             }
             dst.value = qadd8(dst.value, src.value);
             return dst;
+        case BlendOp::Alpha:
+            return src;
         case BlendOp::MaxValue:
         default:
             return src.value > dst.value ? src : dst;

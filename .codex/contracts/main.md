@@ -15,3 +15,7 @@
     `test`. Any other environment is a temporary agent-local diagnostic tool and
     must be removed before finishing unless the owner explicitly asks to keep
     it.
+- Use `magic_enum` functionalities for cleaner semantic code when dealing with
+    enums. Prefer this over manual string conversions, Count members and similar
+    patterns.
+

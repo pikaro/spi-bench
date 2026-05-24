@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Generated/Wire/Support.hpp"
-#include "LedDisplay/Interfaces/Types.hpp"
+#include "LedDisplay/Interfaces/AnimationCommand.hpp"
 #include <tuple>
 
 namespace Totem::Generated::Wire {

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "LedDisplay/Interfaces/Config.hpp"
-#include "LedDisplay/Interfaces/Types.hpp"
+#include "LedDisplay/Interfaces/Color.hpp"
 #include "LedDisplay/detail/FastLedCompat.hpp"
 #include "LedDisplay/detail/RendererSelect.hpp"
 #include "LedTopology/Facade.hpp"

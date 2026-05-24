@@ -3,6 +3,7 @@
 #include "CommandBackend/Interfaces/CommandDesc.hpp"
 #include "CommandBackend/detail/Parser.hpp"
 #include "CommandBackend/detail/Store.hpp"
+#include "LedDisplay/Animations/Commands.hpp"
 #include "LedDisplay/Interfaces/AnimationCommandFactory.hpp"
 #include "Macros/Facade.hpp"
 #include "Services/Commands.hpp"
@@ -13,6 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <limits>
 
 inline CommandDesc helloCmd = {
     .name = "hello",
@@ -118,11 +120,13 @@ optionalU32(CommandDesc::ParsedArgs args, size_t index,
 }
 
 inline uint8_t clampU8(uint32_t value) {
-    return static_cast<uint8_t>(std::min<uint32_t>(value, 255U));
+    return static_cast<uint8_t>(
+        std::min<uint32_t>(value, std::numeric_limits<uint8_t>::max()));
 }
 
 inline uint16_t clampU16(uint32_t value) {
-    return static_cast<uint16_t>(std::min<uint32_t>(value, 65535U));
+    return static_cast<uint16_t>(
+        std::min<uint32_t>(value, std::numeric_limits<uint16_t>::max()));
 }
 
 inline Angle<uint8_t> rawAngleU8(uint32_t value) {
@@ -130,80 +134,94 @@ inline Angle<uint8_t> rawAngleU8(uint32_t value) {
 }
 
 inline Angle<uint8_t> degreesAngleU8(uint32_t degrees) {
-    return Angle<uint8_t>::fromDeg(static_cast<float>(degrees % 360U));
+    constexpr uint32_t degreesPerTurn = 360U;
+    return Angle<uint8_t>::fromDeg(
+        static_cast<float>(degrees % degreesPerTurn));
 }
 
-inline ReturnCode publishAnim(CommandDesc::ParsedArgs args,
-                              Totem::LedDisplay::AnimationKind kind,
-                              uint32_t defaultDuration,
-                              uint32_t defaultHue,
-                              uint32_t defaultValue,
-                              uint32_t defaultParam) {
-    FAIL_IF_UNEXPECTED_FWD(duration,
-                           optionalU32(args, 0, defaultDuration),
-                           "Invalid animation duration argument");
-    FAIL_IF_UNEXPECTED_FWD(hue, optionalU32(args, 1, defaultHue),
-                           "Invalid animation hue argument");
-    FAIL_IF_UNEXPECTED_FWD(value, optionalU32(args, 2, defaultValue),
-                           "Invalid animation value argument");
-    FAIL_IF_UNEXPECTED_FWD(param, optionalU32(args, 3, defaultParam),
-                           "Invalid animation parameter argument");
-
-    return Totem::LedDisplay::publishAnimation({
-        .kind = kind,
-        .lifetimeMs = clampU16(duration),
-        .hue = clampU8(hue),
-        .value = clampU8(value),
-        .param = clampU8(param),
-    });
+inline ReturnCode publishCommand(
+    std::expected<Totem::LedDisplay::AnimationCommand, ReturnCode> result) {
+    FAIL_IF_UNEXPECTED_FWD(cmd, result, "Failed to build animation command");
+    return Totem::LedDisplay::publishAnimationCommand(cmd);
 }
 
 inline ReturnCode handleAnimRoot(CommandDesc::ParsedArgs /*unused*/,
                                  void * /*unused*/) {
-    _log_i("Use /anim wave|fill|fft|prim|stop|hue|rot");
+    _log_i("Use /anim wave|fill|fft|stop|hue|rot");
     return OK();
 }
 
 inline ReturnCode handleAnimWave(CommandDesc::ParsedArgs args,
                                  void * /*unused*/) {
-    return publishAnim(args, Totem::LedDisplay::AnimationKind::CenterWave,
-                       1200, 144, 180, 5);
+    auto config = Totem::LedDisplay::Animations::CenterWaveConfig{};
+    FAIL_IF_UNEXPECTED_FWD(duration,
+                           optionalU32(args, 0,
+                                       Totem::LedDisplay::Animations::
+                                           CenterWave::defaultLifetimeMs),
+                           "Invalid animation duration argument");
+    FAIL_IF_UNEXPECTED_FWD(hue, optionalU32(args, 1, config.hue),
+                           "Invalid animation hue argument");
+    FAIL_IF_UNEXPECTED_FWD(value, optionalU32(args, 2, config.value),
+                           "Invalid animation value argument");
+    FAIL_IF_UNEXPECTED_FWD(rise, optionalU32(args, 3, config.rise),
+                           "Invalid animation rise argument");
+    FAIL_IF_UNEXPECTED_FWD(peak, optionalU32(args, 4, config.peak),
+                           "Invalid animation peak argument");
+    FAIL_IF_UNEXPECTED_FWD(wake, optionalU32(args, 5, config.wake),
+                           "Invalid animation wake argument");
+
+    config.hue = clampU8(hue);
+    config.value = clampU8(value);
+    config.rise = clampU8(rise);
+    config.peak = std::max<uint8_t>(
+        clampU8(peak),
+        Totem::LedDisplay::Animations::CenterWave::minimumPeakRings);
+    config.wake = clampU8(wake);
+
+    return publishCommand(Totem::LedDisplay::Animations::CenterWave::makeCommand(
+        config, 0, clampU16(duration)));
 }
 
 inline ReturnCode handleAnimFill(CommandDesc::ParsedArgs args,
                                  void * /*unused*/) {
-    return publishAnim(args, Totem::LedDisplay::AnimationKind::DiagnosticFill,
-                       2000, 96, 80, 0);
+    auto config = Totem::LedDisplay::Animations::DiagnosticFillConfig{};
+    FAIL_IF_UNEXPECTED_FWD(duration,
+                           optionalU32(args, 0,
+                                       Totem::LedDisplay::Animations::
+                                           DiagnosticFill::defaultLifetimeMs),
+                           "Invalid animation duration argument");
+    FAIL_IF_UNEXPECTED_FWD(hue, optionalU32(args, 1, config.hue),
+                           "Invalid animation hue argument");
+    FAIL_IF_UNEXPECTED_FWD(value, optionalU32(args, 2, config.value),
+                           "Invalid animation value argument");
+
+    config.hue = clampU8(hue);
+    config.value = clampU8(value);
+
+    return publishCommand(
+        Totem::LedDisplay::Animations::DiagnosticFill::makeCommand(
+            config, 0, clampU16(duration)));
 }
 
 inline ReturnCode handleAnimFft(CommandDesc::ParsedArgs args,
                                 void * /*unused*/) {
-    return publishAnim(args, Totem::LedDisplay::AnimationKind::FftReactive, 0,
-                       0, 180, 0);
-}
+    auto config = Totem::LedDisplay::Animations::FftReactiveConfig{};
+    FAIL_IF_UNEXPECTED_FWD(duration,
+                           optionalU32(args, 0,
+                                       Totem::LedDisplay::Animations::
+                                           FftReactive::defaultLifetimeMs),
+                           "Invalid animation duration argument");
+    FAIL_IF_UNEXPECTED_FWD(hue, optionalU32(args, 1, config.baseHue),
+                           "Invalid animation hue argument");
+    FAIL_IF_UNEXPECTED_FWD(value, optionalU32(args, 2, config.valueScale),
+                           "Invalid animation value argument");
 
-inline ReturnCode handleAnimPrim(CommandDesc::ParsedArgs args,
-                                 void * /*unused*/) {
-    auto primitive = args.get<Totem::LedDisplay::PrimitiveKind>(0);
-    FAIL_IF_NOT(primitive.ok, ERR(CoreError, InvalidArgument),
-                "Invalid primitive kind argument");
-    FAIL_IF_UNEXPECTED_FWD(duration, optionalU32(args, 1, 2400),
-                           "Invalid primitive duration argument");
-    FAIL_IF_UNEXPECTED_FWD(hue, optionalU32(args, 2, 144),
-                           "Invalid primitive hue argument");
-    FAIL_IF_UNEXPECTED_FWD(value, optionalU32(args, 3, 180),
-                           "Invalid primitive value argument");
-    FAIL_IF_UNEXPECTED_FWD(width, optionalU32(args, 4, 5),
-                           "Invalid primitive width argument");
+    config.baseHue = clampU8(hue);
+    config.valueScale = clampU8(value);
 
-    return Totem::LedDisplay::publishAnimation({
-        .kind = Totem::LedDisplay::AnimationKind::PrimitiveDemo,
-        .primitive = primitive.value,
-        .lifetimeMs = clampU16(duration),
-        .hue = clampU8(hue),
-        .value = clampU8(value),
-        .param = clampU8(width),
-    });
+    return publishCommand(
+        Totem::LedDisplay::Animations::FftReactive::makeCommand(
+            config, 0, clampU16(duration)));
 }
 
 inline ReturnCode handleAnimStop(CommandDesc::ParsedArgs args,
@@ -240,7 +258,7 @@ inline ReturnCode handleAnimRot(CommandDesc::ParsedArgs args,
 
 } // namespace Totem::Support::detail
 
-inline std::array<CommandDesc, 7> animSubcommands{{
+inline std::array<CommandDesc, 6> animSubcommands{{
     {
         .name = "wave",
         .description = "Publish a center wave animation",
@@ -251,7 +269,11 @@ inline std::array<CommandDesc, 7> animSubcommands{{
                  Totem::CommandBackend::detail::arg<uint32_t>(
                      "value", CommandDesc::ArgRequirement::Optional),
                  Totem::CommandBackend::detail::arg<uint32_t>(
-                     "width", CommandDesc::ArgRequirement::Optional)},
+                     "rise", CommandDesc::ArgRequirement::Optional),
+                 Totem::CommandBackend::detail::arg<uint32_t>(
+                     "peak", CommandDesc::ArgRequirement::Optional),
+                 Totem::CommandBackend::detail::arg<uint32_t>(
+                     "wake", CommandDesc::ArgRequirement::Optional)},
         .handler = Totem::Support::detail::handleAnimWave,
         .subcommands = {},
     },
@@ -277,22 +299,6 @@ inline std::array<CommandDesc, 7> animSubcommands{{
                  Totem::CommandBackend::detail::arg<uint32_t>(
                      "valueScale", CommandDesc::ArgRequirement::Optional)},
         .handler = Totem::Support::detail::handleAnimFft,
-        .subcommands = {},
-    },
-    {
-        .name = "prim",
-        .description = "Publish a primitive demo animation",
-        .args = {Totem::CommandBackend::detail::arg<
-                     Totem::LedDisplay::PrimitiveKind>("primitive"),
-                 Totem::CommandBackend::detail::arg<uint32_t>(
-                     "durationMs", CommandDesc::ArgRequirement::Optional),
-                 Totem::CommandBackend::detail::arg<uint32_t>(
-                     "hue", CommandDesc::ArgRequirement::Optional),
-                 Totem::CommandBackend::detail::arg<uint32_t>(
-                     "value", CommandDesc::ArgRequirement::Optional),
-                 Totem::CommandBackend::detail::arg<uint32_t>(
-                     "width", CommandDesc::ArgRequirement::Optional)},
-        .handler = Totem::Support::detail::handleAnimPrim,
         .subcommands = {},
     },
     {

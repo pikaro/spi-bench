@@ -1,6 +1,7 @@
 #pragma once
 
-#include "LedDisplay/Interfaces/Types.hpp"
+#include "LedDisplay/Interfaces/Blend.hpp"
+#include "LedDisplay/Interfaces/Color.hpp"
 #include <cstdint>
 
 namespace Totem::LedDisplay::detail {

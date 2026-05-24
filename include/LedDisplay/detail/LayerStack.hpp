@@ -1,0 +1,139 @@
+#pragma once
+
+#include "LedDisplay/Interfaces/AnimationStyle.hpp"
+#include "LedDisplay/Interfaces/Color.hpp"
+#include "LedDisplay/Interfaces/Config.hpp"
+#include "LedDisplay/Interfaces/Layer.hpp"
+#include "LedDisplay/detail/Compositor.hpp"
+#include "magic_enum/magic_enum.hpp"
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <limits>
+#include <span>
+
+namespace Totem::LedDisplay::detail {
+
+struct LayerConfig {
+    AnimationStyle style{};
+    uint8_t decay = 0;
+    bool clearEachFrame = true;
+    bool enabled = true;
+};
+
+inline constexpr size_t layerCount = magic_enum::enum_count<Layer>();
+inline constexpr uint8_t layerFullOpacity =
+    std::numeric_limits<uint8_t>::max();
+inline constexpr uint8_t layerWheelOpacity = 192;
+inline constexpr uint8_t persistentFftLayerDecay = 4;
+inline constexpr uint8_t persistentEffectLayerDecay = 3;
+inline constexpr uint8_t debugLayerDecay = 8;
+
+[[nodiscard]] inline constexpr size_t layerIndex(Layer layer) {
+    return static_cast<size_t>(layer);
+}
+
+[[nodiscard]] inline constexpr std::array<LayerConfig, layerCount>
+defaultLayerConfigs() {
+    std::array<LayerConfig, layerCount> configs{};
+    configs[layerIndex(Layer::Background)] = LayerConfig{
+        .style = {.blendOp = BlendOp::MaxValue, .opacity = layerFullOpacity},
+        .decay = 0,
+        .clearEachFrame = true,
+        .enabled = true,
+    };
+    configs[layerIndex(Layer::Fft)] = LayerConfig{
+        .style = {.blendOp = BlendOp::MaxValue, .opacity = layerFullOpacity},
+        .decay = persistentFftLayerDecay,
+        .clearEachFrame = false,
+        .enabled = true,
+    };
+    configs[layerIndex(Layer::Effect)] = LayerConfig{
+        .style = {.blendOp = BlendOp::MaxValue, .opacity = layerFullOpacity},
+        .decay = persistentEffectLayerDecay,
+        .clearEachFrame = false,
+        .enabled = true,
+    };
+    configs[layerIndex(Layer::Wheel)] = LayerConfig{
+        .style = {.blendOp = BlendOp::Alpha, .opacity = layerWheelOpacity},
+        .decay = 0,
+        .clearEachFrame = true,
+        .enabled = true,
+    };
+    configs[layerIndex(Layer::Debug)] = LayerConfig{
+        .style = {.blendOp = BlendOp::AddValue, .opacity = layerFullOpacity},
+        .decay = debugLayerDecay,
+        .clearEachFrame = false,
+        .enabled = true,
+    };
+    return configs;
+}
+
+class LayerStack {
+  public:
+    static constexpr size_t layerCount = detail::layerCount;
+
+    LayerStack() {
+        constexpr auto configs = defaultLayerConfigs();
+        for (size_t i = 0; i < layerCount; ++i) {
+            _layers[i].config = configs[i];
+        }
+    }
+
+    void beginFrame(uint32_t frame) {
+        (void)frame;
+        for (size_t i = 0; i < layerCount; ++i) {
+            auto &layer = _layers[i];
+            if (!layer.config.enabled) {
+                Compositor::clear(layer.frame);
+                continue;
+            }
+            if (layer.config.clearEachFrame) {
+                Compositor::clear(layer.frame);
+            } else {
+                Compositor::decay(layer.frame, layer.config.decay);
+            }
+        }
+    }
+
+    void clearScratch(Layer layer) {
+        Compositor::clear(_layers[layerIndex(layer)].scratch);
+    }
+
+    [[nodiscard]] std::span<HsvColor> scratch(Layer layer) {
+        return _layers[layerIndex(layer)].scratch;
+    }
+
+    void blendScratch(Layer layer, AnimationStyle style) {
+        auto &state = _layers[layerIndex(layer)];
+        if (!state.config.enabled) {
+            return;
+        }
+        Compositor::blend({.src = state.scratch,
+                           .dst = state.frame,
+                           .style = style});
+    }
+
+    void compose(std::span<HsvColor> out) {
+        Compositor::clear(out);
+        for (auto &layer : _layers) {
+            if (!layer.config.enabled) {
+                continue;
+            }
+            Compositor::blend({.src = layer.frame,
+                               .dst = out,
+                               .style = layer.config.style});
+        }
+    }
+
+  private:
+    struct LayerState {
+        std::array<HsvColor, Config::ownedPixelCount> frame{};
+        std::array<HsvColor, Config::ownedPixelCount> scratch{};
+        LayerConfig config{};
+    };
+
+    std::array<LayerState, layerCount> _layers{};
+};
+
+} // namespace Totem::LedDisplay::detail

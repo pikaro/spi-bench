@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Audio/Interfaces/Wire.hpp"
+#include "LedDisplay/Animations/Commands.hpp"
 #include "LedDisplay/Interfaces/AnimationCommandFactory.hpp"
 #include "Macros/Facade.hpp"
 #include "PubSubBackend/Interfaces/Envelope.hpp"
@@ -28,7 +29,9 @@ struct BeatWaveMapping {
     std::array<uint8_t, Totem::Audio::beatGroupCount> hueByGroup{{144, 96, 32}};
     uint16_t lifetimeMs = 2000;
     uint8_t value = 200;
-    uint8_t width = 5;
+    uint8_t rise = 2;
+    uint8_t peak = 1;
+    uint8_t wake = 5;
     uint32_t minIntervalMs = 120;
 };
 
@@ -199,15 +202,19 @@ inline ReturnCode handleBeat(const Totem::Audio::BeatEvent &event,
         return OK();
     }
 
-    auto options = Totem::LedDisplay::AnimationCommandOptions{};
-    options.kind = Totem::LedDisplay::AnimationKind::CenterWave;
-    options.lifetimeMs = config.beatWave.lifetimeMs;
-    options.hue = config.beatWave.hueByGroup[groupIndex];
-    options.value = config.beatWave.value;
-    options.param = config.beatWave.width;
-
     detail::lastBeatWaveMs[groupIndex] = nowMs;
-    return Totem::LedDisplay::publishAnimation(options);
+    FAIL_IF_UNEXPECTED_FWD(
+        cmd,
+        Totem::LedDisplay::Animations::CenterWave::makeCommand(
+            {.hue = config.beatWave.hueByGroup[groupIndex],
+             .saturation = 255,
+             .value = config.beatWave.value,
+             .rise = config.beatWave.rise,
+             .peak = config.beatWave.peak,
+             .wake = config.beatWave.wake},
+            0, config.beatWave.lifetimeMs),
+        "Failed to build beat center wave command");
+    return Totem::LedDisplay::publishAnimationCommand(cmd);
 }
 
 inline ReturnCode work(uint32_t nowMs) {

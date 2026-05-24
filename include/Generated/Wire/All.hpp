@@ -11,7 +11,6 @@
 #include "Generated/Wire/Totem__LedDisplay__CenterWaveConfig.hpp"
 #include "Generated/Wire/Totem__LedDisplay__DiagnosticFillConfig.hpp"
 #include "Generated/Wire/Totem__LedDisplay__FftReactiveConfig.hpp"
-#include "Generated/Wire/Totem__LedDisplay__PrimitiveDemoConfig.hpp"
 #include "Generated/Wire/Totem__PubSubBackend__Header.hpp"
 #include "Generated/Wire/Totem__PubSubBackend__detail__PubSubEvent.hpp"
 #include "Generated/Wire/Totem__Wheel__WheelState.hpp"

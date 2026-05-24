@@ -1,21 +1,33 @@
 #pragma once
 
-#include "LedDisplay/Interfaces/Types.hpp"
+#include "LedDisplay/Interfaces/Blend.hpp"
+#include "LedDisplay/Interfaces/Color.hpp"
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 
 namespace Totem::LedDisplay::Renderers {
 
 struct GenericRenderer {
+    static constexpr uint8_t channelMax =
+        std::numeric_limits<uint8_t>::max();
+    static constexpr uint16_t hueStepCount =
+        static_cast<uint16_t>(channelMax) + 1U;
+    static constexpr uint8_t hsvRegionCount = 6U;
+    static constexpr uint8_t hsvRegionCeilDivBias = hsvRegionCount - 1U;
+    static constexpr uint8_t hsvRegionWidth = static_cast<uint8_t>(
+        (hueStepCount + hsvRegionCeilDivBias) / hsvRegionCount);
+    static constexpr uint8_t hsvRegionScale = hsvRegionCount;
+
     [[nodiscard]] static constexpr uint8_t scale8(uint8_t value,
                                                   uint8_t scale) {
         return static_cast<uint8_t>((static_cast<uint16_t>(value) * scale) /
-                                    255U);
+                                    channelMax);
     }
 
     [[nodiscard]] static constexpr uint8_t qadd8(uint8_t a, uint8_t b) {
         const auto sum = static_cast<uint16_t>(a) + b;
-        return static_cast<uint8_t>(std::min<uint16_t>(sum, 255U));
+        return static_cast<uint8_t>(std::min<uint16_t>(sum, channelMax));
     }
 
     [[nodiscard]] static constexpr HsvColor blend(HsvColor dst, HsvColor src,
@@ -30,6 +42,8 @@ struct GenericRenderer {
             }
             dst.value = qadd8(dst.value, src.value);
             return dst;
+        case BlendOp::Alpha:
+            return src;
         case BlendOp::MaxValue:
         default:
             return src.value > dst.value ? src : dst;
@@ -43,16 +57,17 @@ struct GenericRenderer {
                             .blue = hsv.value};
         }
 
-        const uint8_t region = hsv.hue / 43U;
-        const uint8_t remainder = static_cast<uint8_t>((hsv.hue -
-                                                        (region * 43U)) *
-                                                       6U);
-        const uint8_t p = scale8(hsv.value, 255U - hsv.saturation);
+        const uint8_t region = hsv.hue / hsvRegionWidth;
+        const uint8_t remainder = static_cast<uint8_t>(
+            (hsv.hue - (region * hsvRegionWidth)) * hsvRegionScale);
+        const uint8_t p = scale8(hsv.value, channelMax - hsv.saturation);
         const uint8_t q =
-            scale8(hsv.value, 255U - scale8(hsv.saturation, remainder));
+            scale8(hsv.value, channelMax - scale8(hsv.saturation, remainder));
         const uint8_t t = scale8(
             hsv.value,
-            255U - scale8(hsv.saturation, static_cast<uint8_t>(255U - remainder)));
+            channelMax - scale8(hsv.saturation,
+                                static_cast<uint8_t>(channelMax -
+                                                     remainder)));
 
         switch (region) {
         case 0:

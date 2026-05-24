@@ -1,5 +1,13 @@
 # Animation Pipeline Port Plan
 
+> Current implementation note: this older port plan has been superseded for
+> active refactor work by
+> [animation-pipeline-refactor-temporary-plan.md](animation-pipeline-refactor-temporary-plan.md).
+> The temporary plan is the source of truth for the clean final shape: no
+> backwards-compatibility requirement, generic `Display` ingress only, an
+> `AnimationEngine`/`LayerStack`/`Compositor` split, animation-owned rendering,
+> primitive kernels separate from animations, and no `PrimitiveDemo` wrapper.
+
 This is the current implementation plan for porting the useful legacy animation
 pipeline into the current repository. It is intentionally a plan, not an
 implementation contract. The open questions at the end need resolution before

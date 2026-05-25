@@ -119,8 +119,8 @@ Missing FFT bands default to zero.
 
 `bin/led-render-build` runs `tools/led-render/generate_registry.py` before
 compiling the host renderer. The generator scans
-`include/LedDisplay/Animations/*.hpp` and discovers animation classes by the
-current production convention:
+`include/LedDisplay/Animations/*/Animation.hpp` plus each sibling `Config.hpp`
+and discovers animation classes by the current production convention:
 
 - one `struct WIRE_MSG NameConfig`
 - one `struct Name` with `NameConfig config{}`
@@ -128,8 +128,9 @@ current production convention:
 - a `render(AnimationRenderContext &ctx)` method
 
 The generated registry lives under `tools/led-render/generated/` and is not the
-source of truth. Adding an animation should require adding the animation header,
-not editing host renderer dispatch code.
+source of truth. Adding an animation should require adding the animation
+directory headers. `Command.hpp` and `CommandDesc.hpp` are intentionally outside
+the host-render discovery path.
 
 ## Trace Format
 

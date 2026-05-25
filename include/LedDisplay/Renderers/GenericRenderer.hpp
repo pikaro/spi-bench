@@ -29,6 +29,26 @@ struct GenericRenderer {
         return static_cast<uint8_t>(std::min<uint16_t>(sum, channelMax));
     }
 
+    [[nodiscard]] static constexpr uint8_t sine8(uint8_t phase) {
+        const auto offset =
+            (phase & 0x40U) != 0 ? static_cast<uint8_t>(255U - phase) : phase;
+        const auto sectionOffset = static_cast<uint8_t>(offset & 0x3FU);
+        uint8_t secondaryOffset = static_cast<uint8_t>(sectionOffset & 0x0FU);
+        if ((phase & 0x40U) != 0) {
+            ++secondaryOffset;
+        }
+
+        const auto section = static_cast<uint8_t>(sectionOffset >> 4U);
+        const auto base = sinBase(section);
+        const auto slope = sinSlope(section);
+        auto y = static_cast<int16_t>(
+            base + static_cast<uint8_t>((slope * secondaryOffset) >> 4U));
+        if ((phase & 0x80U) != 0) {
+            y = -y;
+        }
+        return static_cast<uint8_t>(y + 128);
+    }
+
     [[nodiscard]] static constexpr HsvColor blend(HsvColor dst, HsvColor src,
                                                   BlendOp op) {
         switch (op) {
@@ -79,6 +99,35 @@ struct GenericRenderer {
             return RgbColor{.red = t, .green = p, .blue = hsv.value};
         default:
             return RgbColor{.red = hsv.value, .green = p, .blue = q};
+        }
+    }
+
+  private:
+    [[nodiscard]] static constexpr uint8_t sinBase(uint8_t section) {
+        switch (section) {
+        case 0:
+            return 0;
+        case 1:
+            return 49;
+        case 2:
+            return 90;
+        case 3:
+        default:
+            return 117;
+        }
+    }
+
+    [[nodiscard]] static constexpr uint8_t sinSlope(uint8_t section) {
+        switch (section) {
+        case 0:
+            return 49;
+        case 1:
+            return 41;
+        case 2:
+            return 27;
+        case 3:
+        default:
+            return 10;
         }
     }
 };

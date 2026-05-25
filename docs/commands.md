@@ -130,9 +130,29 @@ Runtime command discovery:
 Useful LED animation commands:
 
 - Publish animation commands over PubSub from any node:
+    Optional animation arguments may be passed as `-` to keep their default
+    value while setting later arguments.
     `!master /anim wave`
     `!master /anim wave 1200 144 180 2 1 5`
     Wave arguments are `durationMs`, `hue`, `value`, `rise`, `peak`, `wake`.
+    `!master /anim sinelon`
+    `!master /anim sinelon 0 96 120 3 2400 0 0 245 160 64`
+    Sinelon arguments are `durationMs`, `hue`, `value`, `width`, `periodMs`,
+    `outerOrigin`, `travelRings`, `bounceAttenuation`, `spokeGainPct`,
+    `spokeGainPhaseStep`. Use `outerOrigin=1` to bounce inward from the outer
+    edge, `travelRings=0` for the full strip depth, and
+    `bounceAttenuation=255` for no per-bounce fade.
+    `!master /anim sine`
+    `!master /anim sine 3200 96 90 0 1 8 0 0 140 8 160`
+    Sine arguments are `durationMs`, `hue`, `value`, `baseValue`, `width`,
+    `wavelength`, `outerOrigin`, `travelRings`, `spokeGainPct`, `tailDecay`,
+    `peakHold`, `lifetimeMs`. It scans a sine-valued head once over
+    `durationMs` and renders the already-scanned trace directly on the effect
+    layer.
+    `tailDecay` is value loss per ring behind the head; `peakHold` reduces that
+    loss for brighter sine peaks, with `0` meaning linear decay and `255`
+    strongly preserving peaks. `lifetimeMs` is optional and defaults to the
+    projected total time for the last peak to decay to the output value floor.
     `!master /anim sweep`
     `!master /anim sweep 6000 0 220 0 1 255`
     Sweep arguments are `durationMs`, `baseHue`, `value`, `trailSpokes`,
@@ -146,11 +166,13 @@ Useful LED animation commands:
     Wheel-update arguments are `hue`, `value`, `spokes`, `falloff`,
     `requestId`.
     `!gpu0 /anim stop`
-- Publish global LED display offsets over PubSub:
-    `!master /anim hue 32`
-    `!master /anim rot 90`
+- Publish global LED display controls over PubSub:
+    `!master /disp hue 32`
+    `!master /disp rot 90`
+    `!master /disp brightness 96`
     Hue offset is the raw `Angle<uint8_t>` value, 0-255. Rotation offset is in
     degrees; with the current 16 spokes, about 23 degrees advances one spoke.
+    Brightness is the FastLED global brightness value, 0-255.
     Automatic master runtime orchestration is gated until the bring-up spoke
     sweep has finished. Manual commands remain direct diagnostics.
 

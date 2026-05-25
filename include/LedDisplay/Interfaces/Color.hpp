@@ -11,6 +11,12 @@ struct HsvColor {
     uint8_t value = 0;
 };
 
+enum HsvConversion : uint8_t {
+    Rainbow = 0,
+    Spectrum,
+    Fullspectrum,
+};
+
 struct RgbColor {
     uint8_t red = 0;
     uint8_t green = 0;
@@ -23,4 +29,3 @@ static_assert(std::is_trivially_copyable_v<RgbColor>,
               "RgbColor must remain queue-copyable");
 
 } // namespace Totem::LedDisplay
-

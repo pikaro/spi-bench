@@ -1,10 +1,12 @@
 #pragma once
 
-#include "LedDisplay/Animations/CenterWave.hpp"
-#include "LedDisplay/Animations/DiagnosticFill.hpp"
-#include "LedDisplay/Animations/FftReactive.hpp"
-#include "LedDisplay/Animations/SpokeSweep.hpp"
-#include "LedDisplay/Animations/WheelIndicator.hpp"
+#include "LedDisplay/Animations/CenterWave/Animation.hpp"
+#include "LedDisplay/Animations/DiagnosticFill/Animation.hpp"
+#include "LedDisplay/Animations/FftReactive/Animation.hpp"
+#include "LedDisplay/Animations/SineWave/Animation.hpp"
+#include "LedDisplay/Animations/Sinelon/Animation.hpp"
+#include "LedDisplay/Animations/SpokeSweep/Animation.hpp"
+#include "LedDisplay/Animations/WheelIndicator/Animation.hpp"
 #include "LedDisplay/Interfaces/AnimationCommandCodec.hpp"
 #include "LedDisplay/Interfaces/RenderContext.hpp"
 #include "Macros/Facade.hpp"
@@ -15,9 +17,8 @@
 
 namespace Totem::LedDisplay::Animations {
 
-using Payload =
-    std::variant<DiagnosticFill, CenterWave, FftReactive, WheelIndicator,
-                 SpokeSweep>;
+using Payload = std::variant<DiagnosticFill, CenterWave, FftReactive,
+                             WheelIndicator, SpokeSweep, Sinelon, SineWave>;
 
 static_assert(std::is_trivially_copyable_v<Payload>,
               "Animation payload must remain queue-copyable");
@@ -42,6 +43,18 @@ makePayload(const AnimationCommand &cmd) {
             config, decodeCommandPayload<FftReactiveConfig>(cmd),
             "Failed to decode FFT reactive config");
         return Payload{FftReactive{.config = config}};
+    }
+    case AnimationKind::Sinelon: {
+        FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
+            config, decodeCommandPayload<SinelonConfig>(cmd),
+            "Failed to decode sinelon config");
+        return Payload{Sinelon{.config = config}};
+    }
+    case AnimationKind::SineWave: {
+        FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
+            config, decodeCommandPayload<SineWaveConfig>(cmd),
+            "Failed to decode sine wave config");
+        return Payload{SineWave{.config = config}};
     }
     case AnimationKind::WheelIndicator: {
         FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
@@ -84,8 +97,8 @@ inline ReturnCode update(Payload &payload, const AnimationCommand &cmd) {
 }
 
 [[nodiscard]] inline AnimationKind kind(const Payload &payload) {
-    return std::visit(
-        [](const auto &animation) { return animation.kind; }, payload);
+    return std::visit([](const auto &animation) { return animation.kind; },
+                      payload);
 }
 
 inline void render(const Payload &payload, AnimationRenderContext &ctx) {

@@ -1,32 +1,20 @@
 #pragma once
 
 #include "Audio/Interfaces/Wire.hpp"
-#include "LedDisplay/Interfaces/AnimationCommand.hpp"
-#include "LedDisplay/Interfaces/AnimationKind.hpp"
+#include "LedDisplay/Animations/FftReactive/Config.hpp"
 #include "LedDisplay/Interfaces/AnimationStyle.hpp"
-#include "LedDisplay/Interfaces/Layer.hpp"
 #include "LedDisplay/Interfaces/RenderContext.hpp"
 #include "LedDisplay/Renderers/GenericRenderer.hpp"
-#include "Macros/Facade.hpp"
-#include "Macros/internal/Markers.hpp"
-#include "Types/Error.hpp"
 #include <cstdint>
-#include <expected>
 #include <limits>
-#include <type_traits>
 
 namespace Totem::LedDisplay::Animations {
 
-struct WIRE_MSG FftReactiveConfig {
-    uint8_t baseHue = 0;
-    uint8_t saturation = 255;
-    uint8_t valueScale = 128;
-};
-
 struct FftReactive {
-    static constexpr AnimationKind kind = AnimationKind::FftReactive;
-    static constexpr Layer defaultLayer = Layer::Fft;
-    static constexpr uint16_t defaultLifetimeMs = 0;
+    static constexpr AnimationKind kind = FftReactiveSpec::kind;
+    static constexpr Layer defaultLayer = FftReactiveSpec::defaultLayer;
+    static constexpr uint16_t defaultLifetimeMs =
+        FftReactiveSpec::defaultLifetimeMs;
     static constexpr uint32_t fallbackHueFramePeriodMs = 12;
     static constexpr uint8_t fallbackSpokeHueStride = 16;
     static constexpr uint8_t fallbackRadialHueStride = 3;
@@ -38,12 +26,6 @@ struct FftReactive {
                                                  .opacity = 255};
 
     FftReactiveConfig config{};
-
-    static std::expected<AnimationCommand, ReturnCode>
-    makeCommand(FftReactiveConfig commandConfig = {},
-                uint16_t requestId = 0,
-                uint16_t lifetimeMs = defaultLifetimeMs,
-                Layer layer = defaultLayer);
 
     void render(AnimationRenderContext &ctx) const {
         const auto baseHue =
@@ -59,12 +41,11 @@ struct FftReactive {
                 Config::ringCount;
             const uint8_t bandValue = Renderers::GenericRenderer::scale8(
                 fftBandValue(ctx.inputs.fftFrame, band), config.valueScale);
-            ctx.canvas.ring(
-                radial,
-                HsvColor{.hue = static_cast<uint8_t>(
-                             baseHue + band * fftBandHueStride),
-                         .saturation = config.saturation,
-                         .value = bandValue});
+            ctx.canvas.ring(radial,
+                            HsvColor{.hue = static_cast<uint8_t>(
+                                         baseHue + band * fftBandHueStride),
+                                     .saturation = config.saturation,
+                                     .value = bandValue});
         }
     }
 
@@ -78,8 +59,7 @@ struct FftReactive {
                 ctx.canvas.pixel(
                     spoke, radial,
                     HsvColor{.hue = static_cast<uint8_t>(
-                                 animatedHue +
-                                 spoke * fallbackSpokeHueStride +
+                                 animatedHue + spoke * fallbackSpokeHueStride +
                                  radial * fallbackRadialHueStride),
                              .saturation = config.saturation,
                              .value = config.valueScale});
@@ -123,8 +103,5 @@ struct FftReactive {
         return static_cast<uint8_t>(raw >> wireBandHighByteShift);
     }
 };
-
-static_assert(std::is_trivially_copyable_v<FftReactiveConfig>,
-              "FftReactiveConfig must remain queue-copyable");
 
 } // namespace Totem::LedDisplay::Animations

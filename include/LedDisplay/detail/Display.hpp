@@ -216,8 +216,18 @@ class Display : public HasLifecycle<Display, Config>,
             metrics().addRenderFailure();
             FAIL_ERR_FWD(ret, "Failed to render LED animation frame");
         }
+        FAIL_IF_ERR_FWD(_applyDisplayControlUpdates(),
+                        "Failed to apply LED display control updates");
         _presentBuffers.publishRenderedFrame();
         return OK();
+    }
+
+    ReturnCode _applyDisplayControlUpdates() {
+        const auto brightness = _engine.takeBrightnessUpdate();
+        if (!brightness.has_value()) {
+            return OK();
+        }
+        return _output.setBrightness(*brightness);
     }
 
     ReturnCode _presentFrame() {

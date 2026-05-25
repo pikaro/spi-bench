@@ -1,6 +1,7 @@
 #pragma once
 
 #include "LedPwm/detail/Types.hpp"
+#include "Macros/internal/Markers.hpp"
 #include "Types/Error.hpp"
 #include <cstdint>
 #include <limits>
@@ -99,7 +100,7 @@ enum class Curve : uint8_t {
     SmoothStep,
 };
 
-struct Pulse {
+struct WIRE_MSG Pulse {
     Brightness peak{Brightness::full()};
 
     uint32_t riseMs = 50;
@@ -123,7 +124,24 @@ struct Pulse {
     }
 };
 
-using Animation = std::variant<Pulse>;
+struct WIRE_MSG Glitter {
+    Brightness base{Brightness::fromPercent(2.0F)};
+    Brightness glimmerPeak{Brightness::fromPercent(18.0F)};
+    Brightness sparklePeak{Brightness::fromPercent(65.0F)};
+
+    uint16_t stepMs = 120;
+    uint16_t sparkleMs = 28;
+    uint8_t sparkleChance = 36;
+    uint16_t seed = 1;
+
+    [[nodiscard]] constexpr bool validate() const {
+        return stepMs > 0 && sparkleMs <= stepMs &&
+               base.value.value <= glimmerPeak.value.value &&
+               glimmerPeak.value.value <= sparklePeak.value.value;
+    }
+};
+
+using Animation = std::variant<Pulse, Glitter>;
 
 struct StartAnimation {
     Animation animation{Pulse{}};
@@ -182,6 +200,8 @@ static_assert(std::is_trivially_copyable_v<SetBrightness>,
               "SetBrightness must remain queue-copyable");
 static_assert(std::is_trivially_copyable_v<Pulse>,
               "Pulse must remain queue-copyable");
+static_assert(std::is_trivially_copyable_v<Glitter>,
+              "Glitter must remain queue-copyable");
 static_assert(std::is_trivially_copyable_v<Animation>,
               "Animation must remain queue-copyable");
 static_assert(std::is_trivially_copyable_v<StartAnimation>,

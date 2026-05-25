@@ -1,13 +1,12 @@
 #pragma once
 
 #include "Generated/Wire/Support.hpp"
-#include "LedDisplay/Animations/DiagnosticFill.hpp"
+#include "LedDisplay/Animations/DiagnosticFill/Config.hpp"
 #include <tuple>
 
 namespace Totem::Generated::Wire {
 
-template <>
-struct FieldList<::Totem::LedDisplay::Animations::DiagnosticFillConfig> {
+template <> struct FieldList<::Totem::LedDisplay::Animations::DiagnosticFillConfig> {
     using Type = ::Totem::LedDisplay::Animations::DiagnosticFillConfig;
     static constexpr auto fields = std::make_tuple(
         Field<&Type::hue>{"hue"},

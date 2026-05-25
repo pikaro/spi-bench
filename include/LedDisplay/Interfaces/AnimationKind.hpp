@@ -11,6 +11,7 @@ enum class AnimationCommandType : uint8_t {
     Stop,
     SetHueOffset,
     SetRotationOffset,
+    SetBrightness,
 };
 
 enum class AnimationKind : uint8_t {
@@ -20,6 +21,8 @@ enum class AnimationKind : uint8_t {
     FftReactive,
     WheelIndicator,
     SpokeSweep,
+    Sinelon,
+    SineWave,
 };
 
 } // namespace Totem::LedDisplay

@@ -1,40 +1,25 @@
 #pragma once
 
-#include "LedDisplay/Interfaces/AnimationCommand.hpp"
-#include "LedDisplay/Interfaces/AnimationKind.hpp"
+#include "LedDisplay/Animations/SpokeSweep/Config.hpp"
 #include "LedDisplay/Interfaces/AnimationStyle.hpp"
-#include "LedDisplay/Interfaces/Layer.hpp"
 #include "LedDisplay/Interfaces/RenderContext.hpp"
 #include "LedDisplay/Renderers/GenericRenderer.hpp"
-#include "Macros/Facade.hpp"
-#include "Macros/internal/Markers.hpp"
-#include "Types/Error.hpp"
 #include <algorithm>
 #include <array>
 #include <cstdint>
-#include <expected>
 #include <limits>
-#include <type_traits>
 
 namespace Totem::LedDisplay::Animations {
 
-struct WIRE_MSG SpokeSweepConfig {
-    uint8_t baseHue = 0;
-    uint8_t hueStride = 16;
-    uint8_t value = 220;
-    uint8_t trailSpokes = 2;
-    uint8_t cycles = 1;
-    uint8_t markerValue = 255;
-};
-
 struct SpokeSweep {
-    static constexpr AnimationKind kind = AnimationKind::SpokeSweep;
-    static constexpr Layer defaultLayer = Layer::Debug;
-    static constexpr uint16_t defaultLifetimeMs = 6000;
-    static constexpr uint16_t defaultRequestId = 2;
-    static constexpr uint8_t minimumCycles = 1;
-    static constexpr uint8_t fullScale =
-        std::numeric_limits<uint8_t>::max();
+    static constexpr AnimationKind kind = SpokeSweepSpec::kind;
+    static constexpr Layer defaultLayer = SpokeSweepSpec::defaultLayer;
+    static constexpr uint16_t defaultLifetimeMs =
+        SpokeSweepSpec::defaultLifetimeMs;
+    static constexpr uint16_t defaultRequestId =
+        SpokeSweepSpec::defaultRequestId;
+    static constexpr uint8_t minimumCycles = SpokeSweepSpec::minimumCycles;
+    static constexpr uint8_t fullScale = std::numeric_limits<uint8_t>::max();
     static constexpr uint8_t markerSaturation = 255;
     static constexpr uint8_t innerOuterMarkerHue = 96;
     static constexpr uint8_t secondaryMarkerHue = 0;
@@ -47,16 +32,9 @@ struct SpokeSweep {
 
     SpokeSweepConfig config{};
 
-    static std::expected<AnimationCommand, ReturnCode>
-    makeCommand(SpokeSweepConfig commandConfig = {},
-                uint16_t requestId = defaultRequestId,
-                uint16_t lifetimeMs = defaultLifetimeMs,
-                Layer layer = defaultLayer);
-
     void render(AnimationRenderContext &ctx) const {
         const auto duration = nonzero(ctx.clock.durationMs, defaultLifetimeMs);
-        const auto cycleCount = std::max<uint8_t>(config.cycles,
-                                                 minimumCycles);
+        const auto cycleCount = std::max<uint8_t>(config.cycles, minimumCycles);
         const auto totalSweepSteps =
             static_cast<uint32_t>(Config::spokeCount) * cycleCount;
         const auto sweepStep = static_cast<uint32_t>(
@@ -67,12 +45,9 @@ struct SpokeSweep {
         const auto visibleTrailSpokes =
             std::min<uint8_t>(config.trailSpokes, Config::spokeCount - 1U);
 
-        for (uint8_t distance = 0; distance <= visibleTrailSpokes;
-             ++distance) {
-            const auto value =
-                Renderers::GenericRenderer::scale8(config.value,
-                                                   trailScale(distance,
-                                                              visibleTrailSpokes));
+        for (uint8_t distance = 0; distance <= visibleTrailSpokes; ++distance) {
+            const auto value = Renderers::GenericRenderer::scale8(
+                config.value, trailScale(distance, visibleTrailSpokes));
             if (value == 0) {
                 continue;
             }
@@ -90,8 +65,8 @@ struct SpokeSweep {
         return value == 0 ? fallback : value;
     }
 
-    [[nodiscard]] static constexpr uint8_t
-    wrapSpoke(uint8_t center, int16_t offset) {
+    [[nodiscard]] static constexpr uint8_t wrapSpoke(uint8_t center,
+                                                     int16_t offset) {
         const auto raw = static_cast<int16_t>(center) + offset;
         const auto spokeCount = static_cast<int16_t>(Config::spokeCount);
         const auto wrapped = ((raw % spokeCount) + spokeCount) % spokeCount;
@@ -112,11 +87,12 @@ struct SpokeSweep {
     }
 
     static void drawMarkedSpoke(AnimationRenderContext &ctx, uint8_t spoke,
-                                uint8_t hue, uint8_t value,
-                                uint8_t markerValue, bool active) {
-        ctx.canvas.spoke(spoke, HsvColor{.hue = hue,
-                                         .saturation = markerSaturation,
-                                         .value = value},
+                                uint8_t hue, uint8_t value, uint8_t markerValue,
+                                bool active) {
+        ctx.canvas.spoke(spoke,
+                         HsvColor{.hue = hue,
+                                  .saturation = markerSaturation,
+                                  .value = value},
                          BlendOp::Replace);
 
         if (!active) {
@@ -124,8 +100,7 @@ struct SpokeSweep {
         }
 
         const auto activeMarkerValue = std::max(markerValue, value);
-        const auto lastRadial =
-            static_cast<uint8_t>(Config::ringCount - 1U);
+        const auto lastRadial = static_cast<uint8_t>(Config::ringCount - 1U);
         const auto markerColors = std::array<HsvColor, markerBandCount>{
             HsvColor{.hue = innerOuterMarkerHue,
                      .saturation = markerSaturation,
@@ -141,14 +116,10 @@ struct SpokeSweep {
         for (uint8_t marker = 0; marker < markerBandCount; ++marker) {
             ctx.canvas.pixel(spoke, marker, markerColors[marker],
                              BlendOp::Replace);
-            ctx.canvas.pixel(spoke,
-                             static_cast<uint8_t>(lastRadial - marker),
+            ctx.canvas.pixel(spoke, static_cast<uint8_t>(lastRadial - marker),
                              markerColors[marker], BlendOp::Replace);
         }
     }
 };
-
-static_assert(std::is_trivially_copyable_v<SpokeSweepConfig>,
-              "SpokeSweepConfig must remain queue-copyable");
 
 } // namespace Totem::LedDisplay::Animations

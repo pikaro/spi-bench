@@ -30,6 +30,7 @@ enum class Topic : uint32_t {
     Metrics = 1U << 7,
     Button = 1U << 8,
     Animation = 1U << 9,
+    LedPwm = 1U << 10,
 };
 
 enum class SPIOnlyTransport : uint8_t {

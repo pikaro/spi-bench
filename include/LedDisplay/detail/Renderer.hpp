@@ -15,6 +15,10 @@ template <class Impl> struct Renderer {
         return Impl::qadd8(a, b);
     }
 
+    [[nodiscard]] static uint8_t sine8(uint8_t phase) {
+        return Impl::sine8(phase);
+    }
+
     [[nodiscard]] static HsvColor blend(HsvColor dst, HsvColor src,
                                         BlendOp op) {
         return Impl::blend(dst, src, op);

@@ -18,10 +18,24 @@
 - Use `magic_enum` functionalities for cleaner semantic code when dealing with
     enums. Prefer this over manual string conversions, Count members and similar
     patterns.
-- You may connect to the serial monitor using multi-monitor as documented at any
-    time, and you may use it to reflash the environments as needed. Make use of
-    the facilities to configure the metrics and logging thresholds in order to
-    get more detailed information if useful, but ensure that the permanent
-    performance impact is balanced by the permanent value of the information
-    obtained.
+- For LED animations and similar patterns, document non-obvious command
+    parameters. E.g. `duration` is obvious, but `spokeGain` is not.
 
+## Building and uploading
+
+- Use `bin/build` to build the project if possible.
+- Build output is rendered in SARIF format in `build/<env>/`. If a build fails,
+    inspect the SARIF output; use `jq` or similar to reduce the amount of
+    information to what is relevant. If you invoked `pio` directly, the SARIF is
+    in the repository root.
+- You may connect to the serial monitor using multi-monitor as documented at any
+    time, and you may use it to reflash the environments as needed.
+
+## Debugging and optimization
+
+- Temporarily increase logging and metrics collection levels as needed and add
+    trace-level instrumentation if helpful for debugging or optimization. Ensure
+    that all statements added for debugging or optimization purposes are gated
+    behind their respective compile-time constants; many macros already
+    implement this, but for custom statements, you may need to add your own
+    gates.

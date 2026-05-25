@@ -1,7 +1,9 @@
 #pragma once
 
-#include "LedDisplay/Animations/SpokeSweepCommands.hpp"
-#include "LedDisplay/Animations/WheelIndicatorCommands.hpp"
+#include "LedDisplay/Animations/SpokeSweep/Command.hpp"
+#include "LedDisplay/Animations/SpokeSweep/Config.hpp"
+#include "LedDisplay/Animations/WheelIndicator/Command.hpp"
+#include "LedDisplay/Animations/WheelIndicator/Config.hpp"
 #include "LedDisplay/Interfaces/AnimationCommandFactory.hpp"
 #include "Macros/Facade.hpp"
 #include "Types/Error.hpp"
@@ -13,18 +15,20 @@ struct SpokeProbeConfig {
     bool enabled = true;
     // Give high-speed SPI/PubSub time to recover after a full-system reset.
     uint32_t publishDelayMs = 9000;
-    uint16_t lifetimeMs =
-        Totem::LedDisplay::Animations::SpokeSweep::defaultLifetimeMs;
+    uint16_t lifetimeMs = 2000;
     uint16_t requestId =
-        Totem::LedDisplay::Animations::SpokeSweep::defaultRequestId;
-    Totem::LedDisplay::Animations::SpokeSweepConfig animation{};
+        Totem::LedDisplay::Animations::SpokeSweepCommand::defaultRequestId;
+    Totem::LedDisplay::Animations::SpokeSweepConfig animation{
+        .hueStride = 16,
+        .cycles = 3,
+    };
 };
 
 struct WheelIndicatorConfig {
-    bool enabled = true;
+    bool enabled = false;
     uint32_t publishDelayMs = 0;
     uint16_t requestId =
-        Totem::LedDisplay::Animations::WheelIndicator::defaultRequestId;
+        Totem::LedDisplay::Animations::WheelIndicatorCommand::defaultRequestId;
     Totem::LedDisplay::Animations::WheelIndicatorConfig animation{};
 };
 
@@ -62,7 +66,7 @@ inline uint32_t wheelIndicatorDelayMs() {
 inline ReturnCode publishSpokeProbe() {
     FAIL_IF_UNEXPECTED_FWD(
         cmd,
-        Totem::LedDisplay::Animations::SpokeSweep::makeCommand(
+        Totem::LedDisplay::Animations::SpokeSweepCommand::makeCommand(
             config.spokeProbe.animation, config.spokeProbe.requestId,
             config.spokeProbe.lifetimeMs),
         "Failed to build master LED bringup spoke probe");
@@ -77,7 +81,7 @@ inline ReturnCode publishSpokeProbe() {
 inline ReturnCode publishWheelIndicator() {
     FAIL_IF_UNEXPECTED_FWD(
         cmd,
-        Totem::LedDisplay::Animations::WheelIndicator::makeCommand(
+        Totem::LedDisplay::Animations::WheelIndicatorCommand::makeCommand(
             config.wheelIndicator.animation, config.wheelIndicator.requestId),
         "Failed to build master LED bringup wheel indicator");
     FAIL_IF_ERR_FWD(Totem::LedDisplay::publishAnimationCommand(cmd),

@@ -20,8 +20,8 @@ The embedded pipeline is feature-complete for current animation development:
   presentation only
 - `AnimationEngine` owns command draining, animation slots, input snapshots,
   layer rendering, and concrete animation dispatch
-- concrete animations live under `include/LedDisplay/Animations/`, one header
-  per animation
+- concrete animations live under `include/LedDisplay/Animations/<Name>/` with
+  separate config, command, command-description, and render headers
 - reusable drawing access lives under `include/LedDisplay/Primitives/`
 - rendering uses scratch -> layer -> composed frame
 - present buffering supports `None`, `Double`, `Triple`, and `Quadruple`;
@@ -56,13 +56,17 @@ wheel inputs, renders each active animation into scratch, blends scratch into
 the target layer, composes layers into the output frame, and expires timed
 animations.
 
-`Animations/*` files own animation-specific semantics. Each base animation file
-contains the config payload, default style/layer/lifetime, command helper
-declarations, and render/update behavior for that animation. Per-animation
-`*Commands.hpp` headers in the same directory contain the command helper
-definitions; they are intentionally not centralized in one command factory. The
-registry is boring glue: it maps `AnimationKind` to payload construction, style
-lookup, update dispatch, and render dispatch.
+`Animations/<Name>/Config.hpp` owns the queue-copyable config payload and shared
+animation metadata such as kind, default layer, and default lifetime. It must not
+include command-codec, PubSub, or renderer dependencies.
+
+`Animations/<Name>/Animation.hpp` owns render behavior for that animation and
+depends only on the config plus rendering interfaces. `Command.hpp` owns command
+construction and payload encoding. `CommandDesc.hpp` owns the console handler and
+subcommand descriptor. `CoreCommands.hpp` only includes per-animation
+`CommandDesc.hpp` files and combines their descriptors into the `/anim`
+subcommand array. The registry is boring glue: it maps `AnimationKind` to
+payload construction, style lookup, update dispatch, and render dispatch.
 
 `Primitives/*` are reusable drawing kernels and canvas accessors. A primitive
 renders into a supplied canvas/scratch buffer and does not own lifetime, command
@@ -164,6 +168,21 @@ inside a single shared frame buffer.
 `CenterWave` is a one-shot effect on the `Effect` layer. Its config has
 separate rise, peak, and wake ring counts.
 
+`Sinelon` is an effect-layer bouncing sine-position head. It can start from the
+inner or outer edge, limit its travel depth, attenuate later edge-to-edge
+bounces, and apply a spoke-to-spoke gain wave. It renders only the current head
+lobe and relies on the layer's persistent decay for its wake, so repeated bright
+positions linger without requiring animation-private frame history.
+
+`SineWave` is an effect-layer sine trace. It scans a single sine-valued head
+from an edge into the strip once over `durationMs` and renders the
+already-scanned history directly, so the wave shape does not depend on layer
+persistence. Its trace decay is value-based per ring behind the head, and
+`peakHold` can reduce that decay for bright sine peaks so slopes disappear
+faster than crests. Its command lifetime is separate from scan duration and can
+be omitted to use the projected time for the last peak to fall to the value
+floor.
+
 `DiagnosticFill` is a debug-layer fill used for command/output validation.
 
 `SpokeSweep` is a debug-layer bring-up animation. Master starts it after boot to
@@ -258,7 +277,7 @@ Main entry points:
 The host renderer includes production animation, primitive, topology,
 compositor, layer-stack, and generic color-renderer headers:
 
-- `include/LedDisplay/Animations/*.hpp`
+- `include/LedDisplay/Animations/*/Animation.hpp`
 - `include/LedDisplay/Primitives/Canvas.hpp`
 - `include/LedDisplay/detail/Compositor.hpp`
 - `include/LedDisplay/detail/LayerStack.hpp`
@@ -274,10 +293,12 @@ logging, or device output dependencies. If an animation needs broad host
 emulation to compile, the animation boundary is the thing to fix.
 
 Animation discovery is generated from `include/LedDisplay/Animations/` naming
-conventions and emitted to
+conventions, with each animation using sibling `Animation.hpp` and `Config.hpp`
+headers. Command publishers use sibling `Command.hpp` and CLI registration uses
+`CommandDesc.hpp`. The host registry is emitted to
 `tools/led-render/generated/AnimationRegistry.hpp`. Adding a normal animation
 should not require manual host dispatch edits when the animation follows the
-current one-file-per-animation shape. A future source annotation such as
+current per-animation directory shape. A future source annotation such as
 `LED_ANIMATION` may replace directory scanning if the naming convention becomes
 too weak, but a manually maintained host-only animation list should be avoided.
 

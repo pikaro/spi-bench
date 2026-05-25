@@ -1,5 +1,6 @@
 #pragma once
 
+#include "LedDisplay/Interfaces/Color.hpp"
 #include "LedDisplay/Interfaces/PresentBufferMode.hpp"
 #include <array>
 #include <cstddef>
@@ -109,6 +110,8 @@ struct LedOwnershipStaticConfig : LedTopologyStaticConfig {
 struct LedOutputStaticConfig : LedOwnershipStaticConfig {
     static constexpr size_t dataLineCount = LED_DATA_LINE_COUNT;
     static constexpr bool genericRenderer = LED_DISPLAY_GENERIC_RENDERER != 0;
+    static constexpr Totem::LedDisplay::HsvConversion hsvConversion =
+        Totem::LedDisplay::HsvConversion::Rainbow;
 
     static_assert(dataLineCount > 0,
                   "LED_DATA_LINE_COUNT must be greater than 0");

@@ -31,3 +31,5 @@ enum class Color : uint8_t {
     BrightCyan,
     BrightWhite,
 };
+
+template <auto> inline constexpr bool always_false_v = false;

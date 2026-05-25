@@ -11,6 +11,10 @@
 
 namespace Totem::LedDisplay {
 
+struct DisplayBrightness {
+    uint8_t value = 0;
+};
+
 struct WIRE_MSG AnimationCommand {
     AnimationCommandType type = AnimationCommandType::None;
     AnimationKind kind = AnimationKind::None;

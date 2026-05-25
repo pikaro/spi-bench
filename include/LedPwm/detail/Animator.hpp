@@ -148,6 +148,33 @@ class Animator {
                      pulse.curve);
     }
 
+    static std::optional<Brightness> evaluate(const Glitter &glitter,
+                                              uint32_t elapsedMs) {
+        if (!glitter.validate()) {
+            return std::nullopt;
+        }
+
+        const auto segment = elapsedMs / glitter.stepMs;
+        const auto offset = elapsedMs % glitter.stepMs;
+        auto value =
+            blend(randomGlimmer(glitter, segment),
+                  randomGlimmer(glitter, segment + 1U), offset,
+                  glitter.stepMs, Curve::SmoothStep);
+
+        if (glitter.sparkleMs > 0 && offset < glitter.sparkleMs) {
+            const auto chance =
+                static_cast<uint8_t>(mix(glitter.seed, segment) >> 24U);
+            if (chance < glitter.sparkleChance) {
+                value =
+                    max(value, scale(glitter.sparklePeak,
+                                     glitter.sparkleMs - offset,
+                                     glitter.sparkleMs, Curve::SmoothStep));
+            }
+        }
+
+        return value;
+    }
+
     static Brightness scale(Brightness brightness, uint32_t numerator,
                             uint32_t denominator, Curve curve) {
         if (denominator == 0) {
@@ -159,6 +186,51 @@ class Animator {
             (static_cast<uint64_t>(brightness.value.value) * fraction) /
             NormalizedValue::max);
         return Brightness::fromRaw(value);
+    }
+
+    static Brightness blend(Brightness from, Brightness to,
+                            uint32_t numerator, uint32_t denominator,
+                            Curve curve) {
+        if (denominator == 0 || numerator >= denominator) {
+            return to;
+        }
+
+        const auto fraction = applyCurve(numerator, denominator, curve);
+        const auto fromRaw = from.value.value;
+        const auto toRaw = to.value.value;
+        const auto raw =
+            fromRaw <= toRaw
+                ? fromRaw + static_cast<uint16_t>(
+                                (static_cast<uint32_t>(toRaw - fromRaw) *
+                                 fraction) /
+                                NormalizedValue::max)
+                : fromRaw - static_cast<uint16_t>(
+                                (static_cast<uint32_t>(fromRaw - toRaw) *
+                                 fraction) /
+                                NormalizedValue::max);
+        return Brightness::fromRaw(raw);
+    }
+
+    static Brightness randomGlimmer(const Glitter &glitter,
+                                    uint32_t segment) {
+        const auto range = static_cast<uint16_t>(
+            glitter.glimmerPeak.value.value - glitter.base.value.value);
+        const auto rnd = static_cast<uint16_t>(
+            (mix(glitter.seed ^ 0xB17DU, segment) >> 16U) & 0xFFFFU);
+        const auto raw = static_cast<uint16_t>(
+            glitter.base.value.value +
+            ((static_cast<uint32_t>(range) * rnd) / NormalizedValue::max));
+        return Brightness::fromRaw(raw);
+    }
+
+    static uint32_t mix(uint32_t seed, uint32_t value) {
+        auto x = seed ^ (value + 0x9E3779B9UL + (seed << 6U) + (seed >> 2U));
+        x ^= x >> 16U;
+        x *= 0x7FEB352DUL;
+        x ^= x >> 15U;
+        x *= 0x846CA68BUL;
+        x ^= x >> 16U;
+        return x;
     }
 
     static uint16_t applyCurve(uint32_t numerator, uint32_t denominator,

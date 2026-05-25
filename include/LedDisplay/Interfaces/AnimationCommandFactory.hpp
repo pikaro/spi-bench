@@ -54,6 +54,21 @@ makeRotationOffsetCommand(Angle<uint8_t> offset, uint16_t requestId = 0) {
     return cmd;
 }
 
+inline std::expected<AnimationCommand, ReturnCode>
+makeBrightnessCommand(uint8_t brightness, uint16_t requestId = 0) {
+    auto cmd = AnimationCommand{
+        .type = AnimationCommandType::SetBrightness,
+        .kind = AnimationKind::None,
+        .requestId = requestId,
+        .layer = Layer::Effect,
+        .lifetimeMs = 0,
+    };
+    FAIL_IF_ERR_FWD_UNEXPECTED(encodeCommandPayload(
+                                   cmd, DisplayBrightness{.value = brightness}),
+                               "Failed to encode LED brightness");
+    return cmd;
+}
+
 inline ReturnCode publishAnimationCommand(AnimationCommand cmd) {
     using Pool = Totem::PubSubBackend::Pool<
         AnimationCommand, LedDisplayConfig::animationPublishPoolSize>;

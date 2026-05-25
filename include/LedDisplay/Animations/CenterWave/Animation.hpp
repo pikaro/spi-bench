@@ -1,54 +1,32 @@
 #pragma once
 
-#include "LedDisplay/Interfaces/AnimationCommand.hpp"
-#include "LedDisplay/Interfaces/AnimationKind.hpp"
+#include "LedDisplay/Animations/CenterWave/Config.hpp"
 #include "LedDisplay/Interfaces/AnimationStyle.hpp"
-#include "LedDisplay/Interfaces/Layer.hpp"
 #include "LedDisplay/Interfaces/RenderContext.hpp"
 #include "LedDisplay/Renderers/GenericRenderer.hpp"
-#include "Macros/Facade.hpp"
-#include "Macros/internal/Markers.hpp"
-#include "Types/Error.hpp"
 #include <algorithm>
 #include <cstdint>
-#include <expected>
 #include <limits>
-#include <type_traits>
 
 namespace Totem::LedDisplay::Animations {
 
-struct WIRE_MSG CenterWaveConfig {
-    uint8_t hue = 144;
-    uint8_t saturation = 255;
-    uint8_t value = 180;
-    uint8_t rise = 2;
-    uint8_t peak = 1;
-    uint8_t wake = 5;
-};
-
 struct CenterWave {
-    static constexpr AnimationKind kind = AnimationKind::CenterWave;
-    static constexpr Layer defaultLayer = Layer::Effect;
-    static constexpr uint16_t defaultLifetimeMs = 1200;
-    static constexpr uint8_t minimumPeakRings = 1;
-    static constexpr uint16_t fullScale =
-        std::numeric_limits<uint8_t>::max();
+    static constexpr AnimationKind kind = CenterWaveSpec::kind;
+    static constexpr Layer defaultLayer = CenterWaveSpec::defaultLayer;
+    static constexpr uint16_t defaultLifetimeMs =
+        CenterWaveSpec::defaultLifetimeMs;
+    static constexpr uint8_t minimumPeakRings =
+        CenterWaveSpec::minimumPeakRings;
+    static constexpr uint16_t fullScale = std::numeric_limits<uint8_t>::max();
     static constexpr AnimationStyle defaultStyle{.blendOp = BlendOp::MaxValue,
                                                  .opacity = 255};
 
     CenterWaveConfig config{};
 
-    static std::expected<AnimationCommand, ReturnCode>
-    makeCommand(CenterWaveConfig commandConfig = {},
-                uint16_t requestId = 0,
-                uint16_t lifetimeMs = defaultLifetimeMs,
-                Layer layer = defaultLayer);
-
     void render(AnimationRenderContext &ctx) const {
         const auto duration = nonzero(ctx.clock.durationMs, defaultLifetimeMs);
         const auto rise = static_cast<uint32_t>(config.rise);
-        const auto peak =
-            std::max<uint32_t>(config.peak, minimumPeakRings);
+        const auto peak = std::max<uint32_t>(config.peak, minimumPeakRings);
         const auto wake = static_cast<uint32_t>(config.wake);
         const auto profileRings = rise + peak + wake;
         const auto travelRings =
@@ -75,11 +53,10 @@ struct CenterWave {
             }
 
             ctx.canvas.ring(
-                radial,
-                HsvColor{.hue = hue,
-                         .saturation = config.saturation,
-                         .value = Renderers::GenericRenderer::scale8(
-                             config.value, scale)});
+                radial, HsvColor{.hue = hue,
+                                 .saturation = config.saturation,
+                                 .value = Renderers::GenericRenderer::scale8(
+                                     config.value, scale)});
         }
     }
 
@@ -100,8 +77,8 @@ struct CenterWave {
                                     riseStepsIncludingLeadIn);
     }
 
-    [[nodiscard]] static constexpr uint8_t
-    wakeScale(uint32_t distanceIntoWake, uint32_t wakeRings) {
+    [[nodiscard]] static constexpr uint8_t wakeScale(uint32_t distanceIntoWake,
+                                                     uint32_t wakeRings) {
         if (wakeRings == 0) {
             return 0;
         }
@@ -118,8 +95,7 @@ struct CenterWave {
             return risingEdgeScale(distanceBehindLeadingEdge, riseRings);
         }
 
-        const auto distanceAfterRise =
-            distanceBehindLeadingEdge - riseRings;
+        const auto distanceAfterRise = distanceBehindLeadingEdge - riseRings;
         if (distanceAfterRise < peakRings) {
             return fullScale;
         }
@@ -128,8 +104,5 @@ struct CenterWave {
         return wakeScale(distanceIntoWake, wakeRings);
     }
 };
-
-static_assert(std::is_trivially_copyable_v<CenterWaveConfig>,
-              "CenterWaveConfig must remain queue-copyable");
 
 } // namespace Totem::LedDisplay::Animations

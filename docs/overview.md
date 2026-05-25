@@ -176,10 +176,11 @@ brightness and all active animation slots. `clearAnimations()` removes overlays;
 send an explicit brightness or duty command afterward when a stop command
 should also force the LED output off.
 
-`Pulse` is the first animation payload. Additional effects such as chest
-twinkle, beat flicker, and bell/drop flares should be added as new `Animation`
-variant payloads with small self-contained parameter structs, keeping command
-objects queue-copyable and allocation-free.
+`Pulse` and `Glitter` are the current LED PWM animation payloads. Master-owned
+orchestration publishes queue-copyable `LedPwm::CommandEvent` payloads over the
+`LedPwm` PubSub topic, and `io` only maps those logical LED commands to local
+PWM contexts. This keeps beat, bell, and chest-light animation policy on the
+master while preserving `io` as the hardware execution node.
 LED PWM command metrics live in `ledCore`, `ledPwm`, and `ledProf` for command
 failures, queued/handled command counts, and opt-in task-step profiling.
 

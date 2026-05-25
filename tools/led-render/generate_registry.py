@@ -3,8 +3,8 @@
 
 The renderer must not keep a separate, hand-maintained animation dispatch table.
 This script discovers animations by the local convention used by
-include/LedDisplay/Animations: one animation struct owns one WIRE_MSG config
-struct, exposes default metadata, and has a render(ctx) method.
+include/LedDisplay/Animations: each animation lives in its own directory with
+Animation.hpp for rendering and Config.hpp for the matching WIRE_MSG config.
 """
 
 from __future__ import annotations
@@ -26,7 +26,6 @@ FIELD_RE = re.compile(
     re.M,
 )
 STRUCT_RE = re.compile(r"struct\s+(?P<name>[A-Za-z_]\w*)\s*\{(?P<body>.*?)\n\};", re.S)
-KIND_RE = re.compile(r"AnimationKind::(?P<kind>[A-Za-z_]\w*)")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -41,22 +40,23 @@ class Animation:
     config: str
     header: str
     fields: tuple[Field, ...]
-    kind: str
 
 
 def animation_headers(root: pathlib.Path) -> Iterable[pathlib.Path]:
     directory = root / "include" / "LedDisplay" / "Animations"
-    for path in sorted(directory.glob("*.hpp")):
-        if path.name in {"All.hpp", "Registry.hpp"}:
-            continue
-        if path.stem.endswith("Commands"):
-            continue
+    for path in sorted(directory.glob("*/Animation.hpp")):
         yield path
 
 
 def discover_animation(path: pathlib.Path, root: pathlib.Path) -> Animation | None:
     text = path.read_text(encoding="utf-8")
-    config_match = CONFIG_RE.search(text)
+    command_path = path.with_name("Config.hpp")
+    command_text = (
+        command_path.read_text(encoding="utf-8")
+        if command_path.exists()
+        else text
+    )
+    config_match = CONFIG_RE.search(command_text)
     if config_match is None:
         return None
 
@@ -85,16 +85,11 @@ def discover_animation(path: pathlib.Path, root: pathlib.Path) -> Animation | No
             f"{path}: found {config_name}, but no matching animation struct"
         )
 
-    kind_match = KIND_RE.search(animation_body)
-    if kind_match is None:
-        raise SystemExit(f"{path}: {animation_name} has no AnimationKind")
-
     return Animation(
         name=animation_name,
         config=config_name,
         header=str(path.relative_to(root / "include")),
         fields=fields,
-        kind=kind_match.group("kind"),
     )
 
 
@@ -111,7 +106,7 @@ def read_expression(field: Field, config: str) -> str:
 
 def emit_registry(animations: list[Animation]) -> str:
     includes = "\n".join(
-        f'#include "LedDisplay/Animations/{pathlib.PurePosixPath(animation.header).name}"'
+        f'#include "{pathlib.PurePosixPath(animation.header)}"'
         for animation in animations
     )
     variant_types = ", ".join(

@@ -62,6 +62,11 @@ constexpr ReturnCode ok_code() { return ReturnCode::from(CoreError::Ok); }
 
 constexpr ReturnCode error_code(CoreError err) { return ReturnCode::from(err); }
 
+template <typename T>
+std::expected<T, ReturnCode> unexpected_code(ReturnCode ret) {
+    return std::expected<T, ReturnCode>{std::unexpect, ret};
+}
+
 template <typename T> struct always_false : std::false_type {};
 
 template <auto MemberPtr> struct MemberPointerTraits;
@@ -200,16 +205,16 @@ std::expected<T, ReturnCode> decode_scalar(DecodeCursor &cursor) {
 
     constexpr size_t width = sizeof(StorageT);
     if (!cursor.reader.valid()) {
-        return std::unexpected(error_code(CoreError::InvalidArgument));
+        return unexpected_code<T>(error_code(CoreError::InvalidArgument));
     }
     if (cursor.offset + width > cursor.reader.size) {
-        return std::unexpected(error_code(CoreError::Underflow));
+        return unexpected_code<T>(error_code(CoreError::Underflow));
     }
 
     std::array<std::byte, width> raw{};
     auto ret = cursor.reader.read(cursor.reader.owner, cursor.offset, raw);
     if (!ret.ok()) {
-        return std::unexpected(ret);
+        return unexpected_code<T>(ret);
     }
 
     UnsignedT bits{};
@@ -277,7 +282,7 @@ decode_fields(const TupleT &fields, DecodeCursor &cursor,
         ...);
 
     if (!ret.ok()) {
-        return std::unexpected(ret);
+        return unexpected_code<T>(ret);
     }
     return value;
 }

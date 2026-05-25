@@ -161,6 +161,13 @@ class AnimationEngine {
             _rotationOffset.load(std::memory_order_relaxed));
     }
 
+    [[nodiscard]] std::optional<uint8_t> takeBrightnessUpdate() {
+        if (!_brightnessDirty.exchange(false, std::memory_order_acq_rel)) {
+            return std::nullopt;
+        }
+        return _brightness.load(std::memory_order_acquire);
+    }
+
     static ReturnCode
     onFftEnvelope(void *owner,
                   const Totem::PubSubBackend::Envelope &envelope) {
@@ -249,6 +256,8 @@ class AnimationEngine {
             return _setHueOffset(cmd);
         case AnimationCommandType::SetRotationOffset:
             return _setRotationOffset(cmd);
+        case AnimationCommandType::SetBrightness:
+            return _setBrightness(cmd);
         default:
             FAIL(ERR(CoreError, InvalidArgument),
                  "Unknown LED animation command type");
@@ -383,6 +392,17 @@ class AnimationEngine {
         return OK();
     }
 
+    ReturnCode _setBrightness(const AnimationCommand &cmd) {
+        FAIL_IF_UNEXPECTED_FWD(brightness,
+                               decodeCommandPayload<DisplayBrightness>(cmd),
+                               "Failed to decode LED brightness");
+        _brightness.store(brightness.value, std::memory_order_release);
+        _brightnessDirty.store(true, std::memory_order_release);
+        _log_i("Set LED display brightness=%u",
+               static_cast<unsigned>(brightness.value));
+        return OK();
+    }
+
     void _render(const ActiveAnimation &slot, uint32_t nowMs,
                  uint8_t hueOffset,
         const AnimationInputSnapshot &inputs) {
@@ -480,6 +500,8 @@ class AnimationEngine {
     AnimationInputSnapshot _inputs{};
     std::atomic<uint8_t> _hueOffset{0};
     std::atomic<uint8_t> _rotationOffset{0};
+    std::atomic<uint8_t> _brightness{0};
+    std::atomic<bool> _brightnessDirty{false};
     uint16_t _lastRequestId = 0;
     uint32_t _frames = 0;
     Totem::PubSubBackend::SubscriberKey _fftSub = 0;

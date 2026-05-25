@@ -1,7 +1,7 @@
 #pragma once
 
-#include "StaticConfig/Stacks.hpp"
 #include "StaticConfig/LedDisplay.hpp"
+#include "StaticConfig/Stacks.hpp"
 #include "TaskController/Interfaces/Config.hpp"
 #include <cstdint>
 
@@ -10,6 +10,9 @@ namespace Totem::LedDisplay {
 struct Config : LedDisplayConfig {
     uint8_t globalBrightness = 96;
     bool temporalDithering = true;
+    // Zero disables; interpreted after configured FastLED brightness.
+    uint8_t outputValueFloor = 10;
+    uint8_t outputLumaFloor = 0;
     uint32_t frameBudgetUs = defaultFrameBudgetUs;
 
     Totem::TaskController::Config task{

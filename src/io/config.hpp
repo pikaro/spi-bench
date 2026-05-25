@@ -36,6 +36,10 @@ constexpr Totem::Wire::Rs485::SlaveConfig rs485SlaveConfig{
 };
 
 constexpr Totem::LedPwm::Config ledPwmConfig{
+    .platform =
+        {
+            .brightnessGamma = 1.0F,
+        },
     .leds = {{
         {.led = PeripheralLed::Bulb1, .pin = Pin::GPIO6, .configured = true},
         {.led = PeripheralLed::Bulb2, .pin = Pin::GPIO7, .configured = true},

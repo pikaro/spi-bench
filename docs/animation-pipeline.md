@@ -1,8 +1,9 @@
 # Animation Pipeline
 
 This is the current design reference for GPU-side LED animation rendering.
-Older port and legacy notes have been removed from the active documentation to
-avoid carrying migration-era assumptions forward.
+It consolidates the current embedded pipeline documentation and the legacy
+offline-render tooling plan into one active reference. Advanced animation plans
+and known visual issues are intentionally out of scope for this document.
 
 The pipeline is intentionally not backwards compatible with the first bring-up
 implementation or with the old `../led` codebase. That code was used only as an
@@ -30,13 +31,13 @@ The embedded pipeline is feature-complete for current animation development:
 - the persistent wheel indicator starts through the same generic command path
   as all other animations
 
-Remaining work is feature growth and visual tuning, not another structural
+Remaining pipeline work is validation and visual tuning, not another structural
 replacement:
 
-- decide the final FFT visual policy; `FftReactive` is still a placeholder
-- add richer real animations and the primitives they need
-- add host-side render tooling from
-  [animation-pipeline-offline-render-plan.md](animation-pipeline-offline-render-plan.md)
+- keep using the host-side render tooling under `tools/led-render/` for local
+  animation inspection and regression traces
+- extend the host renderer with optional FastLED-backed color conversion and
+  temporal dithering when higher hardware-parity traces are needed
 - tune layer decay, opacity, and blend choices with hardware and offline traces
 - revisit parallel per-layer rendering only when larger LED counts prove the
   sequential renderer is the bottleneck
@@ -131,6 +132,11 @@ Updates are matched by animation kind and optional request ID. Request ID `0`
 means update every active animation of that kind. Misses are counted in
 `ledDisp.updMiss`.
 
+`Play` with a nonzero request ID replaces any currently active slot with that
+same request ID. This makes repeated command delivery idempotent for persistent
+animations such as `WheelIndicator`. `Play` with request ID `0` allocates a
+fresh nonzero request ID.
+
 ## Layers
 
 Layers are fixed and composed in enum order:
@@ -208,6 +214,214 @@ presentation plus rendering the next complete buffer. Over-budget frame work is
 counted as `ledDisp.slow`, while actual missed external strobes are counted as
 `ledDisp.miss`.
 
+## Host Render Tooling
+
+This section consolidates the former offline-render plan into the active
+pipeline reference. Local animation development uses the host renderer under
+`tools/led-render/`. It is a deterministic inspection tool for animation,
+primitive, layer, blend, topology, and color-output traces. It is not a
+replacement for hardware validation.
+
+Objectives:
+
+- render frames `N..M` for one animation or a small timed animation sequence
+  with parameters supplied from JSON
+- store output in a compact binary trace that can be streamed and analyzed
+- keep animations and primitives host-compilable with minimal dependencies
+- provide spatial region, per-pixel time-series, frame-delta, and
+  flicker/discontinuity analysis
+- provide a Python interface for rendering, trace loading, analysis, and
+  playback
+- reflect firmware behavior closely enough that local findings are meaningful
+  before hardware validation
+
+Boundaries:
+
+- no ESP32 hardware, serial devices, PlatformIO upload, or monitor access is
+  required
+- Python must not contain a second implementation of animation behavior
+- host-only convenience APIs must not leak back into animation classes
+- exact FastLED color-conversion and temporal-dither fidelity is not claimed
+  until an optional FastLED backend is proven against host or hardware captures
+- host traces reduce the search space; they do not prove electrical LED
+  behavior
+
+Main entry points:
+
+- `bin/led-render`: run the C++ host renderer
+- `bin/led-render-build`: regenerate the host animation registry and build the
+  renderer
+- `bin/led-analyze`: load `.tled` traces for summary, flicker, pixel, region,
+  and still-capture analysis
+- `bin/led-view`: open the pygame trace viewer
+
+The host renderer includes production animation, primitive, topology,
+compositor, layer-stack, and generic color-renderer headers:
+
+- `include/LedDisplay/Animations/*.hpp`
+- `include/LedDisplay/Primitives/Canvas.hpp`
+- `include/LedDisplay/detail/Compositor.hpp`
+- `include/LedDisplay/detail/LayerStack.hpp`
+- `include/LedDisplay/Renderers/GenericRenderer.hpp`
+- `include/LedTopology/Facade.hpp`
+
+The host runtime supplies only the environment that isolated animations need:
+frame clock, hue and rotation offsets, logical-to-local mapping,
+scratch/output buffers, optional FFT and wheel input snapshots, and config
+payloads loaded from JSON. Animations and primitives should remain isolated
+enough to compile in this runtime without services, tasks, PubSub, queues,
+logging, or device output dependencies. If an animation needs broad host
+emulation to compile, the animation boundary is the thing to fix.
+
+Animation discovery is generated from `include/LedDisplay/Animations/` naming
+conventions and emitted to
+`tools/led-render/generated/AnimationRegistry.hpp`. Adding a normal animation
+should not require manual host dispatch edits when the animation follows the
+current one-file-per-animation shape. A future source annotation such as
+`LED_ANIMATION` may replace directory scanning if the naming convention becomes
+too weak, but a manually maintained host-only animation list should be avoided.
+
+The renderer accepts JSON configuration rather than positional
+animation-specific flags. The parser maps animation and enum names with
+`magic_enum` where possible, rejects unknown fields, and rejects type
+mismatches so traces remain reproducible.
+
+Example config:
+
+```json
+{
+  "animation": "CenterWave",
+  "duration_ms": 1200,
+  "layer": "Effect",
+  "hue_offset": 0,
+  "rotation_offset": 0,
+  "config": {
+    "hue": 96,
+    "saturation": 255,
+    "value": 180,
+    "rise": 2,
+    "peak": 1,
+    "wake": 5
+  }
+}
+```
+
+Rendering modes:
+
+- `animation`: render one animation directly through `AnimationRenderContext`
+  to test isolated animation and primitive behavior
+- `pipeline`: render through scratch -> layer -> composed-frame, matching the
+  firmware pipeline shape for layer policy, blend behavior, decay, and final
+  HSV composition checks
+- `animations: [...]`: run a small timed sequence with `start_ms`,
+  `duration_ms`, `layer`, and `config` entries for overlap/regression fixtures
+
+Trace files use the `.tled` format: `TLED` magic, versioned little-endian
+header, metadata JSON, then contiguous per-frame planes. Pixel order is logical
+`(spoke, radial)` unless the metadata says otherwise; logical order is the
+default because it is stable across GPU ownership and easier to analyze.
+
+Header data includes frame count, first frame index, FPS numerator and
+denominator, timestamp step in microseconds, topology dimensions, logical and
+local pixel counts, plane mask, per-frame record size, and metadata JSON byte
+length. Current planes are:
+
+- `hsv_final`: final composed HSV frame, three bytes per pixel
+- `rgb_final`: deterministic RGB frame from the selected color backend, three
+  bytes per pixel
+- optional `hsv_scratch`: raw animation scratch frame
+- optional `hsv_layer_<name>`: selected layer frames
+
+Trace metadata should record the renderer command line, git commit if
+available, animation name, animation config JSON, render mode, topology,
+ownership mode, color backend, FastLED fidelity mode, and build timestamp.
+
+The current color backend is deterministic `GenericRenderer` HSV-to-RGB
+conversion. Optional FastLED host rendering can be added as a fidelity mode if
+FastLED host compilation is practical. The target is to reuse FastLED color
+conversion and, where possible, temporal dithering behavior. Firmware behavior
+remains the source of truth; host traces are diagnostic evidence, not a second
+renderer to tune the firmware against.
+
+Python is a thin control and inspection layer:
+
+- `led_render.run_render(...)`: invoke `bin/led-render`
+- `led_render.Trace`: memory-map or load binary traces
+- `Trace.frames(plane="hsv_final")`
+- `Trace.pixel_series(spoke, radial, plane="hsv_final")`
+- `Trace.region(spokes=..., radials=..., plane=...)`
+- `led_render.analysis.detect_flicker(trace, ...)`
+- `led_render.analysis.detect_hue_ping_pong(trace, ...)`
+- `led_render.analysis.frame_deltas(trace, ...)`
+- `led_render.viewer.play(trace, ...)`
+
+Trace loading and analysis use NumPy. Interactive playback uses pygame because
+it gives direct access to the rendered pixel surface and simple real-time
+controls. The tooling also includes a dependency-light `.ppm` still-frame
+exporter so capture is not blocked when pygame is unavailable.
+
+Viewer controls should include play/pause, frame step forward/backward, speed
+control, frame slider, plane selector, color mode selector, optional pixel
+hover/readout, optional spoke/ring grid overlay, flat heatmap view, and radial
+umbrella view. The flat `(spoke x radial)` heatmap remains the primary analysis
+view; the radial view is primarily for pattern design.
+
+Initial analysis reports include per-frame max deltas in HSV and RGB channels,
+per-pixel max delta over time, isolated spike detection, hue ping-pong
+detection, value spike detection, temporal variance heatmaps, and
+frame-to-frame discontinuity reports with the top offending pixels. Analysis
+thresholds must be configurable because useful sensitivity depends on the
+animation and plane under inspection.
+
+Build integration is intentionally simple:
+
+```sh
+bin/led-render-build
+```
+
+The wrapper compiles with C++23, includes `include/`, supplies only host
+topology/ownership defaults, and avoids PlatformIO or ESP-IDF include paths.
+If direct compilation exposes embedded dependencies, fix the offending
+animation or primitive boundary first. Add heavier build-system integration
+only if the direct wrapper becomes hard to maintain.
+
+Checked-in sample configs live under `tools/led-render/examples/`:
+
+- `center-wave-green.json`
+- `center-wave-purple.json`
+- `center-wave-green-purple-adjacent.json`
+- `wheel-indicator-static.json`
+- `spoke-sweep.json`
+- `fft-reactive-static.json`
+
+Current implementation status:
+
+- generated animation discovery and dispatch are in place
+- all discovered animations compile in the host translation unit
+- the C++ renderer CLI consumes generated/table-driven JSON parsing
+- `hsv_final` and `rgb_final` traces are emitted in logical topology order
+- Python can load traces, summarize them, extract pixels and regions, report
+  frame deltas, detect flicker-like discontinuities, play traces, and export
+  still frames
+- pygame playback supports frame indicators, heatmap viewing, radial viewing,
+  LED spacing, circular LEDs, and glare
+- the remaining fidelity extension is optional FastLED host color conversion
+  and temporal-dither support
+
+Common commands:
+
+```sh
+bin/led-render \
+  --config tools/led-render/examples/center-wave-green.json \
+  --output /tmp/center.tled
+
+bin/led-analyze summary /tmp/center.tled --stats
+bin/led-analyze pixel /tmp/center.tled --spoke 3 --radial 12
+bin/led-analyze region /tmp/center.tled --spokes 0:4 --radials 10:20
+bin/led-analyze flicker /tmp/center.tled --plane hsv_final
+bin/led-view /tmp/center.tled --glare
+```
+
 ## Metrics
 
 LED display metrics are in the `ledDisp` group:
@@ -239,32 +453,24 @@ initialization across cores and trigger interrupt-watchdog failures.
 - `stepMax`: maximum observed present-and-render step duration in microseconds
 
 Validation on 2026-05-25 with `master`, `gpu0`, `gpu1`, and `io` attached
-showed both GPUs receiving FFT-driven animation traffic and the forced
-`/anim wheel-update 160 96 3 1 1` update through master. `gpu0` and `gpu1`
-reported zero queue, command, render, show, input, repeat, and missed-strobe
-failures. The wheel update incremented `update` to `1` on both GPUs with
-`updMiss=0`, proving that the persistent wheel indicator received the generic
-update. Observed maxima were about 2.5 ms render and 2.6 ms show, comfortably
-below the 8 ms work budget for the current LED count. Later validation should
-also require `slow=0` and a `stepMax` comfortably below 8000 us.
+showed stable operation after the metrics prewarm fix. User observation
+confirmed the spoke mapping and the bring-up-to-normal-operation gate. Both
+GPUs received FFT-driven animation traffic and the forced
+`/anim wheel-update 160 96 3 1 1` update through master.
 
-The final local state after adding `SpokeSweep`, master bring-up publication,
-and `slow`/`stepMax` metrics has been build-validated but not revalidated on
-hardware. Device validation was paused on 2026-05-25 after the USB devices
-disappeared from the host. Do not treat the final state as hardware-validated
-until the nodes enumerate reliably again and the validation commands below pass.
+The 2026-05-25 12:45 metrics snapshot showed `qFail=0`, `badCmd=0`,
+`rndFail=0`, `showFail=0`, `inFail=0`, `repeat=0`, `miss=0`, and `slow=0` on
+both GPUs. The forced wheel update incremented `update` without increasing
+`updMiss`, proving that the persistent wheel indicator received the generic
+update path. Observed maxima were:
 
-## Known Visual Bugs
+- `gpu0`: `rndMax=3312us`, `showMax=2244us`, `stepMax=4652us`
+- `gpu1`: `rndMax=3725us`, `showMax=3117us`, `stepMax=4765us`
 
-Closely spaced waves have previously produced isolated pink/white flicker when
-different hues followed each other immediately. Do not close or root-cause this
-by live visual inspection alone. It may be pipeline blending, FastLED
-conversion, temporal dithering, timing, power, or physical LED behavior.
-
-After the offline renderer exists, reproduce this with deterministic command
-scripts and compare raw layer buffers, final HSV frames, converted RGB frames,
-and hardware output. Until then it remains a known visual issue, even if the
-new layer/composition behavior changes the symptom.
+These are comfortably below the 8 ms work budget for the current LED count.
+Separate master-side PubSub SPI RX queue backpressure warnings were seen during
+the same monitor session; those are transport pressure signals, not LED render
+pipeline failures.
 
 ## Validation Commands
 

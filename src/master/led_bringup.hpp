@@ -11,7 +11,8 @@ namespace MasterLedBringup {
 
 struct SpokeProbeConfig {
     bool enabled = true;
-    uint32_t publishDelayMs = 5000;
+    // Give high-speed SPI/PubSub time to recover after a full-system reset.
+    uint32_t publishDelayMs = 9000;
     uint16_t lifetimeMs =
         Totem::LedDisplay::Animations::SpokeSweep::defaultLifetimeMs;
     uint16_t requestId =
@@ -21,7 +22,7 @@ struct SpokeProbeConfig {
 
 struct WheelIndicatorConfig {
     bool enabled = true;
-    uint32_t publishDelayMs = 5500;
+    uint32_t publishDelayMs = 0;
     uint16_t requestId =
         Totem::LedDisplay::Animations::WheelIndicator::defaultRequestId;
     Totem::LedDisplay::Animations::WheelIndicatorConfig animation{};
@@ -42,6 +43,20 @@ inline bool wheelIndicatorPublished = false;
 
 inline bool readyFor(uint32_t nowMs, uint32_t delayMs) {
     return (nowMs - startedMs) >= delayMs;
+}
+
+inline uint32_t spokeProbeDoneAtMs() {
+    if (!config.spokeProbe.enabled) {
+        return 0;
+    }
+    return config.spokeProbe.publishDelayMs + config.spokeProbe.lifetimeMs;
+}
+
+inline uint32_t wheelIndicatorDelayMs() {
+    if (config.wheelIndicator.publishDelayMs != 0) {
+        return config.wheelIndicator.publishDelayMs;
+    }
+    return spokeProbeDoneAtMs();
 }
 
 inline ReturnCode publishSpokeProbe() {
@@ -81,6 +96,10 @@ inline ReturnCode begin(uint32_t nowMs) {
     return OK();
 }
 
+inline bool normalOperationAllowed(uint32_t nowMs) {
+    return detail::readyFor(nowMs, detail::spokeProbeDoneAtMs());
+}
+
 inline ReturnCode work(uint32_t nowMs) {
     if (config.spokeProbe.enabled && !detail::spokeProbePublished &&
         detail::readyFor(nowMs, config.spokeProbe.publishDelayMs)) {
@@ -90,7 +109,7 @@ inline ReturnCode work(uint32_t nowMs) {
     }
 
     if (config.wheelIndicator.enabled && !detail::wheelIndicatorPublished &&
-        detail::readyFor(nowMs, config.wheelIndicator.publishDelayMs)) {
+        detail::readyFor(nowMs, detail::wheelIndicatorDelayMs())) {
         FAIL_IF_ERR_FWD(detail::publishWheelIndicator(),
                         "Failed to run master LED bringup wheel indicator");
         detail::wheelIndicatorPublished = true;

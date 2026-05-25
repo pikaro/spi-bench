@@ -91,12 +91,12 @@ struct Metrics {
         .unit = MetricUnit::None,
     };
     static constexpr MetricDesc attentionAssertDef = {
-        .name = "attnAssert",
+        .name = "attnAss",
         .type = MetricType::Counter,
         .unit = MetricUnit::None,
     };
     static constexpr MetricDesc attentionReleaseDef = {
-        .name = "attnRelease",
+        .name = "attnRel",
         .type = MetricType::Counter,
         .unit = MetricUnit::None,
     };
@@ -362,9 +362,6 @@ struct Metrics {
     static constexpr auto component = MetricsBackend::MetricComponent::Spi;
 };
 
-inline Metrics &metrics() {
-    static Metrics instance = Metrics::create();
-    return instance;
-}
+DEFINE_PREWARMED_METRICS_ACCESSORS(Metrics, metrics, prewarmMetrics)
 
 } // namespace Totem::Wire::Spi::detail

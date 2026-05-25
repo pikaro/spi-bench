@@ -132,9 +132,7 @@ struct DisplayMetrics {
         metrics_enabled(component, profileGroupDef);
 };
 
-inline DisplayMetrics &displayMetrics() {
-    static DisplayMetrics instance = DisplayMetrics::create();
-    return instance;
-}
+DEFINE_PREWARMED_METRICS_ACCESSORS(DisplayMetrics, displayMetrics,
+                                   prewarmDisplayMetrics)
 
 } // namespace Totem::Audio::detail

@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT=$(git rev-parse --show-toplevel)
+OUT_DIR="$ROOT/.build/led-render"
+OUT="$OUT_DIR/led-render"
+REGISTRY="$ROOT/tools/led-render/generated/AnimationRegistry.hpp"
+
+mkdir -p "$OUT_DIR" "$(dirname "$REGISTRY")"
+
+python3 "$ROOT/tools/led-render/generate_registry.py" \
+    --root "$ROOT" \
+    --out "$REGISTRY"
+
+if command -v clang-format >/dev/null 2>&1; then
+    clang-format -i "$REGISTRY"
+fi
+
+MAGIC_ENUM_INCLUDE=""
+while IFS= read -r candidate; do
+    MAGIC_ENUM_INCLUDE="$candidate"
+    break
+done < <(find "$ROOT/.pio/libdeps" -path '*/magic_enum/include' -type d 2>/dev/null | sort)
+
+EXTRA_INCLUDES=()
+if [[ -n "$MAGIC_ENUM_INCLUDE" ]]; then
+    EXTRA_INCLUDES+=("-I$MAGIC_ENUM_INCLUDE")
+fi
+
+"${CXX:-c++}" \
+    -std=c++23 \
+    -O2 \
+    -Wall \
+    -Wextra \
+    -DPLATFORM_HOST=1 \
+    -DLED_GROUP_COUNT=1 \
+    -DLED_GROUP_INDEX=0 \
+    -DLED_NODE_GROUP_COUNT=1 \
+    -DLED_NODE_GROUP0=0 \
+    -DLED_DATA_LINE_COUNT=1 \
+    -DLED_DISPLAY_GENERIC_RENDERER=1 \
+    -I"$ROOT/tools/led-render/host_include" \
+    -I"$ROOT/tools/led-render" \
+    -I"$ROOT/include" \
+    "${EXTRA_INCLUDES[@]}" \
+    "$ROOT/tools/led-render/host_render.cpp" \
+    -o "$OUT"
+
+echo "$OUT"

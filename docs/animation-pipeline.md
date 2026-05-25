@@ -88,6 +88,20 @@ updates affect pixels.
 `src/master/led_bringup.hpp` owns the master-triggered LED bring-up probes. It
 publishes generic animation commands after boot so GPU mapping and long-running
 indicator startup use the same command path as runtime orchestration.
+Automatic master runtime orchestration is held until the spoke probe's publish
+delay plus lifetime has elapsed. The bring-up sweep must run against an
+untransformed logical-to-physical map; otherwise normal effects such as wheel
+rotation, beat waves, or future brightness modulation can obscure topology
+diagnostics. Manual `/anim` commands remain direct diagnostics.
+The spoke probe is intentionally delayed long enough for the high-speed
+SPI/PubSub links to recover after a full-system reset; publishing it too early
+can race subscriber availability and make the diagnostic disappear.
+
+The umbrella topology maps logical spokes in four-spoke quadrants. Within each
+quadrant, logical spoke order is mirrored onto the physical wire segment order:
+logical segment `0` maps to physical segment `3`, `1` to `2`, `2` to `1`, and
+`3` to `0`. Radial serpentine direction is still derived from the physical
+segment because that follows the actual LED strip wiring.
 
 ## Frame Flow
 
@@ -149,6 +163,8 @@ separate rise, peak, and wake ring counts.
 `SpokeSweep` is a debug-layer bring-up animation. Master starts it after boot to
 walk logical spokes and mark radial direction, so mapping errors are visible
 without giving `Display` or the output backend any animation-specific API.
+It is also available manually through `/anim sweep`; use `trailSpokes=0` when
+checking physical spoke order.
 
 `FftReactive` is a placeholder FFT-driven visual on the `Fft` layer. It
 consumes the engine's latest FFT snapshot and renders a fallback gradient when
@@ -158,6 +174,8 @@ no FFT frame exists. The final FFT design is intentionally undecided.
 ID `1`. It renders a small spoke group from the latest wheel position and
 accepts update commands for its display parameters. If no wheel state has been
 received yet, it renders at position zero so the layer is still testable.
+Master starts the persistent wheel indicator only after the bring-up spoke
+probe window has completed.
 
 ## Buffering And Timing
 
@@ -193,6 +211,12 @@ counted as `ledDisp.slow`, while actual missed external strobes are counted as
 ## Metrics
 
 LED display metrics are in the `ledDisp` group:
+
+`LedDisplay` prewarms `ledDisp` metrics during component begin, before the
+render task or PubSub input callbacks can run. Keep that ordering intact:
+render, strobe, wheel, and FFT paths must treat `metrics()` as a hot-path
+accessor only. Lazy metric registration in those paths can hit C++ static guard
+initialization across cores and trigger interrupt-watchdog failures.
 
 - `qFail`: engine command queue failures
 - `badCmd`: invalid or undecodable commands

@@ -53,7 +53,7 @@ class Buttons : public HasLifecycle<Buttons, Config>,
 
   private:
     ReturnCode _onBegin() {
-        (void)metrics();
+        prewarmMetrics();
         DEFAULT_TASK();
         _task = task;
         INIT_QUEUE_OR_FAIL(_eventQueue);

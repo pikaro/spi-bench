@@ -61,6 +61,7 @@ inline Totem::PubSubBackend::SubscriberKey wheelSubscription = 0;
 inline Totem::PubSubBackend::SubscriberKey beatSubscription = 0;
 inline Angle<uint16_t> wheelOffset{};
 inline bool wheelOffsetDirty = false;
+inline bool wheelIndicatorDirty = false;
 inline uint32_t lastWheelPublishMs = 0;
 inline std::array<uint32_t, Totem::Audio::beatGroupCount> lastBeatWaveMs{};
 
@@ -199,6 +200,7 @@ inline ReturnCode handleWheel(const Totem::Wheel::WheelState &state) {
     }
     detail::wheelOffset += state.delta;
     detail::wheelOffsetDirty = true;
+    detail::wheelIndicatorDirty = true;
     return OK();
 }
 
@@ -233,13 +235,15 @@ inline ReturnCode handleBeat(const Totem::Audio::BeatEvent &event,
     return Totem::LedDisplay::publishAnimationCommand(cmd);
 }
 
-inline ReturnCode work(uint32_t nowMs) {
+inline ReturnCode work(uint32_t nowMs, bool allowNormalOperation = true) {
     if (detail::beatEventQueue != nullptr) {
         Totem::Audio::BeatEvent beat{};
         while (Totem::Queue::Platform::receive(detail::beatEventQueue, &beat, 0)
                    .ok()) {
-            FAIL_IF_ERR_FWD(handleBeat(beat, nowMs),
-                            "Failed to handle queued beat event");
+            if (allowNormalOperation) {
+                FAIL_IF_ERR_FWD(handleBeat(beat, nowMs),
+                                "Failed to handle queued beat event");
+            }
         }
     }
 
@@ -253,7 +257,11 @@ inline ReturnCode work(uint32_t nowMs) {
         }
     }
 
-    if (!detail::wheelOffsetDirty) {
+    if (!allowNormalOperation) {
+        return OK();
+    }
+
+    if (!detail::wheelOffsetDirty && !detail::wheelIndicatorDirty) {
         return OK();
     }
 
@@ -267,6 +275,7 @@ inline ReturnCode work(uint32_t nowMs) {
     FAIL_IF_ERR_FWD(detail::publishWheelEffects(),
                     "Failed to publish orchestrated wheel effects");
     detail::wheelOffsetDirty = false;
+    detail::wheelIndicatorDirty = false;
     return OK();
 }
 

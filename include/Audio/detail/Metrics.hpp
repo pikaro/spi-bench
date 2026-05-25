@@ -367,9 +367,6 @@ struct Metrics {
         metrics_enabled(component, profileGroupDef);
 };
 
-inline Metrics &metrics() {
-    static Metrics instance = Metrics::create();
-    return instance;
-}
+DEFINE_PREWARMED_METRICS_ACCESSORS(Metrics, metrics, prewarmMetrics)
 
 } // namespace Totem::Audio::detail

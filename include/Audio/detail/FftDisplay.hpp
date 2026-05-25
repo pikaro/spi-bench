@@ -50,7 +50,7 @@ class FftDisplay : public HasLifecycle<FftDisplay, FftDisplayConfig>,
 
   private:
     ReturnCode _onBegin() {
-        (void)displayMetrics();
+        prewarmDisplayMetrics();
         FAIL_IF(!_display.active(), ERR(CoreError, InvalidState),
                 "Cannot begin FFT display before SSD1306 display is active");
         _defaultMutexTimeoutMs = 2;

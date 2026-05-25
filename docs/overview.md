@@ -54,6 +54,23 @@ events and render their own LED segment locally.
 - No desktop test harness at present; correctness is currently validated by
     successful compilation and careful code review in context
 
+## Metrics Initialization
+
+Subsystem metric accessors are hot-path accessors, not lazy constructors. Every
+component with singleton-style metrics must call its `prewarmMetrics()` hook
+during begin, after `metricsBackend.begin()` and before it starts tasks,
+registers ISRs, subscribes PubSub callbacks, or enables transport activity.
+Display-side audio metrics use the same rule through `prewarmDisplayMetrics()`.
+
+Do not reintroduce function-local static metric initialization such as
+`static Metrics instance = Metrics::create()` in accessors. On ESP32, first use
+from ISR-heavy or multi-core paths can enter C++ guard initialization
+(`__cxa_guard_acquire`) while another core is also touching the accessor. That
+can stall timing-critical paths long enough to trip the interrupt watchdog.
+Use the prewarmed accessor pattern from `include/Macros/internal/Metrics.hpp`
+instead; `metrics()` should abort if a caller reaches it before the component
+has explicitly prewarmed registration.
+
 ## Architectural Shape
 
 Use MCP/LSP for symbol-level exploration. At a high level, the codebase is
@@ -169,6 +186,10 @@ failures, queued/handled command counts, and opt-in task-step profiling.
 ## Build Model
 
 - `platformio.ini` defines PlatformIO environments and board-specific flags
+- PlatformIO build output is rooted at `build/<env>/`. ESP-IDF component-manager
+    state is also per-environment there, including `dependencies.lock` and
+    `managed_components/`, so different ESP targets do not rewrite shared root
+    artifacts.
 - LittleFS images are built from `data/<env>/littlefs` for each device
     environment and mounted during `CoreSetup`; boot logs recursively list the
     mounted contents for validation. The same listing is available at runtime

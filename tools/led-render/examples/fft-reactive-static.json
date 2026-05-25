@@ -1,0 +1,24 @@
+{
+  "animation": "FftReactive",
+  "duration_ms": 0,
+  "layer": "Fft",
+  "frames": "0:124",
+  "mode": "pipeline",
+  "inputs": {
+    "fft": {
+      "subBass": 64,
+      "bass": 180,
+      "lowMid": 220,
+      "mid": 160,
+      "highMid": 96,
+      "presence": 128,
+      "brilliance": 80,
+      "air": 48
+    }
+  },
+  "config": {
+    "baseHue": 0,
+    "saturation": 255,
+    "valueScale": 192
+  }
+}

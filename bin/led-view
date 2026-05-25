@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT=$(git rev-parse --show-toplevel)
+export PYTHONPATH="$ROOT/tools/led_render_py${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m led_render.cli view "$@"

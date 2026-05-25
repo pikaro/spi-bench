@@ -124,7 +124,7 @@ class Node : public HasLifecycle<Derived, ConfT>,
     }
 
     ReturnCode _onBegin() {
-        (void)metrics();
+        prewarmMetrics();
 
         _log_i("RS485 node initialized on UART %u with baud rate %u",
                this->config().uartConfig.uartNumber,

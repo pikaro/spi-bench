@@ -1,0 +1,20 @@
+{
+  "animation": "WheelIndicator",
+  "duration_ms": 0,
+  "layer": "Wheel",
+  "frames": "0:124",
+  "mode": "pipeline",
+  "inputs": {
+    "wheel": {
+      "position": 8192,
+      "delta": 0
+    }
+  },
+  "config": {
+    "hue": 160,
+    "saturation": 255,
+    "value": 96,
+    "spokes": 3,
+    "falloff": 1
+  }
+}

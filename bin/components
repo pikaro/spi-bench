@@ -7,4 +7,4 @@ fi
 
 ENV="$1"
 
-jq -r '.build_components[]' ".pio/build/${ENV}/project_description.json"
+jq -r '.build_components[]' "build/${ENV}/project_description.json"

@@ -17,12 +17,16 @@ Build output notes:
 
 - Compiler diagnostics are emitted in SARIF format
 - The firmware artifact for `master` is written under
-    `.pio/build/master/firmware.elf`
+    `build/master/firmware.elf`
 
 ## bin/build
 
 - Thin wrapper around `pio run`
-- Deletes unnecessary SARIF files after output
+- Accepts repeated `-e`/`--environment` arguments and runs those environments
+    sequentially, preserving ordinary PlatformIO arguments such as `-t upload`
+- Moves compiler SARIF output under `build/<env>/sarif/`
+- Build output and ESP-IDF component-manager state are per-environment under
+    `build/<env>/`; the root-level `dependencies.lock` is obsolete
 
 ## Analyze object sizes
 
@@ -59,6 +63,10 @@ Build output notes:
     `bin/monitor-multi --strip-ansi --include WRN --log-file /tmp/master.log master`
 - Collapse repeated matching lines:
     `bin/monitor-multi --strip-ansi --include 'SPI write failed' --summary master`
+- Capture raw early boot/reset bytes without PlatformIO monitor filters:
+    `bin/monitor-early master -d 15`
+- Force ROM download-mode line states for diagnosis:
+    `bin/monitor-early master --idle-dtr 0 --idle-rts 0 -d 3`
 
 `bin/monitor` delegates to `bin/monitor-multi` and preserves the historical
 `bin/monitor <env> [baud]` form. With one environment, monitor output is
@@ -82,17 +90,18 @@ environment prefix only in multi-environment mode. `--before`, `--after`, and
 non-default monitor baud rates in `bin/monitor-multi`; trailing positional baud
 arguments are only supported by the `bin/monitor` compatibility wrapper.
 `--upload` runs `pio run -e <env> --target upload` for every owned environment
-before any monitor starts. Avoid relying on `--upload` with multiple
-environments for validation: ESP32-C3/S3 USB and reset races can make the
-combined pre-op fail even when separate uploads or already-built same-chip
-reuploads happen to work. Prefer uploading environments one at a time, then
-attach `bin/monitor-multi` without `--upload` for observation and routed
-commands. `--reset` runs `pio run -e <env> --target reset` for
-every owned environment after uploads and before any monitor starts; reset
-commands are run in parallel. The reset target defaults to `upload_protocol`,
-but an environment can set `custom_reset_protocol` when reset uses a different
-tool from upload, such as nRF serial DFU upload with J-Link reset. nRF serial
-DFU bootloader entry is a separate `reset-bootloader` target.
+before any monitor starts. The current per-environment build layout avoids the
+old shared `dependencies.lock`/component-manager collision, so multi-env builds
+and uploads are expected to be usable again. ESP32-C3/S3 USB and reset races can
+still make a combined monitor pre-op fail without implying that the firmware
+image is bad; when validating a tricky device issue, uploading the relevant
+environment first and then attaching `bin/monitor-multi` remains easier to
+reason about. `--reset` runs `pio run -e <env> --target reset` for every owned
+environment after uploads and before any monitor starts; reset commands are run
+in parallel. The reset target defaults to `upload_protocol`, but an environment
+can set `custom_reset_protocol` when reset uses a different tool from upload,
+such as nRF serial DFU upload with J-Link reset. nRF serial DFU bootloader entry
+is a separate `reset-bootloader` target.
 `--uploadfs` uploads the LittleFS image for every owned environment before
 monitoring; for media WAV-source tests this image is built from
 `data/media/littlefs`.
@@ -103,6 +112,14 @@ When running multiple environments interactively, send a command to a specific
 board with `!<env> <command>`, for example `!master /monitor`. If the current
 instance is only attached to another instance's spool, the command is forwarded
 through a per-environment command FIFO to the owner process.
+
+`bin/monitor-early` is a direct pyserial capture tool for boot and reset
+diagnostics. It bypasses `pio device monitor`, so PlatformIO exception-decoder
+filters, reconnect behavior, and monitor banners cannot hide the raw serial
+stream. It defaults to DTR high and RTS low, which boots the observed ESP32-S3
+USB Serial/JTAG boards into the application. Releasing reset with DTR low enters
+ROM download mode on the current master board, which is useful for confirming
+that the tool is actually seeing boot bytes.
 
 Runtime command discovery:
 
@@ -116,9 +133,15 @@ Useful LED animation commands:
     `!master /anim wave`
     `!master /anim wave 1200 144 180 2 1 5`
     Wave arguments are `durationMs`, `hue`, `value`, `rise`, `peak`, `wake`.
+    `!master /anim sweep`
+    `!master /anim sweep 6000 0 220 0 1 255`
+    Sweep arguments are `durationMs`, `baseHue`, `value`, `trailSpokes`,
+    `cycles`, `markerValue`. Use zero trail for topology bring-up checks.
     `!master /anim wheel`
-    `!master /anim wheel 0 160 96 3 1`
-    Wheel arguments are `durationMs`, `hue`, `value`, `spokes`, `falloff`.
+    `!master /anim wheel 0 160 96 3 1 1`
+    Wheel arguments are `durationMs`, `hue`, `value`, `spokes`, `falloff`,
+    `requestId`. The default request ID is the persistent wheel indicator ID
+    used by wheel updates.
     `!master /anim wheel-update 160 96 3 1 1`
     Wheel-update arguments are `hue`, `value`, `spokes`, `falloff`,
     `requestId`.
@@ -128,6 +151,8 @@ Useful LED animation commands:
     `!master /anim rot 90`
     Hue offset is the raw `Angle<uint8_t>` value, 0-255. Rotation offset is in
     degrees; with the current 16 spokes, about 23 degrees advances one spoke.
+    Automatic master runtime orchestration is gated until the bring-up spoke
+    sweep has finished. Manual commands remain direct diagnostics.
 
 Useful filesystem validation command:
 
@@ -174,7 +199,7 @@ Supporting commands:
 
 Implementation notes:
 
-- `make wire` and `make bindings` cache `idedata` under `.pio/build/<env>/`
+- `make wire` and `make bindings` cache `idedata` under `build/<env>/`
 - Generated output is written to `include/Generated/Wire/`
 
 ## Environment Notes

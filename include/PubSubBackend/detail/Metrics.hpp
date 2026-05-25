@@ -191,9 +191,6 @@ struct Metrics {
     static constexpr auto component = MetricsBackend::MetricComponent::PubSub;
 };
 
-inline Metrics &metrics() {
-    static Metrics instance = Metrics::create();
-    return instance;
-}
+DEFINE_PREWARMED_METRICS_ACCESSORS(Metrics, metrics, prewarmMetrics)
 
 } // namespace Totem::PubSubBackend::detail

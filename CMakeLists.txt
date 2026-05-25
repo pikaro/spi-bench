@@ -213,4 +213,27 @@ if (ENABLE_HTTPD)
 endif()
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+
+set(DEPENDENCIES_LOCK "${CMAKE_BINARY_DIR}/dependencies.lock" CACHE FILEPATH
+  "ESP-IDF component manager lock file" FORCE)
+idf_build_set_property(DEPENDENCIES_LOCK "${DEPENDENCIES_LOCK}")
+
+# PlatformIO builds every environment from the same source tree. Keep
+# ESP-IDF component-manager state in the per-environment build directory so
+# different IDF targets do not rewrite one root dependencies.lock and
+# managed_components directory.
+macro(idf_build_process target)
+  set(_spi_idf_build_args ${ARGN})
+  list(FIND _spi_idf_build_args PROJECT_DIR _spi_project_dir_index)
+  if(NOT _spi_project_dir_index EQUAL -1)
+    math(EXPR _spi_project_dir_value_index "${_spi_project_dir_index} + 1")
+    list(REMOVE_AT _spi_idf_build_args ${_spi_project_dir_value_index})
+    list(REMOVE_AT _spi_idf_build_args ${_spi_project_dir_index})
+  endif()
+
+  _idf_build_process(${target}
+    ${_spi_idf_build_args}
+    PROJECT_DIR "${CMAKE_BINARY_DIR}"
+  )
+endmacro()
 project(spi)

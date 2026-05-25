@@ -1,0 +1,6 @@
+# Monitor/upload caveats
+
+- `bin/monitor-multi` can send commands while monitoring; prefix with `!<node> <command>` for an interactive session or use `--command` for one-shot commands.
+- Older ESP32-C3/S3 USB race behavior made `bin/monitor-multi --upload` across multiple environments unreliable. A newer per-environment build mechanism isolates build output and component-manager state, so multi-env builds/uploads may now work, especially when the environments were compiled first, but a USB race can still make the command fail without changing firmware.
+- Avoid treating the root-level `dependencies.lock` as authoritative. Current builds isolate ESP-IDF component-manager lock/state under the per-environment build directory, e.g. `build/master/dependencies.lock`.
+- For early boot capture on USB Serial/JTAG, use `bin/monitor-early`. On the observed ESP32-S3 master, releasing reset with DTR low enters ROM download mode; normal app boot uses DTR high. `monitor-early` is preferable when PlatformIO monitor filters or reconnect behavior hide raw boot bytes.

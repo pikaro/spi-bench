@@ -142,6 +142,7 @@ class FftAnalyzer : public HasLifecycle<FftAnalyzer, FftAnalyzerConfig>,
         _magnitudeCache.reset(config().magnitudeCache);
         _beatTracker.reset(config().beatTracker);
         _resetStats();
+        prewarmMetrics();
         _metrics = &metrics();
 
         FAIL_IF_ERR_FWD(_fftBackend.begin(config(), _source.audioInfo(),

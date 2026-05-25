@@ -20,12 +20,14 @@ struct Umbrella {
     [[nodiscard]] static constexpr PhysicalPixelIndex
     physicalFor(uint8_t spoke, uint8_t radial) {
         const auto strip = static_cast<size_t>(spoke / segmentsPerStrip);
-        const auto segment = static_cast<size_t>(spoke % segmentsPerStrip);
-        const bool reversed = (segment % 2U) != 0U;
+        const auto logicalSegment =
+            static_cast<size_t>(spoke % segmentsPerStrip);
+        const auto physicalSegment = physicalSegmentFor(logicalSegment);
+        const bool reversed = (physicalSegment % 2U) != 0U;
         const auto position =
             reversed ? (ledsPerSegment - 1U - radial) : radial;
         const auto physical = (strip * ledsPerStrip) +
-                              (segment * ledsPerSegment) + position;
+                              (physicalSegment * ledsPerSegment) + position;
         return static_cast<PhysicalPixelIndex>(physical);
     }
 
@@ -38,6 +40,12 @@ struct Umbrella {
             return static_cast<uint8_t>(position);
         }
         return static_cast<uint8_t>(ledsPerSegment - 1U - position);
+    }
+
+  private:
+    [[nodiscard]] static constexpr size_t
+    physicalSegmentFor(size_t logicalSegment) {
+        return (segmentsPerStrip - 1U) - logicalSegment;
     }
 };
 

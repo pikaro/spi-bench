@@ -67,7 +67,7 @@ class LedPwm : public HasLifecycle<LedPwm, Config>,
 
   private:
     ReturnCode _onBegin() {
-        (void)metrics();
+        prewarmMetrics();
         DEFAULT_TASK();
         INIT_QUEUE_OR_FAIL(_commandQueue);
 

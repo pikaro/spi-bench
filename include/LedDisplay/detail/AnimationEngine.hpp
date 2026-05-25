@@ -23,6 +23,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <optional>
 #include <span>
 
 namespace Totem::LedDisplay::detail {
@@ -40,7 +41,7 @@ class AnimationEngine {
 
   public:
     ReturnCode begin() {
-        (void)metrics();
+        prewarmMetrics();
         INIT_QUEUE_OR_FAIL(_commandQueue);
         _rebuildLogicalToLocalMap(rotationOffset());
         return OK();
@@ -64,10 +65,13 @@ class AnimationEngine {
             FAIL(ERR(CoreError, InvalidArgument),
                  "Invalid LED animation command");
         }
-        auto ret = Totem::Queue::Platform::send(_commandQueue, &cmd);
+        auto ret = Totem::Queue::Platform::send(_commandQueue, &cmd, 0);
         if (!ret.ok()) {
             metrics().addQueueFailure();
-            FAIL_ERR_FWD(ret, "Failed to enqueue LED animation command");
+            _log_w("Dropped LED animation command because the command queue "
+                   "is full: " ERR_FMT,
+                   ERR_ARG(ret));
+            return OK();
         }
         metrics().addCommand();
         return OK();
@@ -291,8 +295,17 @@ class AnimationEngine {
 
         FAIL_IF_UNEXPECTED_FWD(payload, Animations::makePayload(cmd),
                                "Failed to build animation payload");
-        FAIL_IF_UNEXPECTED_FWD(slotIndex, _reserveSlot(),
-                               "No free LED animation slot");
+        const auto existingSlotIndex = _findSlotByRequestId(cmd.requestId);
+        const bool replacing = existingSlotIndex.has_value();
+        size_t slotIndex = 0;
+        if (replacing) {
+            slotIndex = *existingSlotIndex;
+            ++_animations[slotIndex].generation;
+        } else {
+            FAIL_IF_UNEXPECTED_FWD(reservedSlotIndex, _reserveSlot(),
+                                   "No free LED animation slot");
+            slotIndex = reservedSlotIndex;
+        }
 
         auto &slot = _animations[slotIndex];
         slot.active = true;
@@ -303,12 +316,27 @@ class AnimationEngine {
         slot.layer = cmd.layer;
         slot.payload = payload;
 
-        _log_i("Started LED animation kind=%u request=%u lifetime=%ums "
+        _log_i("%s LED animation kind=%u request=%u lifetime=%ums "
                "layer=%u",
+               replacing ? "Replaced" : "Started",
                static_cast<unsigned>(cmd.kind), slot.requestId,
                cmd.lifetimeMs, static_cast<unsigned>(cmd.layer));
         metrics().addPlay();
         return OK();
+    }
+
+    [[nodiscard]] std::optional<size_t>
+    _findSlotByRequestId(uint16_t requestId) const {
+        if (requestId == 0) {
+            return std::nullopt;
+        }
+        for (size_t i = 0; i < _animations.size(); ++i) {
+            if (_animations[i].active &&
+                _animations[i].requestId == requestId) {
+                return i;
+            }
+        }
+        return std::nullopt;
     }
 
     std::expected<size_t, ReturnCode> _reserveSlot() {

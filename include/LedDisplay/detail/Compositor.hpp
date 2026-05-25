@@ -19,8 +19,7 @@ struct BlendContext {
 };
 
 struct Compositor {
-    static constexpr uint8_t fullOpacity =
-        std::numeric_limits<uint8_t>::max();
+    static constexpr uint8_t fullOpacity = std::numeric_limits<uint8_t>::max();
 
     static void clear(std::span<HsvColor> frame) {
         for (auto &pixel : frame) {
@@ -47,8 +46,7 @@ struct Compositor {
     }
 
   private:
-    static void blendPixel(HsvColor &dst, HsvColor src,
-                           AnimationStyle style) {
+    static void blendPixel(HsvColor &dst, HsvColor src, AnimationStyle style) {
         const uint8_t value = Render::scale8(src.value, style.opacity);
         if (value == 0) {
             return;
@@ -81,7 +79,7 @@ struct Compositor {
         }
         case BlendOp::MaxValue:
         default:
-            if (src.value > dst.value) {
+            if (src.value >= dst.value) {
                 dst = src;
             }
             return;

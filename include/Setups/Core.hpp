@@ -51,7 +51,7 @@ struct CoreSetup {
         CommandRegistrarService::set(commandController.registrar());
 
         ABORT_IF_ERR_BEGIN(metricsBackend.begin());
-        (void)Totem::Mutex::detail::metrics();
+        Totem::Mutex::detail::prewarmMetrics();
 
         ABORT_IF_ERR(register_core_commands(commandController.store()),
                      "Failed to register core commands to command controller");

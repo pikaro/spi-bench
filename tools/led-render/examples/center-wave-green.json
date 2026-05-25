@@ -1,0 +1,15 @@
+{
+  "animation": "CenterWave",
+  "duration_ms": 1200,
+  "layer": "Effect",
+  "frames": "0:180",
+  "mode": "pipeline",
+  "config": {
+    "hue": 96,
+    "saturation": 255,
+    "value": 180,
+    "rise": 2,
+    "peak": 1,
+    "wake": 5
+  }
+}

@@ -105,7 +105,7 @@ class Display : public HasLifecycle<Display, Config>,
     ReturnCode _onBegin() {
         static_assert(Config::dataLineCount <= maxFastLedDataLines,
                       "FastLED output currently supports two configured lines");
-        (void)metrics();
+        prewarmMetrics();
         DEFAULT_TASK();
         _renderTask = task;
         FAIL_IF_ERR_FWD(_engine.begin(),

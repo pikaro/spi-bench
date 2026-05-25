@@ -119,7 +119,7 @@ class Master : public HasLifecycle<Master, MasterConfig>,
 
   private:
     ReturnCode _onBegin() {
-        (void)metrics();
+        prewarmMetrics();
         _defaultMutexTimeoutMs = config().transactionTimeoutMs;
         const auto &pins = config().pins;
         _log_i("Starting I2C master: bus=%u, clock=%lu Hz, sda=%d, scl=%d, "

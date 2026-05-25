@@ -1,0 +1,15 @@
+{
+  "animation": "SpokeSweep",
+  "duration_ms": 6000,
+  "layer": "Debug",
+  "frames": "0:300",
+  "mode": "pipeline",
+  "config": {
+    "baseHue": 0,
+    "hueStride": 16,
+    "value": 220,
+    "trailSpokes": 2,
+    "cycles": 1,
+    "markerValue": 255
+  }
+}

@@ -6,9 +6,15 @@ if [ "$#" -ne 1 ]; then
 fi
 
 ENV="${1}"
+SRC_ROOT="${ENV}"
+case "${ENV}" in
+gpu0 | gpu1)
+    SRC_ROOT="gpu"
+    ;;
+esac
 
 XTENSA="${HOME}/.platformio/packages/toolchain-xtensa-esp-elf/bin/xtensa-esp32-elf"
-OBJ=".pio/build/${ENV}/src/${ENV}/main.cpp.o"
+OBJ="build/${ENV}/src/${SRC_ROOT}/main.cpp.o"
 
 _section() {
     echo

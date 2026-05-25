@@ -1,0 +1,217 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import argparse
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+
+def repo_root() -> Path:
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return Path(result.stdout.strip())
+
+
+def reexec_in_venv(root: Path) -> None:
+    venv_python = root / ".venv" / "bin" / "python"
+    if not venv_python.exists():
+        return
+    if os.environ.get("TOTEM_MONITOR_EARLY_VENV") == "1":
+        return
+    if Path(sys.prefix).resolve() == (root / ".venv").resolve():
+        return
+
+    os.environ["TOTEM_MONITOR_EARLY_VENV"] = "1"
+    os.execv(str(venv_python), [str(venv_python), __file__, *sys.argv[1:]])
+
+
+ROOT = repo_root()
+reexec_in_venv(ROOT)
+sys.path.insert(0, str(ROOT / "bin"))
+
+try:
+    import serial
+except ImportError as exc:
+    raise SystemExit(
+        "monitor-early requires pyserial; run from the repo venv or install "
+        "the PlatformIO Python dependencies."
+    ) from exc
+
+from lib.monitor.ports import selected_port_env
+
+
+def parse_line_state(value: str) -> bool | None:
+    if value == "keep":
+        return None
+    if value == "0":
+        return False
+    if value == "1":
+        return True
+    raise argparse.ArgumentTypeError("expected one of: 0, 1, keep")
+
+
+def set_if_requested(ser: serial.Serial, *, dtr: bool | None, rts: bool | None) -> None:
+    if dtr is not None:
+        ser.dtr = dtr
+    if rts is not None:
+        ser.rts = rts
+
+
+def pulse_rts_reset(
+    ser: serial.Serial,
+    *,
+    idle_dtr: bool | None,
+    idle_rts: bool | None,
+    pre_delay: float,
+    hold: float,
+    post_delay: float,
+) -> None:
+    set_if_requested(ser, dtr=idle_dtr, rts=idle_rts)
+    time.sleep(pre_delay)
+    ser.rts = True
+    time.sleep(hold)
+    ser.rts = False if idle_rts is None else idle_rts
+    time.sleep(post_delay)
+
+
+def resolve_port(args: argparse.Namespace) -> str:
+    if args.port:
+        return args.port
+
+    env = args.environment or args.env
+    selected = selected_port_env(ROOT, env)
+    key = "ESPTOOL_PORT" if args.tty else "UPLOAD_PORT"
+    try:
+        return selected[key]
+    except KeyError as exc:
+        raise SystemExit(f"Port selector did not provide {key} for {env!r}") from exc
+
+
+def capture(args: argparse.Namespace) -> int:
+    port = resolve_port(args)
+    output_path = Path(args.output) if args.output else None
+    output = output_path.open("wb") if output_path else None
+    captured = 0
+
+    print(
+        "monitor-early: "
+        f"port={port} baud={args.baud} duration={args.duration:.3f}s "
+        f"reset={'none' if args.no_reset else args.reset_mode} "
+        f"idle-dtr={args.idle_dtr_label} idle-rts={args.idle_rts_label}",
+        file=sys.stderr,
+    )
+
+    try:
+        with serial.Serial(port, args.baud, timeout=args.read_timeout) as ser:
+            set_if_requested(ser, dtr=args.idle_dtr, rts=args.idle_rts)
+            time.sleep(args.open_delay)
+            if not args.no_reset:
+                if args.reset_mode == "rts":
+                    pulse_rts_reset(
+                        ser,
+                        idle_dtr=args.idle_dtr,
+                        idle_rts=args.idle_rts,
+                        pre_delay=args.reset_pre_delay,
+                        hold=args.reset_hold,
+                        post_delay=args.reset_post_delay,
+                    )
+                else:
+                    raise SystemExit(f"Unsupported reset mode: {args.reset_mode}")
+
+            end = time.monotonic() + args.duration
+            while time.monotonic() < end:
+                chunk = ser.read(args.chunk_size)
+                if not chunk:
+                    continue
+                captured += len(chunk)
+                if output is not None:
+                    output.write(chunk)
+                if args.raw:
+                    sys.stdout.buffer.write(chunk)
+                    sys.stdout.buffer.flush()
+                else:
+                    sys.stdout.write(chunk.decode(args.encoding, errors="replace"))
+                    sys.stdout.flush()
+    except KeyboardInterrupt:
+        print("\nmonitor-early: interrupted", file=sys.stderr)
+    finally:
+        if output is not None:
+            output.close()
+
+    print(f"\nmonitor-early: captured {captured} bytes", file=sys.stderr)
+    if args.require_output and captured == 0:
+        return 2
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Capture early ESP boot output with direct pyserial RTS/DTR control. "
+            "This intentionally bypasses `pio device monitor`."
+        )
+    )
+    parser.add_argument("env", nargs="?", default="master")
+    parser.add_argument("-e", "--environment", help="PlatformIO environment")
+    parser.add_argument("--port", help="serial port override")
+    parser.add_argument(
+        "--tty",
+        action="store_true",
+        help="use the selected /dev/tty.* port instead of /dev/cu.*",
+    )
+    parser.add_argument("-b", "--baud", type=int, default=921600)
+    parser.add_argument("-d", "--duration", type=float, default=8.0)
+    parser.add_argument("--open-delay", type=float, default=0.05)
+    parser.add_argument("--read-timeout", type=float, default=0.05)
+    parser.add_argument("--chunk-size", type=int, default=4096)
+    parser.add_argument("--no-reset", action="store_true")
+    parser.add_argument("--reset-mode", choices=("rts",), default="rts")
+    parser.add_argument("--reset-pre-delay", type=float, default=0.10)
+    parser.add_argument("--reset-hold", type=float, default=0.25)
+    parser.add_argument("--reset-post-delay", type=float, default=0.05)
+    parser.add_argument(
+        "--idle-dtr",
+        choices=("0", "1", "keep"),
+        default="1",
+        help=(
+            "DTR state to hold before/after reset; default 1 boots the app on "
+            "the observed ESP32-S3 USB Serial/JTAG boards"
+        ),
+    )
+    parser.add_argument(
+        "--idle-rts",
+        choices=("0", "1", "keep"),
+        default="0",
+        help="RTS state to hold before/after reset; default 0 releases reset",
+    )
+    parser.add_argument("--raw", action="store_true", help="write raw bytes")
+    parser.add_argument("--encoding", default="utf-8")
+    parser.add_argument("-o", "--output", help="write captured bytes to a file")
+    parser.add_argument(
+        "--require-output",
+        action="store_true",
+        help="exit 2 when no serial bytes were captured",
+    )
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
+    args = parser.parse_args()
+    args.idle_dtr_label = args.idle_dtr
+    args.idle_rts_label = args.idle_rts
+    args.idle_dtr = parse_line_state(args.idle_dtr)
+    args.idle_rts = parse_line_state(args.idle_rts)
+    return capture(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

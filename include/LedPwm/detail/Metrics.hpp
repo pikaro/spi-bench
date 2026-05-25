@@ -100,9 +100,6 @@ struct Metrics {
     static constexpr auto component = MetricsBackend::MetricComponent::LedPwm;
 };
 
-inline Metrics &metrics() {
-    static Metrics instance = Metrics::create();
-    return instance;
-}
+DEFINE_PREWARMED_METRICS_ACCESSORS(Metrics, metrics, prewarmMetrics)
 
 } // namespace Totem::LedPwm::detail

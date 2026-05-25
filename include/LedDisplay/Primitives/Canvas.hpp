@@ -42,8 +42,12 @@ class Canvas {
 
     void pixel(uint8_t spoke, uint8_t radial, HsvColor color,
                BlendOp op = BlendOp::MaxValue) {
+        if (spoke >= Config::spokeCount || radial >= Config::ringCount) {
+            return;
+        }
         const auto local = _logicalToLocal[logicalIndex(spoke, radial)];
-        if (local == invalidLocalPixel) {
+        if (local == invalidLocalPixel ||
+            static_cast<size_t>(local) >= _frame.size()) {
             return;
         }
         auto &dst = _frame[static_cast<size_t>(local)];

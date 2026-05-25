@@ -6,10 +6,10 @@ areas.
 
 ## Compiler diagnostics
 
-- `main.cpp.cpp.sarif` in the project root may contain compiler diagnostics in
-    SARIF format when a build or IDE integration produced one. Treat it as a
-    diagnostic artifact to inspect when command-line output is truncated, not as
-    authoritative source state.
+- `build/<env>/sarif/` may contain compiler diagnostics in SARIF format when a
+    build or IDE integration produced one. Treat these as diagnostic artifacts
+    to inspect when command-line output is truncated, not as authoritative
+    source state.
 
 ## Top-Level Layout
 

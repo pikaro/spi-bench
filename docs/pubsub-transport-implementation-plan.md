@@ -495,7 +495,7 @@ At the time of this handoff:
 - the latest successful build reported:
   - RAM: `45.3%` (`148452 / 327680`)
   - Flash: `38.2%` (`776061 / 2031616`)
-- if PlatformIO truncates diagnostics, inspect `main.cpp.cpp.sarif`
+- if PlatformIO truncates diagnostics, inspect `build/<env>/sarif/`
 
 ## Current Known Good Build / Runtime State
 
@@ -529,8 +529,8 @@ pio run -e master
 Use compiler diagnostics if PlatformIO truncates errors:
 
 ```bash
-rg -n "error" main.cpp.cpp.sarif
-sed -n '1,220p' main.cpp.cpp.sarif
+rg -n "error" build/master/sarif/*.sarif
+sed -n '1,220p' build/master/sarif/*.sarif
 ```
 
 ## Files Most Relevant For The Next Step
@@ -589,4 +589,4 @@ When resuming after context loss:
 6. confirm whether the current single-downstream direct-relay fast path is
    sufficient or should be widened
 7. rebuild with `pio run -e master`
-8. if diagnostics are truncated, inspect `main.cpp.cpp.sarif`
+8. if diagnostics are truncated, inspect `build/<env>/sarif/`

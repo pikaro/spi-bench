@@ -46,7 +46,7 @@ class Central : public HasLifecycle<Central, Config>,
             return OK();
         }
 
-        (void)metrics();
+        prewarmMetrics();
         DEFAULT_TASK();
         _task = task;
         INIT_QUEUE_OR_FAIL(_notificationQueue);

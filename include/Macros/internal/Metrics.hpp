@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Macros/internal/Fail.hpp"
+#include <optional>
 
 #define REGISTER_METRICS_GROUP(cls, group)                                     \
     ABORT_IF_UNEXPECTED(group,                                                 \
@@ -45,3 +46,20 @@
                 "Failed to set metric " #metricName);                          \
         }                                                                      \
     } while (0)
+
+// Avoid function-local static guards in hot paths; prewarm from begin code.
+#define DEFINE_PREWARMED_METRICS_ACCESSORS(Type, accessor, prewarm)            \
+    namespace metrics_storage {                                                \
+    inline std::optional<Type> CONCAT(accessor, Instance);                     \
+    }                                                                          \
+    inline void prewarm() {                                                    \
+        if (metrics_storage::CONCAT(accessor, Instance).has_value()) {         \
+            return;                                                            \
+        }                                                                      \
+        metrics_storage::CONCAT(accessor, Instance).emplace(Type::create());   \
+    }                                                                          \
+    inline Type &accessor() {                                                  \
+        ABORT_IF(!metrics_storage::CONCAT(accessor, Instance).has_value(),     \
+                 "Metrics accessor " #accessor " used before " #prewarm);    \
+        return *metrics_storage::CONCAT(accessor, Instance);                   \
+    }

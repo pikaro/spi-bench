@@ -9,8 +9,7 @@
 namespace Totem::LedDisplay::Renderers {
 
 struct GenericRenderer {
-    static constexpr uint8_t channelMax =
-        std::numeric_limits<uint8_t>::max();
+    static constexpr uint8_t channelMax = std::numeric_limits<uint8_t>::max();
     static constexpr uint16_t hueStepCount =
         static_cast<uint16_t>(channelMax) + 1U;
     static constexpr uint8_t hsvRegionCount = 6U;
@@ -46,15 +45,14 @@ struct GenericRenderer {
             return src;
         case BlendOp::MaxValue:
         default:
-            return src.value > dst.value ? src : dst;
+            return src.value >= dst.value ? src : dst;
         }
     }
 
     [[nodiscard]] static constexpr RgbColor hsvToRgb(HsvColor hsv) {
         if (hsv.saturation == 0) {
-            return RgbColor{.red = hsv.value,
-                            .green = hsv.value,
-                            .blue = hsv.value};
+            return RgbColor{
+                .red = hsv.value, .green = hsv.value, .blue = hsv.value};
         }
 
         const uint8_t region = hsv.hue / hsvRegionWidth;
@@ -66,8 +64,7 @@ struct GenericRenderer {
         const uint8_t t = scale8(
             hsv.value,
             channelMax - scale8(hsv.saturation,
-                                static_cast<uint8_t>(channelMax -
-                                                     remainder)));
+                                static_cast<uint8_t>(channelMax - remainder)));
 
         switch (region) {
         case 0:

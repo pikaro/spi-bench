@@ -104,7 +104,7 @@ class Slave : public HasLifecycle<Slave, SlaveConfig>,
 
   private:
     ReturnCode _onBegin() {
-        (void)metrics();
+        prewarmMetrics();
 
         _log_i("SPI slave initializing device");
         FAIL_IF_ERR_FWD(_device.init(config()),

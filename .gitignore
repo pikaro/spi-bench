@@ -1,6 +1,9 @@
 .pio
+build/
+.build/
 .cache
 compiledb/
+dependencies.lock
 managed_components/
 sdkconfig.*
 !sdkconfig.stack.*

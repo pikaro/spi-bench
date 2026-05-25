@@ -7,6 +7,7 @@
 #include "LedDisplay/Animations/CenterWaveCommands.hpp"
 #include "LedDisplay/Animations/DiagnosticFillCommands.hpp"
 #include "LedDisplay/Animations/FftReactiveCommands.hpp"
+#include "LedDisplay/Animations/SpokeSweepCommands.hpp"
 #include "LedDisplay/Animations/WheelIndicatorCommands.hpp"
 #include "LedDisplay/Interfaces/AnimationCommandFactory.hpp"
 #include "Macros/Facade.hpp"
@@ -20,7 +21,7 @@
 #include <expected>
 #include <limits>
 
-inline CommandDesc helloCmd = {
+inline constinit CommandDesc helloCmd = {
     .name = "hello",
     .description = "Prints Hello, World!",
     .args = {},
@@ -111,8 +112,7 @@ inline ReturnCode handleHelp(CommandDesc::ParsedArgs /*unused*/, void *ctx) {
 }
 
 inline std::expected<uint32_t, ReturnCode>
-optionalU32(CommandDesc::ParsedArgs args, size_t index,
-            uint32_t defaultValue) {
+optionalU32(CommandDesc::ParsedArgs args, size_t index, uint32_t defaultValue) {
     auto parsed = args.get<uint32_t>(index);
     if (parsed.ok) {
         return parsed.value;
@@ -151,18 +151,19 @@ inline ReturnCode publishCommand(
 
 inline ReturnCode handleAnimRoot(CommandDesc::ParsedArgs /*unused*/,
                                  void * /*unused*/) {
-    _log_i("Use /anim wave|fill|fft|wheel|wheel-update|stop|hue|rot");
+    _log_i("Use /anim wave|fill|fft|sweep|wheel|wheel-update|stop|hue|rot");
     return OK();
 }
 
 inline ReturnCode handleAnimWave(CommandDesc::ParsedArgs args,
                                  void * /*unused*/) {
     auto config = Totem::LedDisplay::Animations::CenterWaveConfig{};
-    FAIL_IF_UNEXPECTED_FWD(duration,
-                           optionalU32(args, 0,
-                                       Totem::LedDisplay::Animations::
-                                           CenterWave::defaultLifetimeMs),
-                           "Invalid animation duration argument");
+    FAIL_IF_UNEXPECTED_FWD(
+        duration,
+        optionalU32(
+            args, 0,
+            Totem::LedDisplay::Animations::CenterWave::defaultLifetimeMs),
+        "Invalid animation duration argument");
     FAIL_IF_UNEXPECTED_FWD(hue, optionalU32(args, 1, config.hue),
                            "Invalid animation hue argument");
     FAIL_IF_UNEXPECTED_FWD(value, optionalU32(args, 2, config.value),
@@ -182,18 +183,20 @@ inline ReturnCode handleAnimWave(CommandDesc::ParsedArgs args,
         Totem::LedDisplay::Animations::CenterWave::minimumPeakRings);
     config.wake = clampU8(wake);
 
-    return publishCommand(Totem::LedDisplay::Animations::CenterWave::makeCommand(
-        config, 0, clampU16(duration)));
+    return publishCommand(
+        Totem::LedDisplay::Animations::CenterWave::makeCommand(
+            config, 0, clampU16(duration)));
 }
 
 inline ReturnCode handleAnimFill(CommandDesc::ParsedArgs args,
                                  void * /*unused*/) {
     auto config = Totem::LedDisplay::Animations::DiagnosticFillConfig{};
-    FAIL_IF_UNEXPECTED_FWD(duration,
-                           optionalU32(args, 0,
-                                       Totem::LedDisplay::Animations::
-                                           DiagnosticFill::defaultLifetimeMs),
-                           "Invalid animation duration argument");
+    FAIL_IF_UNEXPECTED_FWD(
+        duration,
+        optionalU32(
+            args, 0,
+            Totem::LedDisplay::Animations::DiagnosticFill::defaultLifetimeMs),
+        "Invalid animation duration argument");
     FAIL_IF_UNEXPECTED_FWD(hue, optionalU32(args, 1, config.hue),
                            "Invalid animation hue argument");
     FAIL_IF_UNEXPECTED_FWD(value, optionalU32(args, 2, config.value),
@@ -210,11 +213,12 @@ inline ReturnCode handleAnimFill(CommandDesc::ParsedArgs args,
 inline ReturnCode handleAnimFft(CommandDesc::ParsedArgs args,
                                 void * /*unused*/) {
     auto config = Totem::LedDisplay::Animations::FftReactiveConfig{};
-    FAIL_IF_UNEXPECTED_FWD(duration,
-                           optionalU32(args, 0,
-                                       Totem::LedDisplay::Animations::
-                                           FftReactive::defaultLifetimeMs),
-                           "Invalid animation duration argument");
+    FAIL_IF_UNEXPECTED_FWD(
+        duration,
+        optionalU32(
+            args, 0,
+            Totem::LedDisplay::Animations::FftReactive::defaultLifetimeMs),
+        "Invalid animation duration argument");
     FAIL_IF_UNEXPECTED_FWD(hue, optionalU32(args, 1, config.baseHue),
                            "Invalid animation hue argument");
     FAIL_IF_UNEXPECTED_FWD(value, optionalU32(args, 2, config.valueScale),
@@ -228,24 +232,56 @@ inline ReturnCode handleAnimFft(CommandDesc::ParsedArgs args,
             config, 0, clampU16(duration)));
 }
 
+inline ReturnCode handleAnimSweep(CommandDesc::ParsedArgs args,
+                                  void * /*unused*/) {
+    auto config = Totem::LedDisplay::Animations::SpokeSweepConfig{};
+    FAIL_IF_UNEXPECTED_FWD(
+        duration,
+        optionalU32(
+            args, 0,
+            Totem::LedDisplay::Animations::SpokeSweep::defaultLifetimeMs),
+        "Invalid animation duration argument");
+    FAIL_IF_UNEXPECTED_FWD(baseHue, optionalU32(args, 1, config.baseHue),
+                           "Invalid animation hue argument");
+    FAIL_IF_UNEXPECTED_FWD(value, optionalU32(args, 2, config.value),
+                           "Invalid animation value argument");
+    FAIL_IF_UNEXPECTED_FWD(trailSpokes,
+                           optionalU32(args, 3, config.trailSpokes),
+                           "Invalid animation trail argument");
+    FAIL_IF_UNEXPECTED_FWD(cycles, optionalU32(args, 4, config.cycles),
+                           "Invalid animation cycle argument");
+    FAIL_IF_UNEXPECTED_FWD(markerValue,
+                           optionalU32(args, 5, config.markerValue),
+                           "Invalid animation marker argument");
+
+    config.baseHue = clampU8(baseHue);
+    config.value = clampU8(value);
+    config.trailSpokes = clampU8(trailSpokes);
+    config.cycles = clampU8(cycles);
+    config.markerValue = clampU8(markerValue);
+
+    return publishCommand(
+        Totem::LedDisplay::Animations::SpokeSweep::makeCommand(
+            config, Totem::LedDisplay::Animations::SpokeSweep::defaultRequestId,
+            clampU16(duration)));
+}
+
 inline std::expected<Totem::LedDisplay::Animations::WheelIndicatorConfig,
                      ReturnCode>
 parseWheelIndicatorConfig(CommandDesc::ParsedArgs args, size_t firstIndex) {
     auto config = Totem::LedDisplay::Animations::WheelIndicatorConfig{};
-    FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(hue, optionalU32(args, firstIndex,
-                                                      config.hue),
-                           "Invalid animation hue argument");
-    FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(value, optionalU32(args, firstIndex + 1U,
-                                                        config.value),
-                           "Invalid animation value argument");
-    FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(spokes,
-                                      optionalU32(args, firstIndex + 2U,
-                                                  config.spokes),
-                           "Invalid animation spokes argument");
-    FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(falloff,
-                                      optionalU32(args, firstIndex + 3U,
-                                                  config.falloff),
-                           "Invalid animation falloff argument");
+    FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(hue,
+                                      optionalU32(args, firstIndex, config.hue),
+                                      "Invalid animation hue argument");
+    FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
+        value, optionalU32(args, firstIndex + 1U, config.value),
+        "Invalid animation value argument");
+    FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
+        spokes, optionalU32(args, firstIndex + 2U, config.spokes),
+        "Invalid animation spokes argument");
+    FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
+        falloff, optionalU32(args, firstIndex + 3U, config.falloff),
+        "Invalid animation falloff argument");
 
     config.hue = clampU8(hue);
     config.value = clampU8(value);
@@ -258,17 +294,24 @@ parseWheelIndicatorConfig(CommandDesc::ParsedArgs args, size_t firstIndex) {
 
 inline ReturnCode handleAnimWheel(CommandDesc::ParsedArgs args,
                                   void * /*unused*/) {
-    FAIL_IF_UNEXPECTED_FWD(duration,
-                           optionalU32(args, 0,
-                                       Totem::LedDisplay::Animations::
-                                           WheelIndicator::defaultLifetimeMs),
-                           "Invalid animation duration argument");
+    FAIL_IF_UNEXPECTED_FWD(
+        duration,
+        optionalU32(
+            args, 0,
+            Totem::LedDisplay::Animations::WheelIndicator::defaultLifetimeMs),
+        "Invalid animation duration argument");
     FAIL_IF_UNEXPECTED_FWD(config, parseWheelIndicatorConfig(args, 1),
                            "Invalid wheel indicator config arguments");
+    FAIL_IF_UNEXPECTED_FWD(
+        requestId,
+        optionalU32(
+            args, 5,
+            Totem::LedDisplay::Animations::WheelIndicator::defaultRequestId),
+        "Invalid wheel indicator request ID argument");
 
     return publishCommand(
         Totem::LedDisplay::Animations::WheelIndicator::makeCommand(
-            config, 0, clampU16(duration)));
+            config, clampU16(requestId), clampU16(duration)));
 }
 
 inline ReturnCode handleAnimWheelUpdate(CommandDesc::ParsedArgs args,
@@ -277,9 +320,9 @@ inline ReturnCode handleAnimWheelUpdate(CommandDesc::ParsedArgs args,
                            "Invalid wheel indicator update arguments");
     FAIL_IF_UNEXPECTED_FWD(
         requestId,
-        optionalU32(args, 4,
-                    Totem::LedDisplay::Animations::WheelIndicator::
-                        defaultRequestId),
+        optionalU32(
+            args, 4,
+            Totem::LedDisplay::Animations::WheelIndicator::defaultRequestId),
         "Invalid wheel indicator request ID argument");
 
     return publishCommand(
@@ -300,10 +343,9 @@ inline ReturnCode handleAnimHue(CommandDesc::ParsedArgs args,
     auto parsed = args.get<uint32_t>(0);
     FAIL_IF_NOT(parsed.ok, ERR(CoreError, InvalidArgument),
                 "Invalid hue offset argument");
-    FAIL_IF_UNEXPECTED_FWD(cmd,
-                           Totem::LedDisplay::makeHueOffsetCommand(
-                               rawAngleU8(parsed.value)),
-                           "Failed to build LED hue offset command");
+    FAIL_IF_UNEXPECTED_FWD(
+        cmd, Totem::LedDisplay::makeHueOffsetCommand(rawAngleU8(parsed.value)),
+        "Failed to build LED hue offset command");
     return Totem::LedDisplay::publishAnimationCommand(cmd);
 }
 
@@ -321,7 +363,7 @@ inline ReturnCode handleAnimRot(CommandDesc::ParsedArgs args,
 
 } // namespace Totem::Support::detail
 
-inline std::array<CommandDesc, 8> animSubcommands{{
+inline constinit std::array<CommandDesc, 9> animSubcommands{{
     {
         .name = "wave",
         .description = "Publish a center wave animation",
@@ -365,6 +407,24 @@ inline std::array<CommandDesc, 8> animSubcommands{{
         .subcommands = {},
     },
     {
+        .name = "sweep",
+        .description = "Publish the spoke sweep diagnostic animation",
+        .args = {Totem::CommandBackend::detail::arg<uint32_t>(
+                     "durationMs", CommandDesc::ArgRequirement::Optional),
+                 Totem::CommandBackend::detail::arg<uint32_t>(
+                     "baseHue", CommandDesc::ArgRequirement::Optional),
+                 Totem::CommandBackend::detail::arg<uint32_t>(
+                     "value", CommandDesc::ArgRequirement::Optional),
+                 Totem::CommandBackend::detail::arg<uint32_t>(
+                     "trailSpokes", CommandDesc::ArgRequirement::Optional),
+                 Totem::CommandBackend::detail::arg<uint32_t>(
+                     "cycles", CommandDesc::ArgRequirement::Optional),
+                 Totem::CommandBackend::detail::arg<uint32_t>(
+                     "markerValue", CommandDesc::ArgRequirement::Optional)},
+        .handler = Totem::Support::detail::handleAnimSweep,
+        .subcommands = {},
+    },
+    {
         .name = "wheel",
         .description = "Publish the persistent wheel indicator animation",
         .args = {Totem::CommandBackend::detail::arg<uint32_t>(
@@ -376,7 +436,9 @@ inline std::array<CommandDesc, 8> animSubcommands{{
                  Totem::CommandBackend::detail::arg<uint32_t>(
                      "spokes", CommandDesc::ArgRequirement::Optional),
                  Totem::CommandBackend::detail::arg<uint32_t>(
-                     "falloff", CommandDesc::ArgRequirement::Optional)},
+                     "falloff", CommandDesc::ArgRequirement::Optional),
+                 Totem::CommandBackend::detail::arg<uint32_t>(
+                     "requestId", CommandDesc::ArgRequirement::Optional)},
         .handler = Totem::Support::detail::handleAnimWheel,
         .subcommands = {},
     },
@@ -420,7 +482,7 @@ inline std::array<CommandDesc, 8> animSubcommands{{
     },
 }};
 
-inline CommandDesc animCmd = {
+inline constinit CommandDesc animCmd = {
     .name = "anim",
     .description = "Publish LED display commands over PubSub",
     .args = {},
@@ -428,7 +490,7 @@ inline CommandDesc animCmd = {
     .subcommands = animSubcommands,
 };
 
-inline CommandDesc helpCmd = {
+inline constinit CommandDesc helpCmd = {
     .needsContext = true,
     .name = "help",
     .description = "Output registered command help",

@@ -373,6 +373,7 @@ dependencies = [
     { name = "esp-idf-size" },
     { name = "platformio" },
     { name = "pydantic" },
+    { name = "pyserial" },
 ]
 
 [package.metadata]
@@ -380,6 +381,7 @@ requires-dist = [
     { name = "esp-idf-size", specifier = ">=2.1.0" },
     { name = "platformio", specifier = ">=6.1.19" },
     { name = "pydantic", specifier = ">=2.13.0" },
+    { name = "pyserial", specifier = ">=3.5" },
 ]
 
 [[package]]

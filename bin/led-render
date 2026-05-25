@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT=$(git rev-parse --show-toplevel)
+BIN="$ROOT/.build/led-render/led-render"
+
+"$ROOT/bin/led-render-build" >/dev/null
+exec "$BIN" "$@"

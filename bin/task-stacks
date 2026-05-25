@@ -137,7 +137,7 @@ def main() -> int:
     else:
         print(f"No configured task-stack table for {args.env}")
 
-    elf = root / ".pio" / "build" / args.env / "firmware.elf"
+    elf = root / "build" / args.env / "firmware.elf"
     if not elf.exists():
         print(f"\nFirmware ELF not found: {elf}")
         return 0

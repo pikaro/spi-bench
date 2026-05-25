@@ -1,0 +1,163 @@
+# LED Offline Renderer
+
+This tool renders production LED animations on the host without connecting to
+ESP32 devices. It is intended for debugging animation behavior, layer blending,
+topology mapping, and flicker/discontinuity issues before hardware validation.
+
+## Commands
+
+Build and render:
+
+```sh
+bin/led-render \
+  --config tools/led-render/examples/center-wave-green.json \
+  --output /tmp/center-wave.tled
+```
+
+Inspect:
+
+```sh
+bin/led-analyze summary /tmp/center-wave.tled --stats
+bin/led-analyze flicker /tmp/center-wave.tled --hue-ping-pong
+bin/led-analyze pixel /tmp/center-wave.tled --spoke 3 --radial 12
+bin/led-analyze region /tmp/center-wave.tled --spokes 0:4 --radials 10:20
+```
+
+Export a still frame without `pygame`:
+
+```sh
+bin/led-analyze capture /tmp/center-wave.tled --frame 40 --output /tmp/frame.ppm --glare
+```
+
+Interactive playback uses `pygame`:
+
+```sh
+bin/led-view /tmp/center-wave.tled --glare
+```
+
+The default viewer layout is the analysis-oriented spoke/ring heatmap. Use the
+radial layout for a more realistic umbrella preview with circular LEDs,
+inter-LED spacing, and optional glow:
+
+```sh
+bin/led-view /tmp/center-wave.tled --layout radial --scale 10 --spacing 1.35 --glare
+bin/led-view /tmp/center-wave.tled --capture /tmp/frame.png --frame 80 --layout radial --glare
+```
+
+Frame labels are enabled by default in both playback and capture. Disable them
+with `--no-frame-label`.
+
+Playback controls:
+
+- Space: play/pause
+- Left/right: step frames while paused
+- Up/down: playback speed
+- `q` or Escape: quit
+
+The same pieces are available from Python:
+
+```python
+from led_render import Trace, run_render
+from led_render.analysis import detect_flicker
+
+run_render("tools/led-render/examples/center-wave-green.json", "/tmp/center.tled")
+with Trace("/tmp/center.tled") as trace:
+    print(detect_flicker(trace))
+```
+
+Python dependencies:
+
+- Required for analysis and frame access: `numpy`
+- Required for interactive playback and PNG/JPEG capture: `pygame`
+
+The wrapper scripts use `python3` from the shell path. They do not activate the
+project venv, because the viewer dependency may be supplied by the system/Nix
+Python environment.
+
+## Configuration
+
+The C++ renderer accepts JSON. A single animation can be rendered from the root
+object:
+
+```json
+{
+  "animation": "CenterWave",
+  "duration_ms": 1200,
+  "layer": "Effect",
+  "frames": "0:180",
+  "mode": "pipeline",
+  "config": {
+    "hue": 96,
+    "saturation": 255,
+    "value": 180,
+    "rise": 2,
+    "peak": 1,
+    "wake": 5
+  }
+}
+```
+
+Multiple animation requests can be sequenced with `animations`. Each entry has
+the same `animation`, `config`, `start_ms`, `duration_ms`, and `layer` fields.
+This is enough to reproduce adjacent-wave cases without building a full PubSub
+script runner.
+
+Input snapshots are supplied under `inputs`:
+
+```json
+{
+  "inputs": {
+    "wheel": {"position": 8192, "delta": 0},
+    "fft": {"subBass": 64, "bass": 180, "lowMid": 220, "mid": 160}
+  }
+}
+```
+
+Missing FFT bands default to zero.
+
+## Registry Generation
+
+`bin/led-render-build` runs `tools/led-render/generate_registry.py` before
+compiling the host renderer. The generator scans
+`include/LedDisplay/Animations/*.hpp` and discovers animation classes by the
+current production convention:
+
+- one `struct WIRE_MSG NameConfig`
+- one `struct Name` with `NameConfig config{}`
+- static `defaultLayer`, `defaultLifetimeMs`, and `defaultStyle`
+- a `render(AnimationRenderContext &ctx)` method
+
+The generated registry lives under `tools/led-render/generated/` and is not the
+source of truth. Adding an animation should require adding the animation header,
+not editing host renderer dispatch code.
+
+## Trace Format
+
+Traces use the `.tled` binary format:
+
+```text
+TraceHeader
+metadata JSON
+frame 0 planes
+frame 1 planes
+...
+```
+
+Pixels are stored in logical `(spoke, radial)` order. Each plane stores one
+three-byte pixel after another. Initial planes are:
+
+- `hsv_final`: composed firmware-style HSV frame
+- `rgb_final`: deterministic host RGB conversion through `GenericRenderer`
+- `hsv_scratch`: optional last animation scratch frame, enabled with
+  `--include-scratch`
+
+The metadata JSON records the source config, render mode, animation names,
+frame range, topology, and color backend.
+
+## Fidelity Notes
+
+The renderer uses production animation, primitive, layer stack, compositor,
+topology, and `GenericRenderer` code. It does not yet emulate FastLED temporal
+dithering. A flicker visible in `hsv_final` is likely in animation/composition
+logic. A flicker only visible on hardware still needs FastLED or electrical
+validation.

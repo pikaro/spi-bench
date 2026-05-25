@@ -155,7 +155,8 @@ void app_main() {
         const auto nowMs = ::platform::get_time();
         (void)core.work(nowMs);
         (void)MasterLedBringup::work(nowMs);
-        (void)MasterOrchestration::work(nowMs);
+        (void)MasterOrchestration::work(
+            nowMs, MasterLedBringup::normalOperationAllowed(nowMs));
 
         ::platform::delay(::platform::ms_to_ticks(1));
     }

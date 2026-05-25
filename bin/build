@@ -7,11 +7,69 @@ cd "$REPO_ROOT" || {
 }
 . .venv/bin/activate
 
-RET=0
-pio run "$@" || RET=$?
+declare -a ENVS=()
+declare -a PASSTHROUGH=()
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+    -e | --environment)
+        if [ "$#" -lt 2 ]; then
+            echo "Missing value for $1" >&2
+            exit 2
+        fi
+        ENVS+=("$2")
+        shift 2
+        ;;
+    --environment=*)
+        if [ -z "${1#--environment=}" ]; then
+            echo "Missing value for --environment" >&2
+            exit 2
+        fi
+        ENVS+=("${1#--environment=}")
+        shift
+        ;;
+    *)
+        PASSTHROUGH+=("$1")
+        shift
+        ;;
+    esac
+done
 
-find . -mindepth 1 -maxdepth 1 -type f -name '*.sarif' -and -not -name 'main.cpp.cpp.sarif' -delete
-cat main.cpp.cpp.sarif | jq >/tmp/sarif.json
-mv /tmp/sarif.json main.cpp.cpp.sarif
+collect_sarif() {
+    local env_name="$1"
+    local sarif_dir="build/sarif"
+    if [ -n "${env_name}" ]; then
+        sarif_dir="build/${env_name}/sarif"
+    fi
+
+    if compgen -G "*.sarif" >/dev/null; then
+        mkdir -p "${sarif_dir}"
+        for sarif in *.sarif; do
+            if jq . "${sarif}" >"${sarif_dir}/${sarif}" 2>/dev/null; then
+                rm -f "${sarif}"
+            else
+                mv "${sarif}" "${sarif_dir}/${sarif}"
+            fi
+        done
+    fi
+}
+
+RET=0
+if [ "${#ENVS[@]}" -gt 1 ]; then
+    for env_name in "${ENVS[@]}"; do
+        pio run -e "${env_name}" "${PASSTHROUGH[@]}" || RET=$?
+        collect_sarif "${env_name}"
+        if [ "${RET}" -ne 0 ]; then
+            break
+        fi
+    done
+else
+    if [ "${#ENVS[@]}" -eq 1 ]; then
+        pio run -e "${ENVS[0]}" "${PASSTHROUGH[@]}" || RET=$?
+        collect_sarif "${ENVS[0]}"
+    else
+        pio run "${PASSTHROUGH[@]}" || RET=$?
+        collect_sarif ""
+    fi
+fi
 
 exit $RET

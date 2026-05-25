@@ -83,7 +83,7 @@ class Master : public HasLifecycle<Master, MasterConfig>,
 
   private:
     ReturnCode _onBegin() {
-        (void)metrics();
+        prewarmMetrics();
 
         _log_i("SPI master initializing bus");
         FAIL_IF_ERR(_bus.init(config().bus), ERR(CoreError, OperationFailed),

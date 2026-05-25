@@ -1,10 +1,10 @@
 PIO_ENV ?= master
 COMPILE_DB := compiledb/$(PIO_ENV)/compile_commands.json
-ENV_DATA := .pio/build/$(PIO_ENV)/idedata.json
+ENV_DATA := build/$(PIO_ENV)/idedata.json
 WIRE_OUT := include/Generated/Wire
 BINDINGS_OUT := include/Generated/Bindings
 
-.PHONY: wire wire-clean bindings bindings-clean
+.PHONY: wire wire-clean bindings bindings-clean led-render-registry
 
 $(COMPILE_DB):
 	pio run -e $(PIO_ENV) -t compiledb
@@ -24,5 +24,8 @@ bindings: $(COMPILE_DB) $(ENV_DATA)
 
 bindings-clean:
 	rm -rf $(BINDINGS_OUT)
+
+led-render-registry:
+	python3 tools/led-render/generate_registry.py --root . --out tools/led-render/generated/AnimationRegistry.hpp
 
 all: wire bindings

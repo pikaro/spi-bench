@@ -22,4 +22,4 @@ io)
     ;;
 esac
 
-"${GDB}" ".pio/build/${ENV}/firmware.elf" "$@"
+"${GDB}" "build/${ENV}/firmware.elf" "$@"

@@ -8,4 +8,4 @@ fi
 ENV="$1"
 DEP="$2"
 
-jq -r --arg dep "$DEP" '.build_component_info | to_entries[] | select((.value.reqs + .value.priv_reqs) | index($dep)) | .key' ".pio/build/${ENV}/project_description.json"
+jq -r --arg dep "$DEP" '.build_component_info | to_entries[] | select((.value.reqs + .value.priv_reqs) | index($dep)) | .key' "build/${ENV}/project_description.json"

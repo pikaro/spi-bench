@@ -115,7 +115,7 @@ class BleWheel : public HasLifecycle<BleWheel, BleWheelConfig>,
 
   private:
     ReturnCode _onBegin() {
-        (void)metrics();
+        prewarmMetrics();
         FAIL_IF_NOT(PubSubService::configured(), ERR(InvalidState),
                     "PubSub must be configured before %s", name);
         _lastKnown = false;

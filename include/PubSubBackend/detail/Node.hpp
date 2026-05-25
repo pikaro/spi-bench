@@ -197,7 +197,7 @@ class Node : public HasLifecycle<Node, Config>,
 
   private:
     ReturnCode _onBegin() {
-        (void)metrics(); // Initialize metrics before any logging
+        prewarmMetrics(); // Initialize metrics before any logging
         DEFAULT_TASK();
         _taskKey = task;
         INIT_QUEUE_OR_FAIL(_publishQueue);

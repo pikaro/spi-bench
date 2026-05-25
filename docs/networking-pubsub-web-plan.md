@@ -6,8 +6,9 @@ interface. It is intentionally a planning note, not an implementation contract.
 
 ## Current Context
 
-- The current project has no active WiFi, socket, HTTP server, or WebSocket
-  implementation.
+- At original drafting time, the project had no active WiFi, socket, HTTP
+  server, or WebSocket implementation. Phase 1 has since added and validated
+  master WiFi/socket participation; HTTP/WebSocket remains later scope.
 - The master node is the intended owner of WiFi and central coordination.
 - The active firmware shape is static-oriented, modular, and based on small
   components with `Facade.hpp`, optional `Interfaces/`, and `detail/`
@@ -45,8 +46,9 @@ Non-blocking assumptions:
 - WiFi station and AP credentials can start in ignored master-local static
   config, with tracked example structure only. NVS-backed storage/provisioning
   can be added later if needed.
-- UDP initially uses fixed endpoint or broadcast-style single-peer semantics,
-  not discovery, NAT traversal, or arbitrary endpoint fanout.
+- UDP initially uses one learned peer: the MCU listens on UDP port 2026 and the
+  first valid sender becomes the active peer. No NAT traversal, broadcast fanout,
+  or multi-peer endpoint routing is part of Phase 2.
 - Host-originated PubSub frames may set `timestampUs = 0` until host/device time
   synchronization is deliberately implemented.
 
@@ -148,27 +150,33 @@ Phase 1 risks:
 - Same-network UDP/TCP validation depends on the host and MCU actually sharing a
   routable subnet. Current host-on-guest validation proves TCP in both
   directions and UDP replies to MCU-originated flows, but unsolicited
-  host-to-MCU UDP still times out on the guest WiFi. The Phase 2 single-peer UDP
-  transport should account for networks that appear stateful for station UDP
-  traffic, for example by having the MCU send an initial heartbeat to the
-  configured peer before expecting return traffic.
+  host-to-MCU UDP still times out on the guest WiFi. Phase 2 treats that
+  host-to-MCU timeout as a blocker because the MCU learns the active peer from
+  the first valid sender to UDP port 2026.
 
 ## Phase 2: UDP PubSub And Host Participant
+
+Working implementation plan: `docs/networking-phase2-implementation-plan.md`.
 
 Goal:
 
 - Add a single-peer UDP transport for PubSub.
 - Let the device send PubSub frames to one UDP peer on the same WiFi network.
 - Let the device receive PubSub frames from that UDP peer.
-- Build relevant C++ wire components for host operation.
-- Add a Python script that participates in PubSub through those components.
+- Build host-side C++ PubSub components for send/receive operation.
+- Add a Python notify bridge with async per-type handlers and Pydantic payload
+  models.
+- Start with a ship-bell/button handler that logs one line, while keeping the
+  host trusted for arbitrary generated PubSub publish/subscribe.
 
 UDP transport direction:
 
 - Model initial UDP as `PointToPoint`, not `SharedBusRouter`.
 - The UDP transport represents one remote routing domain.
-- It may be configured with one fixed remote endpoint, or learn one peer from
-  first valid ingress if that behavior is explicitly chosen.
+- The MCU listens on UDP port 2026 and learns the active peer from the first
+  valid sender to that port.
+- The transport sends periodic keepalives and resets peer state when the learned
+  peer goes stale.
 - Multi-peer subscription tracking by IP endpoint is out of scope.
 
 PubSub fit:
@@ -177,6 +185,8 @@ PubSub fit:
   receive raw frames, poll ingress, and support direct raw forwarding.
 - `BaseTransport` can likely be reused if the UDP link exposes send/receive
   callbacks with bounded packet storage.
+- UDP socket receive should run in its own bounded transport task; PubSub should
+  drain already-received frames instead of blocking on socket receive.
 - PubSub's current one-hot peer model is not a good fit for arbitrary IP
   endpoint fanout. Avoid expanding it for Phase 2.
 
@@ -187,16 +197,18 @@ Host build direction:
 - Host operation needs enough platform shims for error/log/CRC/time paths used
   by `Codec` and `SerDe`, or a small host-safe split around the serialization
   code.
-- Prefer exposing a small C ABI around SerDe/Codec for Python initially.
-  Adding pybind11 or similar would be a new dependency decision.
+- Python package dependencies are acceptable when useful for the host bridge.
+  Pydantic should be used for Python-facing wire payload models.
 
 Python participant direction:
 
-- Use UDP sockets from Python.
-- Use the native C++ component binding for frame encode/decode.
+- Use C++ host PubSub code for UDP send/receive and frame encode/decode.
+- Bridge decoded PubSub messages into async Python handlers by generated message
+  type.
 - Represent packets with `timestampUs = 0` until time sync exists.
-- Start with subscribe/publish flows for a small known topic set before trying
-  broad introspection.
+- Start with a ship-bell/button subscription handler that emits a log line.
+- Keep the host trusted: arbitrary generated PubSub messages should be possible
+  from the host.
 
 Phase 2 risks:
 
@@ -208,6 +220,8 @@ Phase 2 risks:
   should be explicit for control-plane expectations.
 - Subscription replay over UDP should be tested carefully because peer
   availability is less concrete than SPI/RS485 readiness.
+- Host-to-MCU UDP timeout blocks Phase 2 because peer learning depends on a host
+  datagram reaching MCU port 2026.
 
 ## Phase 3: HTTP, WebSocket, JavaScript Models, And Web PubSub
 
@@ -245,8 +259,8 @@ Web PubSub direction:
 - Browser PubSub should ride over WebSocket.
 - The device-side WebSocket component can bridge between WebSocket frames and
   local PubSub publish/subscribe.
-- Start with explicit allowed topics/events rather than exposing every PubSub
-  topic automatically.
+- Browser-facing PubSub may need explicit topics/events later, separately from
+  the trusted Phase 2 host bridge.
 
 Phase 3 risks:
 
@@ -261,9 +275,9 @@ Phase 3 risks:
 
 1. Phase 1 WiFi AP/STA and basic UDP/TCP socket wrappers.
 2. Minimal UDP echo/diagnostic command on master.
-3. Single-peer UDP PubSub transport.
+3. Single-peer UDP PubSub transport on MCU port 2026.
 4. `PLATFORM_HOST` serialization build.
-5. Python PubSub participant.
+5. Host-side C++ PubSub peer with a Python/Pydantic notify bridge.
 6. HTTP static server.
 7. WebSocket server with bounded client/message slots.
 8. JS SerDe/Codec generator.
@@ -271,12 +285,8 @@ Phase 3 risks:
 
 ## Open Questions
 
-- Should WiFi AP and STA be enabled simultaneously in the first pass, or should
-  AP-only and STA-only be implemented first?
-- Should UDP learn the single peer from first valid packet, or require an
-  explicit configured endpoint?
-- Which PubSub topics should be allowed from host/web participants initially?
-- Should `Host` be added to the production `NodeId` enum immediately, or only
-  when the first host-originated publish path lands?
+- What exact C++/Python bridge technology should be used?
+- What exact generated Pydantic model strategy should be used?
+- Which browser-facing PubSub topics should be exposed later in Phase 3?
 - What level of host/device time sync is needed after the monotonic wall-clock
   hardware is introduced?

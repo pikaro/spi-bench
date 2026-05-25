@@ -15,6 +15,7 @@ enum class NodeId : uint8_t {
     GPUNode1 = 1U << 4,
     GPUNode2 = 1U << 5,
     GPUNode3 = 1U << 6,
+    Host = 1U << 7,
 };
 
 // NOLINTNEXTLINE(performance-enum-size)
@@ -48,7 +49,7 @@ template <> struct NodeTraits<NodeName::Master> {
         LowSpeedSPI = 1U << 0,
         HighSpeedSPI = 1U << 1,
         RS485 = 1U << 2,
-        WebSocket = 1U << 3,
+        UDP = 1U << 3,
 
         // SPI transport IDs name physical buses. HighSpeedSPI currently routes
         // GPU0/GPU1 as peers on one shared bus; future code should keep using
@@ -57,6 +58,7 @@ template <> struct NodeTraits<NodeName::Master> {
         GPU0SPI = HighSpeedSPI,
         GPU1SPI = HighSpeedSPI,
         SPI = LowSpeedSPI,
+        WebSocket = UDP,
     };
     using Limits = PubSubConfig;
 };

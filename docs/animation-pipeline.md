@@ -10,6 +10,9 @@ implementation or with the old `../led` codebase. That code was used only as an
 architectural reference. The objective here is the clean final shape for the
 current firmware.
 
+Planned procedural sprite work for star, heart, and smiley animations is tracked
+separately in [sprite-animation-plan.md](sprite-animation-plan.md).
+
 ## Current Status
 
 The embedded pipeline is feature-complete for current animation development:
@@ -107,6 +110,14 @@ quadrant, logical spoke order is mirrored onto the physical wire segment order:
 logical segment `0` maps to physical segment `3`, `1` to `2`, `2` to `1`, and
 `3` to `0`. Radial serpentine direction is still derived from the physical
 segment because that follows the actual LED strip wiring.
+
+The physical LED surface is an annulus, not a disk. The strips do not meet at a
+center point: there is roughly a 30 cm empty center gap, and the LED strips are
+roughly 30 cm long. Logical radial index `0` is therefore the inner visible
+ring, not the geometric center. Geometry helpers, radial viewers, and
+shape/sprite animations must model an inner radius plus strip length instead of
+assuming normalized radius starts at zero. With the current approximate
+dimensions, LED centers occupy about the outer half of the radius.
 
 ## Frame Flow
 

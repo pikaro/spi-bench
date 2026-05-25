@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT=$(git rev-parse --show-toplevel)
+OUT_DIR="$ROOT/.build/pubsub-udp-peer"
+OUT="$OUT_DIR/pubsub-udp-peer-cpp"
+
+mkdir -p "$OUT_DIR"
+
+"${CXX:-c++}" \
+    -std=c++23 \
+    -O2 \
+    -Wall \
+    -Wextra \
+    -Werror \
+    -I"$ROOT/tools/pubsub-udp-peer" \
+    "$ROOT/tools/pubsub-udp-peer/pubsub_udp_peer.cpp" \
+    -o "$OUT"
+
+echo "$OUT"

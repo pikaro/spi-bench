@@ -142,6 +142,8 @@ struct PubSubNetworkMasterSetup {
         _log_i("PubSub network master setup ready");
     }
 
+    [[nodiscard]] PubSubNetwork::PubSubNode &node() { return pubSubNode; }
+
   private:
     [[nodiscard]] static LowSpeedSpiDeps
     makeLowSpeedSpiDeps(PubSubNetwork::PubSubNode &node,

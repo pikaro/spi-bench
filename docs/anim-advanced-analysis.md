@@ -94,14 +94,19 @@ A compatible path is to add a topology/display coordinate helper that maps each
 logical LED to compact coordinates:
 
 - `spoke`, `radial`
-- normalized radius, preferably fixed-point such as Q0.16
+- strip-local radius, preferably fixed-point such as Q0.16
+- world radius from the geometric center, accounting for the physical center
+  gap
 - angle as an 8-bit or 16-bit turn value
 - optional `x` and `y` as Q1.15 or similar fixed-point values
 
 This should be precomputed or derived from small lookup tables. With only 16
-spokes, a 16-entry sine/cosine table plus a 46-entry radius table is enough for
-most effects. A full 736-entry coordinate LUT is also plausible, but it should
-be justified against RAM and offline-render reuse.
+spokes, a 16-entry sine/cosine table plus a 46-entry strip-radius table is
+enough for most effects. The radius table must model the annulus: the current
+strips start after a roughly 30 cm empty center gap and are roughly 30 cm long,
+so radial index zero is the inner visible ring, not the center. A full
+736-entry coordinate LUT is also plausible, but it should be justified against
+RAM and offline-render reuse.
 
 This single abstraction supports polar FFT fields, kaleidoscope folding, SDF
 rings, Voronoi cells, particle splats, flow fields, and feedback sampling.

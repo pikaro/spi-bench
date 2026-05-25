@@ -3,9 +3,11 @@
 #include "Network/Facade.hpp"
 #include "Platform/Gpio.hpp"
 #include "Platform/PlatformSelect.hpp"
+#include "PubSubBackend/Transports/UdpTransport.hpp"
 #include "Services/Clock.hpp"
 #include "Setups/Core.hpp"
 #include "Setups/PubSubNetwork.hpp"
+#include "StaticConfig/PubSubUdp.hpp"
 #include "Wifi/Facade.hpp"
 #include "Wire/Rs485/Facade.hpp"
 #include "Wire/Spi/Facade.hpp"
@@ -74,6 +76,18 @@ class LedPresentStrobeOutput {
     bool _level = false;
 };
 
+bool pubSubUdpNetworkReady(void *owner) {
+    auto *wifiRef = static_cast<Totem::Wifi::Wifi *>(owner);
+    if (wifiRef == nullptr) {
+        return false;
+    }
+    const auto status = wifiRef->status();
+    if (!status.started) {
+        return false;
+    }
+    return status.stationIpv4.valid || status.accessPointStarted;
+}
+
 } // namespace
 
 CoreSetup core{};
@@ -88,6 +102,19 @@ PubSubNetworkMasterSetup<Totem::Wire::Spi::Master, Totem::Wire::Spi::Master,
                          Totem::Wire::Rs485::Master>
     pubSubNetwork{core.taskRegistry, spiMasterLowSpeed, spiMasterGpu0,
                   spiMasterGpu1, rs485master};
+Totem::PubSubBackend::Transports::UdpTransport pubSubUdpTransport{
+    Totem::PubSubBackend::Transports::UdpTransportDependencies{
+        .base = PubSubNetwork::makeBaseDeps(
+            pubSubNetwork.node(),
+            static_cast<uint8_t>(
+                Totem::Data::PubSub::PubSubData<
+                    Totem::Data::NodeName::Master>::Transport::UDP),
+            "PubSub-UDP"),
+        .taskRegistry = &core.taskRegistry,
+        .networkReadyOwner = &wifi,
+        .networkReady = pubSubUdpNetworkReady,
+    },
+};
 platform::Gpio ledLevelShifterOutputEnable;
 LedPresentStrobeOutput ledPresentStrobeOutput;
 
@@ -125,6 +152,15 @@ void setup() {
                  "Failed to register RS485 clock handler");
 
     pubSubNetwork.setup();
+    if constexpr (Totem::StaticConfig::PubSubUdp::enabled) {
+        ABORT_IF_ERR_BEGIN(pubSubUdpTransport.begin());
+        ABORT_IF_UNEXPECTED(udpHandle,
+                            pubSubNetwork.node().registerTransport(
+                                pubSubUdpTransport),
+                            "Failed to register UDP PubSub transport");
+        (void)udpHandle;
+    }
+
     ABORT_IF_ERR(MasterOrchestration::begin(),
                  "Failed to begin master orchestration");
 

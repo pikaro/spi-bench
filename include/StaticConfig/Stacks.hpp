@@ -38,6 +38,10 @@ namespace Totem::PubSubBackend::detail {
 class Node;
 } // namespace Totem::PubSubBackend::detail
 
+namespace Totem::PubSubBackend::Transports {
+class UdpTransport;
+} // namespace Totem::PubSubBackend::Transports
+
 namespace Totem::Wire::Rs485::detail {
 class Master;
 class Slave;
@@ -66,6 +70,7 @@ inline constexpr uint32_t rs485Master = 8192;
 inline constexpr uint32_t rs485Slave = 8192;
 inline constexpr uint32_t audioFft = 3072;
 inline constexpr uint32_t audioFftDisplay = 3072;
+inline constexpr uint32_t pubSubUdp = 4096;
 
 } // namespace Totem::StaticConfig::TaskStacks
 
@@ -131,6 +136,11 @@ struct StaticStackSize<
 template <>
 struct StaticStackSize<Totem::PubSubBackend::detail::Node> {
     static constexpr uint32_t value = Totem::StaticConfig::TaskStacks::pubSubNode;
+};
+
+template <>
+struct StaticStackSize<Totem::PubSubBackend::Transports::UdpTransport> {
+    static constexpr uint32_t value = Totem::StaticConfig::TaskStacks::pubSubUdp;
 };
 
 template <>

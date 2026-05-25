@@ -125,7 +125,8 @@ struct FieldPoint {
     uint8_t spoke;
     uint8_t radial;
     uint8_t theta;     // 0..255 turn
-    uint16_t radius;   // 0..65535 normalized radial center
+    uint16_t stripRadius; // 0..65535 along the visible strip
+    uint16_t worldRadius; // 0..65535 from geometric center to outer edge
     int16_t x;         // Q1.14 or Q1.15 style normalized coordinate
     int16_t y;
 };
@@ -135,18 +136,26 @@ Implementation steps:
 
 1. Add a 16-entry sine/cosine table or generate one at compile time if the
    current toolchain allows clean constexpr math.
-2. Add a 46-entry radius table using radial cell centers.
-3. Expose `fieldPoint(spoke, radial)`.
-4. Expose `forEachLogicalPixel(callback)` or a small iterator helper.
-5. Keep all public values fixed-point or integer. Use `float` only in tests or
+2. Add geometry constants for the physical annulus: an inner empty radius and
+   a visible strip length. The current hardware is roughly 30 cm inner gap and
+   30 cm strip length, so LED centers occupy about the outer half of the
+   radius.
+3. Add a 46-entry strip-radius table using radial cell centers.
+4. Derive `worldRadius` from `(innerRadius + stripRadius) / outerRadius` before
+   computing `x` and `y`.
+5. Expose `fieldPoint(spoke, radial)`.
+6. Expose `forEachLogicalPixel(callback)` or a small iterator helper.
+7. Keep all public values fixed-point or integer. Use `float` only in tests or
    host-only helper code if needed.
-6. Add a short doc comment that these coordinates describe logical animation
+8. Add a short doc comment that these coordinates describe logical animation
    space, not physical wiring.
 
 Design notes:
 
 - `theta` should be turn-based, not radians.
-- Radial center coordinates should use `(radial + 0.5) / ringCount`.
+- `stripRadius` should use `(radial + 0.5) / ringCount`.
+- `worldRadius` must account for the center gap. Do not treat radial index zero
+  as the center of the sculpture.
 - Angular resolution is only 16 samples; helpers should make low angular modes
   easy and high modes visibly deliberate.
 - This helper should be useful for later feedback, Voronoi, SDF masks, and

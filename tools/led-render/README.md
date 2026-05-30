@@ -153,7 +153,8 @@ three-byte pixel after another. Initial planes are:
   `--include-scratch`
 
 The metadata JSON records the source config, render mode, animation names,
-frame range, topology, and color backend.
+frame range, topology, annular geometry, and color backend. Radial viewer output
+uses this geometry metadata; regenerate traces after geometry changes.
 
 ## Fidelity Notes
 

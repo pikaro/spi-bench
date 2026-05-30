@@ -103,10 +103,10 @@ logical LED to compact coordinates:
 This should be precomputed or derived from small lookup tables. With only 16
 spokes, a 16-entry sine/cosine table plus a 46-entry strip-radius table is
 enough for most effects. The radius table must model the annulus: the current
-strips start after a roughly 30 cm empty center gap and are roughly 30 cm long,
-so radial index zero is the inner visible ring, not the center. A full
-736-entry coordinate LUT is also plausible, but it should be justified against
-RAM and offline-render reuse.
+strips start after a roughly 30 cm empty center-gap diameter and are roughly
+30 cm long, so radial index zero is the inner visible ring, not the center. A
+full 736-entry coordinate LUT is also plausible, but it should be justified
+against RAM and offline-render reuse.
 
 This single abstraction supports polar FFT fields, kaleidoscope folding, SDF
 rings, Voronoi cells, particle splats, flow fields, and feedback sampling.

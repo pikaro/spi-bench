@@ -27,6 +27,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 
 namespace Totem::Audio::detail {
 
@@ -150,13 +151,13 @@ class FftAnalyzer : public HasLifecycle<FftAnalyzer, FftAnalyzerConfig>,
                                           this),
                         "Failed to begin FFT backend");
 
-        _copier.resize(config().copyBufferSizeBytes);
-        _copier.setDelayOnNoData(0);
-        _copier.setCheckAvailable(true);
-        _copier.setCheckAvailableForWrite(false);
-        _copier.setSynchAudioInfo(false);
-        _copier.setLogName("AudioFft");
-        _copier.begin(_fftBackend.stream(), _source.stream());
+        _copier.emplace(_fftBackend.stream(), _source.stream(),
+                        config().copyBufferSizeBytes);
+        _copier->setDelayOnNoData(0);
+        _copier->setCheckAvailable(true);
+        _copier->setCheckAvailableForWrite(false);
+        _copier->setSynchAudioInfo(false);
+        _copier->setLogName("AudioFft");
 
         FAIL_IF_ERR_FWD(_registerCommands(),
                         "Failed to register FFT analyzer commands");
@@ -176,7 +177,10 @@ class FftAnalyzer : public HasLifecycle<FftAnalyzer, FftAnalyzerConfig>,
     ReturnCode _onEnd() {
         _task = 0;
         auto ret = this->_endTaskController();
-        _copier.end();
+        if (_copier.has_value()) {
+            _copier->end();
+            _copier.reset();
+        }
         ret.combine(_fftBackend.end());
         ret.combine(_deregisterCommands());
         _metrics = nullptr;
@@ -215,7 +219,10 @@ class FftAnalyzer : public HasLifecycle<FftAnalyzer, FftAnalyzerConfig>,
             return OK();
         }
 
-        const auto copied = _copier.copy();
+        FAIL_IF(!_copier.has_value(), ERR(CoreError, InvalidState),
+                "FFT copier is not initialized");
+
+        const auto copied = _copier->copy();
         _source.observeReadResult(copied, nowMs);
         const auto elapsedUs = _profilingElapsedUs(startedUs);
         _recordMax(_maxCopyUs, elapsedUs);
@@ -595,7 +602,7 @@ class FftAnalyzer : public HasLifecycle<FftAnalyzer, FftAnalyzerConfig>,
 
     IAudioSource &_source;
     FftBackend _fftBackend;
-    Platform::StreamCopier _copier{0};
+    std::optional<Platform::StreamCopier> _copier = std::nullopt;
     Platform::HammingWindow _hamming;
     Platform::HannWindow _hann;
     std::array<BandPlan, fftBandCount> _bandPlan{};

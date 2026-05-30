@@ -34,8 +34,27 @@ struct NullLogger : public ILogger {
     }
 
     ReturnCode send(const LogRecord &record) override {
-        ::platform::early_log_error(MAGIC_CHR(record.component),
-                                    record.msg.data());
+        const auto *tag = MAGIC_CHR(record.component);
+        const auto *msg = record.msg.data();
+        switch (record.level) {
+        case LogLevel::Verbose:
+            ::platform::early_log_verbose(tag, msg);
+            break;
+        case LogLevel::Debug:
+            ::platform::early_log_debug(tag, msg);
+            break;
+        case LogLevel::Info:
+            ::platform::early_log_info(tag, msg);
+            break;
+        case LogLevel::Warning:
+            ::platform::early_log_warning(tag, msg);
+            break;
+        case LogLevel::Error:
+            ::platform::early_log_error(tag, msg);
+            break;
+        case LogLevel::Off:
+            break;
+        }
         return OK(CoreError);
     }
 

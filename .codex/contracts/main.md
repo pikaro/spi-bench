@@ -20,6 +20,10 @@
     patterns.
 - For LED animations and similar patterns, document non-obvious command
     parameters. E.g. `duration` is obvious, but `spokeGain` is not.
+- **DO NOT** preserve backwards compatibility with previous versions of the
+    project. The project is in active development, and there are no external
+    dependencies on this project. Breaking changes are expected and acceptable
+    if they serve to improve the project.
 
 ## Building and uploading
 

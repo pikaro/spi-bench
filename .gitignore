@@ -21,3 +21,4 @@ data/
 telemetry/
 docs/wifi.md
 src/master/wifi_credentials.hpp
+*.tled

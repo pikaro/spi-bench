@@ -70,6 +70,22 @@ inline void early_log_error(const char *tag, const char *msg) {
     ESP_EARLY_LOGE(tag, "%s", msg);
 }
 
+inline void early_log_warning(const char *tag, const char *msg) {
+    ESP_EARLY_LOGW(tag, "%s", msg);
+}
+
+inline void early_log_info(const char *tag, const char *msg) {
+    ESP_EARLY_LOGI(tag, "%s", msg);
+}
+
+inline void early_log_debug(const char *tag, const char *msg) {
+    ESP_EARLY_LOGD(tag, "%s", msg);
+}
+
+inline void early_log_verbose(const char *tag, const char *msg) {
+    ESP_EARLY_LOGV(tag, "%s", msg);
+}
+
 [[nodiscard]] inline const char *current_task_name() {
     if (xPortInIsrContext() != pdFALSE) {
         return "<ISR>";

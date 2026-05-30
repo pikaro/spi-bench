@@ -52,7 +52,23 @@ struct LedTopologyStaticConfig {
     static constexpr size_t ringCount = ledsPerSegment;
 };
 
-struct LedOwnershipStaticConfig : LedTopologyStaticConfig {
+struct LedGeometryStaticConfig : LedTopologyStaticConfig {
+    // Approximate current hardware: a 30 cm center opening with 30 cm radial
+    // LED strips. The exact measured values can replace these constants later
+    // without changing the animation coordinate model.
+    static constexpr uint16_t centerGapDiameterMm = 300;
+    static constexpr uint16_t radialStripLengthMm = 300;
+    static constexpr uint16_t innerRadiusMm = centerGapDiameterMm / 2U;
+    static constexpr uint16_t outerRadiusMm =
+        innerRadiusMm + radialStripLengthMm;
+
+    static_assert(radialStripLengthMm > 0,
+                  "LED radial strip length must be greater than zero");
+    static_assert(outerRadiusMm > innerRadiusMm,
+                  "LED outer radius must exceed inner radius");
+};
+
+struct LedOwnershipStaticConfig : LedGeometryStaticConfig {
     static constexpr size_t ledGroupCount = LED_GROUP_COUNT;
     static constexpr size_t ledGroupIndex = LED_GROUP_INDEX;
     static constexpr size_t nodeGroupCount = LED_NODE_GROUP_COUNT;

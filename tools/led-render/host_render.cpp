@@ -507,6 +507,16 @@ metadataJson(const RenderRequest &request, const std::string &configPath,
         << static_cast<unsigned>(request.rotationOffset) << ",";
     out << "\"color_backend\":\"GenericRenderer\",";
     out << "\"pixel_order\":\"logical_spoke_radial\",";
+    out << "\"geometry\":{";
+    out << "\"center_gap_diameter_mm\":"
+        << static_cast<unsigned>(Config::centerGapDiameterMm) << ",";
+    out << "\"radial_strip_length_mm\":"
+        << static_cast<unsigned>(Config::radialStripLengthMm) << ",";
+    out << "\"inner_radius_mm\":"
+        << static_cast<unsigned>(Config::innerRadiusMm) << ",";
+    out << "\"outer_radius_mm\":"
+        << static_cast<unsigned>(Config::outerRadiusMm);
+    out << "},";
     out << "\"animations\":[";
     for (size_t i = 0; i < animations.size(); ++i) {
         const auto &animation = animations[i];

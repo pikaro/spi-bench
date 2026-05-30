@@ -136,10 +136,10 @@ Implementation steps:
 
 1. Add a 16-entry sine/cosine table or generate one at compile time if the
    current toolchain allows clean constexpr math.
-2. Add geometry constants for the physical annulus: an inner empty radius and
-   a visible strip length. The current hardware is roughly 30 cm inner gap and
-   30 cm strip length, so LED centers occupy about the outer half of the
-   radius.
+2. Add geometry constants for the physical annulus: a center-gap diameter and
+   a visible strip length. The current hardware is roughly a 30 cm center-gap
+   diameter and 30 cm strip length, so LED centers start about one third of the
+   way out from the geometric center.
 3. Add a 46-entry strip-radius table using radial cell centers.
 4. Derive `worldRadius` from `(innerRadius + stripRadius) / outerRadius` before
    computing `x` and `y`.

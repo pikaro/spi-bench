@@ -141,16 +141,40 @@ def _add_disc(image, center_x, center_y, radius, color, alpha=1.0):
     image[y0:y1, x0:x1] = np.clip(region, 0, 255).astype(np.uint8)
 
 
-def _radial_frame(source, led_size: int, spacing: float, glare: bool):
+def _radial_geometry(trace: Trace) -> tuple[float, float]:
+    geometry = trace.metadata.get("geometry")
+    if not isinstance(geometry, dict):
+        raise RuntimeError(
+            "Radial view requires trace geometry metadata. Regenerate the trace."
+        )
+
+    inner_radius = geometry.get("inner_radius_mm")
+    strip_length = geometry.get("radial_strip_length_mm")
+    if not isinstance(inner_radius, (int, float)) or not isinstance(
+        strip_length, (int, float)
+    ):
+        raise RuntimeError(
+            "Radial view requires inner_radius_mm and radial_strip_length_mm "
+            "geometry metadata. Regenerate the trace."
+        )
+    if inner_radius < 0 or strip_length <= 0:
+        raise RuntimeError("Trace geometry metadata has invalid annulus dimensions")
+    return float(inner_radius), float(strip_length)
+
+
+def _radial_frame(
+    source, led_size: int, spacing: float, glare: bool, geometry: tuple[float, float]
+):
     np = _need_numpy()
     spokes, rings, _channels = source.shape
+    inner_radius_mm, strip_length_mm = geometry
     led_size = max(2, int(led_size))
     spacing = max(1.05, float(spacing))
     led_radius = led_size / 2.0
     pitch = led_size * spacing
-    angular_clearance_radius = (spokes * pitch) / (2.0 * math.pi)
-    inner_radius = max(pitch, angular_clearance_radius)
-    outer_radius = inner_radius + ((rings - 1) * pitch)
+    strip_length = rings * pitch
+    inner_radius = (inner_radius_mm * strip_length) / strip_length_mm
+    outer_radius = inner_radius + strip_length
     margin = max(led_size * 4, int(led_radius * (6 if glare else 3)))
     image_size = int(math.ceil((outer_radius + led_radius + margin) * 2.0))
     center = image_size / 2.0
@@ -165,7 +189,7 @@ def _radial_frame(source, led_size: int, spacing: float, glare: bool):
             color = source[spoke, radial]
             if int(color.max()) == 0:
                 continue
-            radius = inner_radius + (radial * pitch)
+            radius = inner_radius + ((radial + 0.5) * pitch)
             x = center + (angle_cos * radius)
             y = center + (angle_sin * radius)
             centers.append((x, y, color))
@@ -197,7 +221,7 @@ def frame_image(
     if layout == "heatmap":
         image = _heatmap_frame(source, scale, glare)
     elif layout == "radial":
-        image = _radial_frame(source, scale, spacing, glare)
+        image = _radial_frame(source, scale, spacing, glare, _radial_geometry(trace))
     else:
         raise ValueError(f"Unknown viewer layout {layout!r}")
     if show_frame_label:

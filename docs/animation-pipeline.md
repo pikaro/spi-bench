@@ -112,12 +112,13 @@ logical segment `0` maps to physical segment `3`, `1` to `2`, `2` to `1`, and
 segment because that follows the actual LED strip wiring.
 
 The physical LED surface is an annulus, not a disk. The strips do not meet at a
-center point: there is roughly a 30 cm empty center gap, and the LED strips are
-roughly 30 cm long. Logical radial index `0` is therefore the inner visible
-ring, not the geometric center. Geometry helpers, radial viewers, and
-shape/sprite animations must model an inner radius plus strip length instead of
-assuming normalized radius starts at zero. With the current approximate
-dimensions, LED centers occupy about the outer half of the radius.
+center point: there is roughly a 30 cm empty center-gap diameter, and the LED
+strips are roughly 30 cm long. Logical radial index `0` is therefore the inner
+visible ring, not the geometric center. Geometry helpers and radial viewers
+must model an inner radius plus strip length instead of assuming normalized
+radius starts at zero. With the current approximate dimensions, the inner ring
+is about one third of the outer radius because the 30 cm center gap is a
+diameter.
 
 ## Frame Flow
 
@@ -396,7 +397,8 @@ Viewer controls should include play/pause, frame step forward/backward, speed
 control, frame slider, plane selector, color mode selector, optional pixel
 hover/readout, optional spoke/ring grid overlay, flat heatmap view, and radial
 umbrella view. The flat `(spoke x radial)` heatmap remains the primary analysis
-view; the radial view is primarily for pattern design.
+view; the radial view is primarily for pattern design and uses the annular
+geometry metadata embedded in each generated trace.
 
 Initial analysis reports include per-frame max deltas in HSV and RGB channels,
 per-pixel max delta over time, isolated spike detection, hue ping-pong

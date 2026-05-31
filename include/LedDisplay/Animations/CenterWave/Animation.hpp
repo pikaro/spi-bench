@@ -15,6 +15,7 @@ struct CenterWave {
     static constexpr Layer defaultLayer = CenterWaveSpec::defaultLayer;
     static constexpr uint16_t defaultLifetimeMs =
         CenterWaveSpec::defaultLifetimeMs;
+    static constexpr bool requiresFullFrame = false;
     static constexpr uint8_t minimumPeakRings =
         CenterWaveSpec::minimumPeakRings;
     static constexpr uint16_t fullScale = std::numeric_limits<uint8_t>::max();

@@ -331,12 +331,12 @@ Options:
         return false;
     }
 
-    constexpr std::array<std::string_view, 17> known{
+    constexpr std::array<std::string_view, 18> known{
         "animation",       "animations", "config",          "duration_ms",
         "start_ms",        "layer",      "inputs",          "fps",
         "first_frame",     "last_frame", "frames",          "hue_offset",
         "rotation_offset", "mode",       "include_scratch", "comment",
-        "metadata",
+        "metadata",        "audio",
     };
     if (!checkKnownKeys(root, known, "root", error)) {
         return false;
@@ -357,7 +357,8 @@ Options:
         !readOptionalMode(root, "mode", request.pipelineMode, error) ||
         !readOptionalBool(root, "include_scratch", request.includeScratch,
                           error) ||
-        !Totem::LedRender::readInputSnapshot(root, request.inputs, error)) {
+        !Totem::LedRender::readInputSnapshot(root, request.inputs, error) ||
+        !Totem::LedRender::readSyntheticAudio(root, request.audio, error)) {
         return false;
     }
 
@@ -531,7 +532,12 @@ metadataJson(const RenderRequest &request, const std::string &configPath,
         out << "\"start_ms\":" << animation.startMs << ",";
         out << "\"duration_ms\":" << animation.durationMs << ",";
         out << "\"layer\":\"" << Totem::LedRender::layerName(animation.layer)
-            << "\"";
+            << "\",";
+        out << "\"requires_full_frame\":"
+            << (Totem::LedRender::Generated::requiresFullFrame(
+                    animation.payload)
+                    ? "true"
+                    : "false");
         out << "}";
     }
     out << "],";
@@ -591,11 +597,20 @@ metadataJson(const RenderRequest &request, const std::string &configPath,
     std::array<HsvColor, Config::ownedPixelCount> finalHsv{};
     std::array<HsvColor, Config::ownedPixelCount> scratchTrace{};
     std::array<RgbColor, Config::ownedPixelCount> finalRgb{};
+    std::array<HsvColor, Config::totalPixelCount> fullScratch{};
+    constexpr auto identityMap =
+        Totem::LedDisplay::Primitives::identityLogicalToLocalMap();
+    Totem::LedDisplay::Primitives::AudioControlSmoother audioControls{};
 
     for (uint32_t frameIndex = 0; frameIndex < header.frameCount;
          ++frameIndex) {
         const auto frame = request.firstFrame + frameIndex;
         const auto nowMs = Totem::LedRender::frameTimeMs(frame, request.fps);
+        auto inputs = request.inputs;
+        Totem::LedRender::applySyntheticAudio(request.audio, nowMs, inputs);
+        const auto audio = audioControls.update(
+            inputs.fftFrame, inputs.hasFftFrame, inputs.peakEvent,
+            inputs.hasPeakEvent);
         Compositor::clear(scratchTrace);
 
         if (request.pipelineMode) {
@@ -606,8 +621,17 @@ metadataJson(const RenderRequest &request, const std::string &configPath,
                 }
                 const auto elapsedMs = nowMs - animation.startMs;
                 layers.clearScratch();
-                auto canvas =
-                    Totem::LedRender::Canvas{layers.scratch(), renderMap};
+                const auto fullFrame =
+                    Totem::LedRender::Generated::requiresFullFrame(
+                        animation.payload);
+                if (fullFrame) {
+                    Compositor::clear(fullScratch);
+                }
+                auto canvas = fullFrame
+                                  ? Totem::LedRender::Canvas{fullScratch,
+                                                             identityMap}
+                                  : Totem::LedRender::Canvas{layers.scratch(),
+                                                             renderMap};
                 auto ctx = AnimationRenderContext{
                     .clock = FrameClock{.nowMs = nowMs,
                                         .elapsedMs = elapsedMs,
@@ -615,9 +639,14 @@ metadataJson(const RenderRequest &request, const std::string &configPath,
                                         .frame = frame},
                     .hueOffset = request.hueOffset,
                     .canvas = canvas,
-                    .inputs = request.inputs,
+                    .inputs = inputs,
+                    .audio = audio,
                 };
                 Totem::LedRender::Generated::render(animation.payload, ctx);
+                if (fullFrame) {
+                    Totem::LedDisplay::Primitives::projectLogicalFrameToOwned(
+                        fullScratch, layers.scratch(), renderMap);
+                }
                 if (request.includeScratch) {
                     std::copy(layers.scratch().begin(), layers.scratch().end(),
                               scratchTrace.begin());
@@ -634,7 +663,17 @@ metadataJson(const RenderRequest &request, const std::string &configPath,
                     continue;
                 }
                 const auto elapsedMs = nowMs - animation.startMs;
-                auto canvas = Totem::LedRender::Canvas{finalHsv, renderMap};
+                const auto fullFrame =
+                    Totem::LedRender::Generated::requiresFullFrame(
+                        animation.payload);
+                if (fullFrame) {
+                    Compositor::clear(fullScratch);
+                }
+                auto canvas = fullFrame
+                                  ? Totem::LedRender::Canvas{fullScratch,
+                                                             identityMap}
+                                  : Totem::LedRender::Canvas{finalHsv,
+                                                             renderMap};
                 auto ctx = AnimationRenderContext{
                     .clock = FrameClock{.nowMs = nowMs,
                                         .elapsedMs = elapsedMs,
@@ -642,9 +681,14 @@ metadataJson(const RenderRequest &request, const std::string &configPath,
                                         .frame = frame},
                     .hueOffset = request.hueOffset,
                     .canvas = canvas,
-                    .inputs = request.inputs,
+                    .inputs = inputs,
+                    .audio = audio,
                 };
                 Totem::LedRender::Generated::render(animation.payload, ctx);
+                if (fullFrame) {
+                    Totem::LedDisplay::Primitives::projectLogicalFrameToOwned(
+                        fullScratch, finalHsv, renderMap);
+                }
             }
             if (request.includeScratch) {
                 scratchTrace = finalHsv;

@@ -6,6 +6,7 @@
 #include "LedDisplay/Renderers/GenericRenderer.hpp"
 #include "LedTopology/Facade.hpp"
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -32,6 +33,18 @@ class Canvas {
     [[nodiscard]] static constexpr size_t logicalIndex(uint8_t spoke,
                                                        uint8_t radial) {
         return (static_cast<size_t>(spoke) * Config::ringCount) + radial;
+    }
+
+    [[nodiscard]] HsvColor sample(uint8_t spoke, uint8_t radial) const {
+        if (spoke >= Config::spokeCount || radial >= Config::ringCount) {
+            return {};
+        }
+        const auto local = _logicalToLocal[logicalIndex(spoke, radial)];
+        if (local == invalidLocalPixel ||
+            static_cast<size_t>(local) >= _frame.size()) {
+            return {};
+        }
+        return _frame[static_cast<size_t>(local)];
     }
 
     void fill(HsvColor color, BlendOp op = BlendOp::Replace) {
@@ -109,5 +122,28 @@ class Canvas {
     std::span<HsvColor> _frame;
     LogicalToLocalMap _logicalToLocal;
 };
+
+inline constexpr std::array<LedTopology::LocalPixelIndex,
+                            Config::totalPixelCount>
+identityLogicalToLocalMap() {
+    std::array<LedTopology::LocalPixelIndex, Config::totalPixelCount> map{};
+    for (size_t i = 0; i < map.size(); ++i) {
+        map[i] = static_cast<LedTopology::LocalPixelIndex>(i);
+    }
+    return map;
+}
+
+inline void projectLogicalFrameToOwned(
+    std::span<const HsvColor, Config::totalPixelCount> logicalFrame,
+    std::span<HsvColor> ownedFrame, Canvas::LogicalToLocalMap logicalToLocal) {
+    for (size_t logical = 0; logical < logicalFrame.size(); ++logical) {
+        const auto local = logicalToLocal[logical];
+        if (local == Canvas::invalidLocalPixel ||
+            static_cast<size_t>(local) >= ownedFrame.size()) {
+            continue;
+        }
+        ownedFrame[static_cast<size_t>(local)] = logicalFrame[logical];
+    }
+}
 
 } // namespace Totem::LedDisplay::Primitives

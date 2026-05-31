@@ -6,6 +6,7 @@
 #include "LedDisplay/Interfaces/AnimationCommandCodec.hpp"
 #include "LedDisplay/Interfaces/Config.hpp"
 #include "LedDisplay/Interfaces/RenderContext.hpp"
+#include "LedDisplay/Primitives/AudioControls.hpp"
 #include "LedDisplay/Primitives/Canvas.hpp"
 #include "LedDisplay/detail/LayerStack.hpp"
 #include "LedDisplay/detail/Metrics.hpp"
@@ -102,8 +103,21 @@ class AnimationEngine {
             return wheelSub.error();
         }
         _wheelSub = *wheelSub;
+
+        auto peakSub = pubSub.subscribe(
+            "led-peak", {.subscriber = this, .callback = onPeakEnvelope},
+            PubSubService::Topic::Peak);
+        if (!peakSub) {
+            (void)pubSub.unsubscribe(_wheelSub);
+            (void)pubSub.unsubscribe(_fftSub);
+            _wheelSub = 0;
+            _fftSub = 0;
+            return peakSub.error();
+        }
+        _peakSub = *peakSub;
         _pubSubInputSubscribed = true;
-        _log_i("LED animation engine subscribed to FFT and wheel input topics");
+        _log_i(
+            "LED animation engine subscribed to FFT, peak, and wheel inputs");
         return OK();
     }
 
@@ -112,6 +126,7 @@ class AnimationEngine {
             _pubSubInputSubscribed = false;
             _fftSub = 0;
             _wheelSub = 0;
+            _peakSub = 0;
             return OK();
         }
 
@@ -123,8 +138,12 @@ class AnimationEngine {
         if (_wheelSub != 0) {
             ret.combine(pubSub.unsubscribe(_wheelSub));
         }
+        if (_peakSub != 0) {
+            ret.combine(pubSub.unsubscribe(_peakSub));
+        }
         _fftSub = 0;
         _wheelSub = 0;
+        _peakSub = 0;
         _pubSubInputSubscribed = false;
         return ret;
     }
@@ -135,13 +154,16 @@ class AnimationEngine {
 
         _layers.beginFrame(_frames);
         const auto inputs = _snapshotInputs();
+        const auto audioControls = _audioControls.update(
+            inputs.fftFrame, inputs.hasFftFrame, inputs.peakEvent,
+            inputs.hasPeakEvent);
         const auto hueOffset = _hueOffset.load(std::memory_order_relaxed);
 
         for (auto &slot : _animations) {
             if (!slot.active) {
                 continue;
             }
-            _render(slot, nowMs, hueOffset, inputs);
+            _render(slot, nowMs, hueOffset, inputs, audioControls);
         }
 
         _layers.compose(frame);
@@ -196,6 +218,20 @@ class AnimationEngine {
         return self->_captureWheelState(*state);
     }
 
+    static ReturnCode
+    onPeakEnvelope(void *owner,
+                   const Totem::PubSubBackend::Envelope &envelope) {
+        auto *self = static_cast<AnimationEngine *>(owner);
+        FAIL_IF_NULL(self, ERR(CoreError, InvalidArgument),
+                     "LED animation engine peak subscriber owner is null");
+        auto event = envelope.getPayloadAs<Totem::Audio::PeakEvent>();
+        if (!event) {
+            metrics().addInputFailure();
+            FAIL_ERR_FWD(event.error(), "Failed to decode peak event");
+        }
+        return self->_capturePeakEvent(*event);
+    }
+
   private:
     ReturnCode _captureFftFrame(const Totem::Audio::FftFrame &frame) {
         Totem::Mutex::ScopedSpinlockGuard guard{_inputLock};
@@ -210,6 +246,13 @@ class AnimationEngine {
         _inputs.wheelState = state;
         _inputs.hasWheelState = true;
         metrics().addWheelInput();
+        return OK();
+    }
+
+    ReturnCode _capturePeakEvent(const Totem::Audio::PeakEvent &event) {
+        Totem::Mutex::ScopedSpinlockGuard guard{_inputLock};
+        _inputs.peakEvent = event;
+        _inputs.hasPeakEvent = true;
         return OK();
     }
 
@@ -404,10 +447,16 @@ class AnimationEngine {
     }
 
     void _render(const ActiveAnimation &slot, uint32_t nowMs,
-                 uint8_t hueOffset,
-        const AnimationInputSnapshot &inputs) {
+                 uint8_t hueOffset, const AnimationInputSnapshot &inputs,
+                 Primitives::AudioControls audioControls) {
         const uint32_t elapsed = nowMs - slot.startMs;
         _layers.clearScratch();
+        if (Animations::requiresFullFrame(slot.payload)) {
+            _renderFullFrame(slot, nowMs, elapsed, hueOffset, inputs,
+                             audioControls);
+            return;
+        }
+
         auto canvas = Primitives::Canvas{_layers.scratch(), _logicalToLocal};
         auto ctx = AnimationRenderContext{
             .clock = {.nowMs = nowMs,
@@ -417,8 +466,33 @@ class AnimationEngine {
             .hueOffset = hueOffset,
             .canvas = canvas,
             .inputs = inputs,
+            .audio = audioControls,
         };
         Animations::render(slot.payload, ctx);
+        _layers.blendScratch(slot.layer, Animations::style(slot.payload));
+    }
+
+    void _renderFullFrame(const ActiveAnimation &slot, uint32_t nowMs,
+                          uint32_t elapsed, uint8_t hueOffset,
+                          const AnimationInputSnapshot &inputs,
+                          Primitives::AudioControls audioControls) {
+        Compositor::clear(_fullFrameScratch);
+        auto canvas =
+            Primitives::Canvas{_fullFrameScratch, _identityLogicalToLocal};
+        auto ctx = AnimationRenderContext{
+            .clock = {.nowMs = nowMs,
+                      .elapsedMs = elapsed,
+                      .durationMs = slot.lifetimeMs,
+                      .frame = _frames},
+            .hueOffset = hueOffset,
+            .canvas = canvas,
+            .inputs = inputs,
+            .audio = audioControls,
+        };
+        Animations::render(slot.payload, ctx);
+        Primitives::projectLogicalFrameToOwned(_fullFrameScratch,
+                                               _layers.scratch(),
+                                               _logicalToLocal);
         _layers.blendScratch(slot.layer, Animations::style(slot.payload));
     }
 
@@ -496,8 +570,12 @@ class AnimationEngine {
     LayerStack _layers{};
     std::array<LedTopology::LocalPixelIndex, Config::totalPixelCount>
         _logicalToLocal{};
+    std::array<LedTopology::LocalPixelIndex, Config::totalPixelCount>
+        _identityLogicalToLocal{Primitives::identityLogicalToLocalMap()};
+    std::array<HsvColor, Config::totalPixelCount> _fullFrameScratch{};
     std::array<ActiveAnimation, Config::maxActiveAnimations> _animations{};
     AnimationInputSnapshot _inputs{};
+    Primitives::AudioControlSmoother _audioControls{};
     std::atomic<uint8_t> _hueOffset{0};
     std::atomic<uint8_t> _rotationOffset{0};
     std::atomic<uint8_t> _brightness{0};
@@ -506,6 +584,7 @@ class AnimationEngine {
     uint32_t _frames = 0;
     Totem::PubSubBackend::SubscriberKey _fftSub = 0;
     Totem::PubSubBackend::SubscriberKey _wheelSub = 0;
+    Totem::PubSubBackend::SubscriberKey _peakSub = 0;
     bool _pubSubInputSubscribed = false;
     mutable ::platform::Spinlock _inputLock = ::platform::create_spinlock();
 

@@ -21,6 +21,7 @@ struct SineWave {
         SineWaveSpec::defaultDurationMs;
     static constexpr uint16_t minimumDurationMs =
         SineWaveSpec::minimumDurationMs;
+    static constexpr bool requiresFullFrame = false;
     static constexpr uint8_t minimumWidth = SineWaveSpec::minimumWidth;
     static constexpr uint8_t minimumWavelength =
         SineWaveSpec::minimumWavelength;

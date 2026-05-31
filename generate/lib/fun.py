@@ -24,6 +24,7 @@ CLANG_UNSUPPORTED_FLAGS = {
     "-fno-tree-switch-conversion",
     "-fstrict-volatile-bitfields",
     "-mlongcalls",
+    "-mtext-section-literals",
 }
 
 EntryT = TypeVar("EntryT")

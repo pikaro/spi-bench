@@ -123,8 +123,37 @@ applyFftReactiveConfig(Totem::LedDisplay::Animations::FftReactiveConfig &config,
             if (!readJsonInteger(value, config.saturation, error, fieldName)) {
                 return false;
             }
-        } else if (fieldName == "valueScale") {
-            if (!readJsonInteger(value, config.valueScale, error, fieldName)) {
+        } else if (fieldName == "value") {
+            if (!readJsonInteger(value, config.value, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "baseValue") {
+            if (!readJsonInteger(value, config.baseValue, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "radialMode") {
+            if (!readJsonInteger(value, config.radialMode, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "angularMode") {
+            if (!readJsonInteger(value, config.angularMode, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "symmetry") {
+            if (!readJsonInteger(value, config.symmetry, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "contrast") {
+            if (!readJsonInteger(value, config.contrast, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "peakSensitivity") {
+            if (!readJsonInteger(value, config.peakSensitivity, error,
+                                 fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "flowSpeed") {
+            if (!readJsonInteger(value, config.flowSpeed, error, fieldName)) {
                 return false;
             }
         } else {
@@ -475,6 +504,16 @@ style(const Payload &payload) {
             using Animation = std::remove_cvref_t<decltype(animation)>;
             (void)animation;
             return Animation::defaultStyle;
+        },
+        payload);
+}
+
+[[nodiscard]] inline bool requiresFullFrame(const Payload &payload) {
+    return std::visit(
+        [](const auto &animation) -> bool {
+            using Animation = std::remove_cvref_t<decltype(animation)>;
+            (void)animation;
+            return Animation::requiresFullFrame;
         },
         payload);
 }

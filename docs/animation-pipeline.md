@@ -29,8 +29,11 @@ The embedded pipeline is feature-complete for current animation development:
 - rendering uses scratch -> layer -> composed frame
 - present buffering supports `None`, `Double`, `Triple`, and `Quadruple`;
   the current default is `Triple`
-- FFT and wheel data are latest-value input streams for animations, not
+- FFT, peak, and wheel data are latest-value input streams for animations, not
   display-level rendering special cases
+- the engine derives a small per-frame audio-control snapshot from FFT bands
+  and peak events so animations can use smoothed bass/mid/high/energy plus
+  short attack pulses without owning PubSub state
 - the persistent wheel indicator starts through the same generic command path
   as all other animations
 
@@ -54,10 +57,10 @@ the engine, handles the present-strobe ISR, records present timing, and calls
 animations such as waves, FFT visuals, or the wheel indicator.
 
 `AnimationEngine` is the animation backend. It validates and queues commands,
-drains them at frame boundaries, owns active slots, captures latest FFT and
-wheel inputs, renders each active animation into scratch, blends scratch into
-the target layer, composes layers into the output frame, and expires timed
-animations.
+drains them at frame boundaries, owns active slots, captures latest FFT, peak,
+and wheel inputs, updates the audio-control snapshot, renders each active
+animation into scratch, blends scratch into the target layer, composes layers
+into the output frame, and expires timed animations.
 
 `Animations/<Name>/Config.hpp` owns the queue-copyable config payload and shared
 animation metadata such as kind, default layer, and default lifetime. It must not
@@ -91,7 +94,13 @@ ready.
 `src/master/orchestration.hpp` maps system events into generic LED requests. It
 does not own animation policy. For example, master can publish wheel indicator
 updates, but the wheel indicator animation decides whether and how those
-updates affect pixels.
+updates affect pixels. Master also starts and periodically refreshes the
+persistent FFT field after startup using a stable request ID. A stop-all command
+or a stop for that managed request suppresses further refreshes until the master
+restarts, so manual diagnostics can actually silence the field. Master uses
+peak events for lightweight orchestration: ordinary peak events are not
+center-wave requests, but the first peak after a two-second quiet window
+publishes one short center wave as a primitive drop marker.
 
 `src/master/led_bringup.hpp` owns the master-triggered LED bring-up probes. It
 publishes generic animation commands after boot so GPU mapping and long-running
@@ -129,7 +138,8 @@ Each GPU frame follows this path:
 3. The display asks the engine to render the next complete frame.
 4. The engine drains queued commands.
 5. The layer stack clears or decays layer buffers according to layer policy.
-6. The engine snapshots latest FFT and wheel input state.
+6. The engine snapshots latest FFT, peak, and wheel input state and updates
+   audio controls.
 7. Each active animation renders into shared scratch.
 8. Scratch is blended into the animation's target layer using the animation's
    style.
@@ -152,6 +162,21 @@ means update every active animation of that kind. Misses are counted in
 same request ID. This makes repeated command delivery idempotent for persistent
 animations such as `WheelIndicator`. `Play` with request ID `0` allocates a
 fresh nonzero request ID.
+
+## Render Traits
+
+Each animation exposes `static constexpr bool requiresFullFrame`. Normal
+animations leave this `false` and render only the pixels owned by the current
+GPU, using the existing logical-to-local map. Animations that inherently need a
+complete logical frame can set it to `true`; the engine then renders into a
+full logical scratch frame and projects the owned pixels back into the local
+layer scratch before blending.
+
+The full-frame path exists for future effects such as feedback warping where
+previous or neighboring pixels across GPU boundaries are intrinsic to the
+effect. It should remain opt-in because it doubles render-side pixel work on
+the current two-GPU layout. The current FFT field, wheel indicator, waves, and
+diagnostics do not require full-frame rendering.
 
 ## Layers
 
@@ -203,9 +228,13 @@ without giving `Display` or the output backend any animation-specific API.
 It is also available manually through `/anim sweep`; use `trailSpokes=0` when
 checking physical spoke order.
 
-`FftReactive` is a placeholder FFT-driven visual on the `Fft` layer. It
-consumes the engine's latest FFT snapshot and renders a fallback gradient when
-no FFT frame exists. The final FFT design is intentionally undecided.
+`FftReactive` is a polar FFT field on the `Fft` layer. It uses the annular
+coordinate helpers plus the engine's audio controls: smoothed bass/mid/high
+values modulate radial and angular fields, while peak events add restrained
+attack accents. Hue and spatial phase intentionally do not follow raw FFT-band
+changes directly, because that creates high-rate shimmer. It renders a fallback
+field when no audio input has arrived yet. It does not need full-frame
+rendering.
 
 `WheelIndicator` is a long-running wheel-layer animation with default request
 ID `1`. It renders a small spoke group from the latest wheel position and
@@ -298,11 +327,12 @@ compositor, layer-stack, and generic color-renderer headers:
 
 The host runtime supplies only the environment that isolated animations need:
 frame clock, hue and rotation offsets, logical-to-local mapping,
-scratch/output buffers, optional FFT and wheel input snapshots, and config
-payloads loaded from JSON. Animations and primitives should remain isolated
-enough to compile in this runtime without services, tasks, PubSub, queues,
-logging, or device output dependencies. If an animation needs broad host
-emulation to compile, the animation boundary is the thing to fix.
+scratch/output buffers, optional FFT, peak, and wheel input snapshots,
+derived audio controls, and config payloads loaded from JSON. Animations and
+primitives should remain isolated enough to compile in this runtime without
+services, tasks, PubSub, queues, logging, or device output dependencies. If an
+animation needs broad host emulation to compile, the animation boundary is the
+thing to fix.
 
 Animation discovery is generated from `include/LedDisplay/Animations/` naming
 conventions, with each animation using sibling `Animation.hpp` and `Config.hpp`
@@ -367,7 +397,8 @@ length. Current planes are:
 
 Trace metadata should record the renderer command line, git commit if
 available, animation name, animation config JSON, render mode, topology,
-ownership mode, color backend, FastLED fidelity mode, and build timestamp.
+ownership mode, color backend, FastLED fidelity mode, build timestamp, and the
+`requires_full_frame` trait for each rendered animation.
 
 The current color backend is deterministic `GenericRenderer` HSV-to-RGB
 conversion. Optional FastLED host rendering can be added as a fidelity mode if
@@ -427,6 +458,8 @@ Checked-in sample configs live under `tools/led-render/examples/`:
 - `wheel-indicator-static.json`
 - `spoke-sweep.json`
 - `fft-reactive-static.json`
+- `fft-polar-static.json`
+- `fft-polar-audio-sweep.json`
 
 Current implementation status:
 
@@ -434,6 +467,10 @@ Current implementation status:
 - all discovered animations compile in the host translation unit
 - the C++ renderer CLI consumes generated/table-driven JSON parsing
 - `hsv_final` and `rgb_final` traces are emitted in logical topology order
+- synthetic audio timelines and peak input snapshots are supported for
+  audio-reactive fixtures
+- full-frame animation traits are emitted in metadata and followed by the host
+  render path
 - Python can load traces, summarize them, extract pixels and regions, report
   frame deltas, detect flicker-like discontinuities, play traces, and export
   still frames

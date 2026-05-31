@@ -108,12 +108,27 @@ Input snapshots are supplied under `inputs`:
 {
   "inputs": {
     "wheel": {"position": 8192, "delta": 0},
-    "fft": {"subBass": 64, "bass": 180, "lowMid": 220, "mid": 160}
+    "fft": {"subBass": 64, "bass": 180, "lowMid": 220, "mid": 160},
+    "peak": {"group": "Bass", "energy": 220, "frameSequence": 7}
   }
 }
 ```
 
-Missing FFT bands default to zero.
+Missing FFT bands default to zero. Peak groups may be `Bass`, `Mid`, or
+`High`, or the raw enum integer.
+
+Synthetic audio timelines can be supplied at the root. They generate repeatable
+FFT input while rendering and are useful for audio-reactive fixtures:
+
+```json
+{
+  "audio": {
+    "bass": {"base": 32, "amp": 180, "period_ms": 900},
+    "mid": {"base": 28, "amp": 120, "period_ms": 1400, "phase": 48},
+    "high": {"base": 16, "amp": 110, "period_ms": 420, "phase": 96}
+  }
+}
+```
 
 ## Registry Generation
 
@@ -124,7 +139,8 @@ and discovers animation classes by the current production convention:
 
 - one `struct WIRE_MSG NameConfig`
 - one `struct Name` with `NameConfig config{}`
-- static `defaultLayer`, `defaultLifetimeMs`, and `defaultStyle`
+- static `defaultLayer`, `defaultLifetimeMs`, `defaultStyle`, and
+  `requiresFullFrame`
 - a `render(AnimationRenderContext &ctx)` method
 
 The generated registry lives under `tools/led-render/generated/` and is not the
@@ -153,8 +169,9 @@ three-byte pixel after another. Initial planes are:
   `--include-scratch`
 
 The metadata JSON records the source config, render mode, animation names,
-frame range, topology, annular geometry, and color backend. Radial viewer output
-uses this geometry metadata; regenerate traces after geometry changes.
+frame range, topology, annular geometry, color backend, and each animation's
+`requires_full_frame` trait. Radial viewer output uses this geometry metadata;
+regenerate traces after geometry changes.
 
 ## Fidelity Notes
 

@@ -12,6 +12,7 @@ struct DiagnosticFill {
     static constexpr Layer defaultLayer = DiagnosticFillSpec::defaultLayer;
     static constexpr uint16_t defaultLifetimeMs =
         DiagnosticFillSpec::defaultLifetimeMs;
+    static constexpr bool requiresFullFrame = false;
     static constexpr AnimationStyle defaultStyle{.blendOp = BlendOp::Replace,
                                                  .opacity = 255};
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Audio/Interfaces/Wire.hpp"
+#include "LedDisplay/Primitives/AudioControls.hpp"
 #include "LedDisplay/Primitives/Canvas.hpp"
 #include "Wheel/Interfaces/Wire.hpp"
 #include <cstdint>
@@ -16,8 +17,10 @@ struct FrameClock {
 
 struct AnimationInputSnapshot {
     Totem::Audio::FftFrame fftFrame{};
+    Totem::Audio::PeakEvent peakEvent{};
     Totem::Wheel::WheelState wheelState{};
     bool hasFftFrame = false;
+    bool hasPeakEvent = false;
     bool hasWheelState = false;
 };
 
@@ -26,6 +29,7 @@ struct AnimationRenderContext {
     uint8_t hueOffset = 0;
     Primitives::Canvas canvas;
     const AnimationInputSnapshot &inputs;
+    Primitives::AudioControls audio{};
 };
 
 } // namespace Totem::LedDisplay

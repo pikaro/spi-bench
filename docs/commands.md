@@ -159,6 +159,14 @@ Useful LED animation commands:
     loss for brighter sine peaks, with `0` meaning linear decay and `255`
     strongly preserving peaks. `lifetimeMs` is optional and defaults to the
     projected total time for the last peak to decay to the output value floor.
+    `!master /anim fft`
+    `!master /anim fft 0 144 220 20 2 3 4 180 96 40`
+    FFT arguments are `durationMs`, `hue`, `value`, `baseValue`,
+    `radialMode`, `angularMode`, `symmetry`, `contrast`, `peakSensitivity`,
+    `flowSpeed`. It starts the polar FFT field on the FFT layer. The default
+    master orchestration also refreshes a persistent request after startup; a
+    stop-all command or a stop for that request disables those refreshes until
+    the master restarts.
     `!master /anim sweep`
     `!master /anim sweep 6000 0 220 0 1 255`
     Sweep arguments are `durationMs`, `baseHue`, `value`, `trailSpokes`,
@@ -181,6 +189,10 @@ Useful LED animation commands:
     Brightness is the FastLED global brightness value, 0-255.
     Automatic master runtime orchestration is gated until the bring-up spoke
     sweep has finished. Manual commands remain direct diagnostics.
+    Master no longer publishes center waves for every peak event. Peak events
+    feed the FFT field and IO bulb flicker; after at least two seconds with no
+    peak in any band, the first following peak publishes one short center wave
+    as a primitive drop marker.
 
 Useful filesystem validation command:
 

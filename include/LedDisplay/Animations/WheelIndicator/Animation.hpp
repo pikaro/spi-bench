@@ -17,6 +17,7 @@ struct WheelIndicator {
         WheelIndicatorSpec::defaultLifetimeMs;
     static constexpr uint16_t defaultRequestId =
         WheelIndicatorSpec::defaultRequestId;
+    static constexpr bool requiresFullFrame = false;
     static constexpr uint32_t wheelAngleSteps =
         static_cast<uint32_t>(std::numeric_limits<uint16_t>::max()) + 1U;
     static constexpr uint8_t minimumSpokes = WheelIndicatorSpec::minimumSpokes;

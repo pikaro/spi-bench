@@ -7,10 +7,13 @@
 #include "CommandBackend/Interfaces/CommandDesc.hpp"
 #include "Data/Peripherals.hpp"
 #include "LedDisplay/Animations/CenterWave/Command.hpp"
+#include "LedDisplay/Animations/FftReactive/Command.hpp"
+#include "LedDisplay/Animations/FftReactive/Config.hpp"
 #include "LedDisplay/Animations/SineWave/Command.hpp"
 #include "LedDisplay/Animations/SineWave/Config.hpp"
 #include "LedDisplay/Animations/WheelIndicator/Command.hpp"
 #include "LedDisplay/Animations/WheelIndicator/Config.hpp"
+#include "LedDisplay/Interfaces/AnimationCommand.hpp"
 #include "LedDisplay/Interfaces/AnimationCommandFactory.hpp"
 #include "LedPwm/Interfaces/CommandEvent.hpp"
 #include "LedPwm/Interfaces/CommandEventFactory.hpp"
@@ -43,7 +46,7 @@ struct WheelMapping {
 };
 
 struct PeakWaveMapping {
-    bool publishCenterWave = true;
+    bool publishCenterWave = false;
     // std::array<uint8_t, Totem::Audio::peakGroupCount> hueByGroup{{0, 24,
     // 48}};
     std::array<uint8_t, Totem::Audio::peakGroupCount> hueByGroup{{0, 32, 64}};
@@ -58,6 +61,26 @@ struct PeakWaveMapping {
     uint8_t peak = 2;
     uint8_t wake = 6;
     uint32_t minIntervalMs = 50;
+};
+
+struct FftFieldMapping {
+    bool publishOnStartup = true;
+    uint16_t requestId = 3;
+    uint32_t refreshIntervalMs = 5000;
+    Totem::LedDisplay::Animations::FftReactiveConfig animation{};
+};
+
+struct DropWaveMapping {
+    bool publishCenterWave = true;
+    uint32_t quietWindowMs = 2000;
+    uint32_t minIntervalMs = 2500;
+    uint16_t lifetimeMs = 1400;
+    std::array<uint8_t, Totem::Audio::peakGroupCount> hueByGroup{{0, 32, 64}};
+    uint8_t saturation = 255;
+    uint8_t value = 180;
+    uint8_t rise = 2;
+    uint8_t peak = 1;
+    uint8_t wake = 4;
 };
 
 struct BulbPulseProfile {
@@ -150,6 +173,8 @@ struct BeatMapping {
 
 struct Config {
     WheelMapping wheel{};
+    FftFieldMapping fftField{};
+    DropWaveMapping dropWave{};
     PeakWaveMapping peakWave{};
     BeatMapping beat{};
     IoLedMapping ioLed{};
@@ -184,14 +209,20 @@ inline Totem::PubSubBackend::SubscriberKey wheelSubscription = 0;
 inline Totem::PubSubBackend::SubscriberKey beatSubscription = 0;
 inline Totem::PubSubBackend::SubscriberKey peakSubscription = 0;
 inline Totem::PubSubBackend::SubscriberKey buttonSubscription = 0;
+inline Totem::PubSubBackend::SubscriberKey animationSubscription = 0;
 inline bool calibrateAudioCommandRegistered = false;
 inline Angle<uint16_t> wheelOffset{};
 inline bool wheelOffsetDirty = false;
 inline bool wheelIndicatorDirty = false;
 inline bool ioStartupPublished = false;
+inline bool fftFieldPublished = false;
+inline bool fftFieldSuppressed = false;
 inline uint32_t lastWheelPublishMs = 0;
 inline uint32_t lastIoStartupPublishMs = 0;
+inline uint32_t lastFftFieldPublishMs = 0;
 inline uint32_t lastBellSinelonMs = 0;
+inline uint32_t lastAnyPeakMs = 0;
+inline uint32_t lastDropWaveMs = 0;
 inline uint32_t lastBeatSequence = 0;
 inline Totem::Audio::BeatEventKind lastBeatKind = Totem::Audio::BeatEventKind::Lost;
 inline std::array<uint32_t, Totem::Audio::peakGroupCount> lastPeakWaveMs{};
@@ -330,6 +361,24 @@ inline ReturnCode publishWheelEffects() {
     return OK();
 }
 
+inline ReturnCode publishFftField(bool firstPublish) {
+    FAIL_IF_UNEXPECTED_FWD(
+        cmd,
+        Totem::LedDisplay::Animations::FftReactiveCommand::makeCommand(
+            config.fftField.animation, config.fftField.requestId),
+        "Failed to build orchestrated FFT field animation");
+    FAIL_IF_ERR_FWD(Totem::LedDisplay::publishAnimationCommand(cmd),
+                    "Failed to publish orchestrated FFT field animation");
+    if (firstPublish) {
+        _log_i("Published FFT field animation request=%u",
+               config.fftField.requestId);
+    } else {
+        _log_d("Refreshed FFT field animation request=%u",
+               config.fftField.requestId);
+    }
+    return OK();
+}
+
 inline ReturnCode
 onWheelEnvelope(void * /*unused*/,
                 const Totem::PubSubBackend::Envelope &envelope) {
@@ -403,6 +452,28 @@ onButtonEnvelope(void * /*unused*/,
     if (!ret.ok()) {
         _log_w("Dropping button event: orchestration queue is full");
     }
+    return OK();
+}
+
+inline ReturnCode
+onAnimationEnvelope(void * /*unused*/,
+                    const Totem::PubSubBackend::Envelope &envelope) {
+    FAIL_IF_UNEXPECTED_FWD(cmd,
+                           envelope.getPayloadAs<
+                               Totem::LedDisplay::AnimationCommand>(),
+                           "Failed to decode orchestrated animation command");
+
+    const auto stopsFftField =
+        cmd.type == Totem::LedDisplay::AnimationCommandType::Stop &&
+        (cmd.requestId == 0 || cmd.requestId == config.fftField.requestId);
+    if (stopsFftField && !fftFieldSuppressed) {
+        fftFieldSuppressed = true;
+        fftFieldPublished = false;
+        lastFftFieldPublishMs = 0;
+        _log_i("Suppressed FFT field refresh after animation stop request=%u",
+               cmd.requestId);
+    }
+
     return OK();
 }
 
@@ -502,6 +573,17 @@ inline ReturnCode begin() {
             "Failed to subscribe master orchestration to button events");
         detail::buttonSubscription = sub;
     }
+    if (detail::animationSubscription == 0) {
+        FAIL_IF_UNEXPECTED_FWD(
+            sub,
+            PubSubService::get().subscribe(
+                "master-orch-anim",
+                {.subscriber = nullptr,
+                 .callback = detail::onAnimationEnvelope},
+                PubSubService::Topic::Animation),
+            "Failed to subscribe master orchestration to animation commands");
+        detail::animationSubscription = sub;
+    }
     if (!detail::calibrateAudioCommandRegistered) {
         FAIL_IF_UNEXPECTED_FWD(
             commandKey,
@@ -511,8 +593,8 @@ inline ReturnCode begin() {
         (void)commandKey;
         detail::calibrateAudioCommandRegistered = true;
     }
-    _log_i("Master orchestration subscribed to wheel, beat, peak, and button "
-           "events");
+    _log_i("Master orchestration subscribed to wheel, beat, peak, button, and "
+           "animation events");
     return OK();
 }
 
@@ -564,6 +646,48 @@ inline ReturnCode handlePeakWave(const Totem::Audio::PeakEvent &event,
              .wake = config.peakWave.wake},
             0, config.peakWave.lifetimeMs),
         "Failed to build peak center wave command");
+    return Totem::LedDisplay::publishAnimationCommand(cmd);
+}
+
+inline ReturnCode handleDropWave(const Totem::Audio::PeakEvent &event,
+                                 uint32_t nowMs) {
+    if (!config.dropWave.publishCenterWave) {
+        detail::lastAnyPeakMs = nowMs;
+        return OK();
+    }
+
+    const auto groupIndex = Totem::Audio::peakGroupIndex(event.group);
+    if (groupIndex >= Totem::Audio::peakGroupCount) {
+        detail::lastAnyPeakMs = nowMs;
+        return OK();
+    }
+
+    const auto lastPeakMs = detail::lastAnyPeakMs;
+    detail::lastAnyPeakMs = nowMs;
+    if (lastPeakMs == 0 ||
+        (nowMs - lastPeakMs) < config.dropWave.quietWindowMs) {
+        return OK();
+    }
+
+    if (detail::lastDropWaveMs != 0 &&
+        (nowMs - detail::lastDropWaveMs) < config.dropWave.minIntervalMs) {
+        return OK();
+    }
+
+    detail::lastDropWaveMs = nowMs;
+    FAIL_IF_UNEXPECTED_FWD(
+        cmd,
+        Totem::LedDisplay::Animations::CenterWaveCommand::makeCommand(
+            {.hue = config.dropWave.hueByGroup[groupIndex],
+             .saturation = config.dropWave.saturation,
+             .value = config.dropWave.value,
+             .rise = config.dropWave.rise,
+             .peak = config.dropWave.peak,
+             .wake = config.dropWave.wake},
+            0, config.dropWave.lifetimeMs),
+        "Failed to build drop center wave command");
+    _log_i("Published drop center wave after %lums quiet",
+           static_cast<unsigned long>(nowMs - lastPeakMs));
     return Totem::LedDisplay::publishAnimationCommand(cmd);
 }
 
@@ -635,6 +759,7 @@ inline ReturnCode handleBeat(const Totem::Audio::BeatEvent &event) {
 inline ReturnCode handlePeak(const Totem::Audio::PeakEvent &event,
                              uint32_t nowMs) {
     auto ret = OK();
+    ret.combine(handleDropWave(event, nowMs));
     ret.combine(handlePeakWave(event, nowMs));
     ret.combine(handleIoPeak(event, nowMs));
     return ret;
@@ -738,6 +863,23 @@ inline ReturnCode work(uint32_t nowMs, bool allowNormalOperation = true) {
             return OK();
         }
         detail::ioStartupPublished = true;
+    }
+
+    const auto fftFieldElapsed = nowMs - detail::lastFftFieldPublishMs;
+    const auto fftFieldRefreshDue =
+        detail::fftFieldPublished && config.fftField.refreshIntervalMs != 0 &&
+        detail::lastFftFieldPublishMs != 0 &&
+        fftFieldElapsed >= config.fftField.refreshIntervalMs;
+    if (config.fftField.publishOnStartup && !detail::fftFieldSuppressed &&
+        (!detail::fftFieldPublished || fftFieldRefreshDue)) {
+        const auto firstPublish = !detail::fftFieldPublished;
+        const auto publishResult = detail::publishFftField(firstPublish);
+        detail::lastFftFieldPublishMs = nowMs;
+        if (!publishResult.ok()) {
+            _log_w("Failed to publish FFT field animation; retrying later");
+            return OK();
+        }
+        detail::fftFieldPublished = true;
     }
 
     if (!detail::wheelOffsetDirty && !detail::wheelIndicatorDirty) {

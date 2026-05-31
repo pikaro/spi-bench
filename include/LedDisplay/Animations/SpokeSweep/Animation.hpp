@@ -18,6 +18,7 @@ struct SpokeSweep {
         SpokeSweepSpec::defaultLifetimeMs;
     static constexpr uint16_t defaultRequestId =
         SpokeSweepSpec::defaultRequestId;
+    static constexpr bool requiresFullFrame = false;
     static constexpr uint8_t minimumCycles = SpokeSweepSpec::minimumCycles;
     static constexpr uint8_t fullScale = std::numeric_limits<uint8_t>::max();
     static constexpr uint8_t markerSaturation = 255;

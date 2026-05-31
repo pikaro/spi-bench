@@ -19,6 +19,7 @@ struct Sinelon {
         SinelonSpec::defaultLifetimeMs;
     static constexpr uint16_t defaultPeriodMs = SinelonSpec::defaultPeriodMs;
     static constexpr uint16_t minimumPeriodMs = SinelonSpec::minimumPeriodMs;
+    static constexpr bool requiresFullFrame = false;
     static constexpr uint8_t minimumWidth = SinelonSpec::minimumWidth;
     static constexpr uint8_t defaultSpokeGainPhaseStep =
         SinelonSpec::defaultSpokeGainPhaseStep;

@@ -230,6 +230,7 @@ def emit_registry(animations: list[Animation]) -> str:
             "Totem::LedDisplay::AnimationStyle",
             "Animation::defaultStyle",
         ),
+        ("requiresFullFrame", "bool", "Animation::requiresFullFrame"),
     ]:
         sections.append(
             f"[[nodiscard]] inline {return_type} {function_name}"

@@ -82,7 +82,7 @@ inline ReturnCode publishAnimationCommand(AnimationCommand cmd) {
     FAIL_IF(messageId == 0, ERR(CoreError, InvalidState),
             "PubSub returned message ID 0");
 
-    if (cmd.requestId == 0) {
+    if (cmd.requestId == 0 && cmd.type != AnimationCommandType::Stop) {
         constexpr uint16_t firstNonzeroRequestId = 1;
         constexpr uint32_t requestIdMask =
             std::numeric_limits<uint16_t>::max();

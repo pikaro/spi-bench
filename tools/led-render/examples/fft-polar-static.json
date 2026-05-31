@@ -6,14 +6,21 @@
   "mode": "pipeline",
   "inputs": {
     "fft": {
-      "subBass": 64,
-      "bass": 180,
-      "lowMid": 220,
-      "mid": 160,
-      "highMid": 96,
-      "presence": 128,
-      "brilliance": 80,
-      "air": 48
+      "subBass": 80,
+      "bass": 200,
+      "lowMid": 120,
+      "mid": 170,
+      "highMid": 120,
+      "presence": 80,
+      "brilliance": 60,
+      "air": 40
+    },
+    "peak": {
+      "group": "Mid",
+      "energy": 180,
+      "lowerBand": 2,
+      "upperBand": 4,
+      "frameSequence": 1
     }
   },
   "config": {

@@ -11,7 +11,14 @@ template <> struct FieldList<::Totem::LedDisplay::Animations::FftReactiveConfig>
     static constexpr auto fields = std::make_tuple(
         Field<&Type::baseHue>{"baseHue"},
         Field<&Type::saturation>{"saturation"},
-        Field<&Type::valueScale>{"valueScale"}
+        Field<&Type::value>{"value"},
+        Field<&Type::baseValue>{"baseValue"},
+        Field<&Type::radialMode>{"radialMode"},
+        Field<&Type::angularMode>{"angularMode"},
+        Field<&Type::symmetry>{"symmetry"},
+        Field<&Type::contrast>{"contrast"},
+        Field<&Type::peakSensitivity>{"peakSensitivity"},
+        Field<&Type::flowSpeed>{"flowSpeed"}
     );
 };
 

@@ -32,6 +32,20 @@ using AnimationInputSnapshot = Totem::LedDisplay::AnimationInputSnapshot;
 using AnimationRenderContext = Totem::LedDisplay::AnimationRenderContext;
 using Canvas = Totem::LedDisplay::Primitives::Canvas;
 
+struct SyntheticAudioChannel {
+    uint8_t base = 0;
+    uint8_t amp = 0;
+    uint16_t periodMs = 1000;
+    uint8_t phase = 0;
+};
+
+struct SyntheticAudio {
+    bool enabled = false;
+    SyntheticAudioChannel bass{.base = 48, .amp = 160, .periodMs = 900};
+    SyntheticAudioChannel mid{.base = 40, .amp = 120, .periodMs = 1400};
+    SyntheticAudioChannel high{.base = 18, .amp = 120, .periodMs = 220};
+};
+
 struct ActiveAnimationSpecBase {
     uint32_t startMs = 0;
     uint32_t durationMs = 0;
@@ -49,6 +63,7 @@ struct RenderRequest {
     std::string outputPath;
     std::string sourceJson;
     AnimationInputSnapshot inputs{};
+    SyntheticAudio audio{};
 };
 
 [[nodiscard]] inline uint32_t frameStepUs(uint32_t fps) {
@@ -218,7 +233,117 @@ inline void hsvToRgb(std::span<const HsvColor> hsv, std::span<RgbColor> rgb) {
         inputs.hasWheelState = true;
     }
 
+    if (const auto *peak = inputValue->find("peak"); peak != nullptr) {
+        if (peak->kind != JsonValue::Kind::Object) {
+            error = "Field 'inputs.peak' must be an object";
+            return false;
+        }
+        std::string groupName = "Bass";
+        if (const auto *group = peak->find("group"); group != nullptr) {
+            if (group->kind == JsonValue::Kind::String) {
+                if (!readJsonString(*group, groupName, error,
+                                    "inputs.peak.group")) {
+                    return false;
+                }
+                const auto parsed =
+                    magic_enum::enum_cast<Totem::Audio::PeakGroup>(groupName);
+                if (!parsed.has_value()) {
+                    error = "Unknown peak group '" + groupName + "'";
+                    return false;
+                }
+                inputs.peakEvent.group = *parsed;
+            } else {
+                uint8_t rawGroup = 0;
+                if (!readJsonInteger(*group, rawGroup, error,
+                                     "inputs.peak.group")) {
+                    return false;
+                }
+                inputs.peakEvent.group =
+                    static_cast<Totem::Audio::PeakGroup>(rawGroup);
+            }
+        }
+        if (!readOptionalUint8(*peak, "energy", inputs.peakEvent.energy,
+                               error) ||
+            !readOptionalUint8(*peak, "lowerBand", inputs.peakEvent.lowerBand,
+                               error) ||
+            !readOptionalUint8(*peak, "upperBand", inputs.peakEvent.upperBand,
+                               error) ||
+            !readOptionalUint32(*peak, "frameSequence",
+                                inputs.peakEvent.frameSequence, error)) {
+            return false;
+        }
+        inputs.hasPeakEvent = true;
+    }
+
     return true;
+}
+
+[[nodiscard]] inline bool readSyntheticAudioChannel(
+    const JsonValue &object, std::string_view key, SyntheticAudioChannel &out,
+    std::string &error) {
+    const auto *value = object.find(key);
+    if (value == nullptr) {
+        return true;
+    }
+    if (value->kind != JsonValue::Kind::Object) {
+        error = "Field 'audio." + std::string(key) + "' must be an object";
+        return false;
+    }
+    return readOptionalUint8(*value, "base", out.base, error) &&
+           readOptionalUint8(*value, "amp", out.amp, error) &&
+           readOptionalUint16(*value, "period_ms", out.periodMs, error) &&
+           readOptionalUint8(*value, "phase", out.phase, error);
+}
+
+[[nodiscard]] inline bool readSyntheticAudio(const JsonValue &root,
+                                             SyntheticAudio &audio,
+                                             std::string &error) {
+    const auto *value = root.find("audio");
+    if (value == nullptr) {
+        return true;
+    }
+    if (value->kind != JsonValue::Kind::Object) {
+        error = "Field 'audio' must be an object";
+        return false;
+    }
+    audio.enabled = true;
+    return readSyntheticAudioChannel(*value, "bass", audio.bass, error) &&
+           readSyntheticAudioChannel(*value, "mid", audio.mid, error) &&
+           readSyntheticAudioChannel(*value, "high", audio.high, error);
+}
+
+[[nodiscard]] inline uint8_t syntheticAudioValue(SyntheticAudioChannel channel,
+                                                 uint32_t nowMs) {
+    if (channel.periodMs == 0) {
+        return channel.base;
+    }
+    const auto phase = static_cast<uint8_t>(
+        channel.phase +
+        ((static_cast<uint64_t>(nowMs) * 256ULL) / channel.periodMs));
+    return Totem::LedDisplay::Renderers::GenericRenderer::qadd8(
+        channel.base,
+        Totem::LedDisplay::Renderers::GenericRenderer::scale8(
+            Totem::LedDisplay::Renderers::GenericRenderer::sine8(phase),
+            channel.amp));
+}
+
+inline void applySyntheticAudio(const SyntheticAudio &audio, uint32_t nowMs,
+                                AnimationInputSnapshot &inputs) {
+    if (!audio.enabled) {
+        return;
+    }
+    const auto bass = syntheticAudioValue(audio.bass, nowMs);
+    const auto mid = syntheticAudioValue(audio.mid, nowMs);
+    const auto high = syntheticAudioValue(audio.high, nowMs);
+    inputs.fftFrame.subBass = bass;
+    inputs.fftFrame.bass = bass;
+    inputs.fftFrame.lowMid = mid;
+    inputs.fftFrame.mid = mid;
+    inputs.fftFrame.highMid = mid;
+    inputs.fftFrame.presence = high;
+    inputs.fftFrame.brilliance = high;
+    inputs.fftFrame.air = high;
+    inputs.hasFftFrame = true;
 }
 
 } // namespace Totem::LedRender

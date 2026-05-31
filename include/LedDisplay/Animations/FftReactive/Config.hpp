@@ -9,9 +9,16 @@
 namespace Totem::LedDisplay::Animations {
 
 struct WIRE_MSG FftReactiveConfig {
-    uint8_t baseHue = 0;
+    uint8_t baseHue = 144;
     uint8_t saturation = 255;
-    uint8_t valueScale = 128;
+    uint8_t value = 220;
+    uint8_t baseValue = 20;
+    uint8_t radialMode = 2;
+    uint8_t angularMode = 3;
+    uint8_t symmetry = 4;
+    uint8_t contrast = 180;
+    uint8_t peakSensitivity = 96;
+    uint8_t flowSpeed = 40;
 };
 
 struct FftReactiveSpec {

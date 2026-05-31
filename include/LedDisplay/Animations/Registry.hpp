@@ -101,6 +101,14 @@ inline ReturnCode update(Payload &payload, const AnimationCommand &cmd) {
                       payload);
 }
 
+[[nodiscard]] inline bool requiresFullFrame(const Payload &payload) {
+    return std::visit(
+        [](const auto &animation) {
+            return std::remove_cvref_t<decltype(animation)>::requiresFullFrame;
+        },
+        payload);
+}
+
 inline void render(const Payload &payload, AnimationRenderContext &ctx) {
     std::visit([&ctx](const auto &animation) { animation.render(ctx); },
                payload);

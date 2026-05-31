@@ -1,6 +1,7 @@
 #pragma once
 
-#include "Audio/Interfaces/BeatTrackerConfig.hpp"
+#include "Audio/Interfaces/PeakDetectorConfig.hpp"
+#include "Audio/Interfaces/TempoTrackerConfig.hpp"
 #include "Audio/Interfaces/Types.hpp"
 #include "StaticConfig/Stacks.hpp"
 #include "TaskController/Interfaces/Config.hpp"
@@ -20,8 +21,9 @@ struct FftAnalyzerConfig {
     FftMagnitudeMode magnitudeMode = FftMagnitudeMode::Average;
     FftSignalPipelineConfig signalPipeline{};
     FftMagnitudeCacheConfig magnitudeCache{};
-    BeatTrackerConfig beatTracker{};
-    BeatResultHandler beatIndicator{};
+    PeakDetectorConfig peakDetector{};
+    TempoTrackerConfig tempoTracker{};
+    PeakResultHandler peakIndicator{};
     uint16_t copyBufferSizeBytes = 2048;
     Totem::TaskController::Config task{
         .name = "AudioFft",
@@ -38,7 +40,8 @@ struct FftAnalyzerConfig {
             !isFftBackendLibrary(backend) || !isFftWindow(window) ||
             !isFftMagnitudeMode(magnitudeMode) || copyBufferSizeBytes == 0 ||
             !signalPipeline.validate() || !magnitudeCache.validate() ||
-            !beatTracker.validate() || !task.validate()) {
+            !peakDetector.validate() || !tempoTracker.validate() ||
+            !task.validate()) {
             return false;
         }
 

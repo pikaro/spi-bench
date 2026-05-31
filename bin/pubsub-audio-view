@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT=$(git rev-parse --show-toplevel)
+export PYTHONPATH="$ROOT/tools${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m pubsub_audio_viewer.cli "$@"

@@ -3,16 +3,13 @@
 #include "Base/HasLifecycle.hpp"
 #include "Base/HasTaskController.hpp"
 #include "Buttons/Interfaces/Config.hpp"
+#include "Buttons/Interfaces/EventFactory.hpp"
 #include "Buttons/Interfaces/Wire.hpp"
 #include "Buttons/detail/Metrics.hpp"
 #include "Buttons/detail/Types.hpp"
-#include "Data.hpp"
 #include "Macros/Facade.hpp"
 #include "Platform/Gpio.hpp"
-#include "PubSubBackend/Interfaces/Envelope.hpp"
-#include "PubSubBackend/Interfaces/Types.hpp"
 #include "Queue/Facade.hpp"
-#include "Services/PubSub.hpp"
 #include "StaticConfig/Button.hpp"
 #include "TaskController/Facade.hpp"
 #include "TaskController/Interfaces/IRegistry.hpp"
@@ -39,12 +36,9 @@ class Buttons : public HasLifecycle<Buttons, Config>,
     friend struct TaskController::TaskHooks::Contract<Buttons>;
     friend struct TaskControllerContract<Buttons>;
 
-    using MessagePool = Totem::PubSubBackend::Pool<ButtonEvent, 8>;
-
   public:
     explicit Buttons(TaskController::IRegistry &registry)
-        : HasTaskController<Buttons, Config>(registry),
-          _messagePool(PubSubService::nextMessageId) {}
+        : HasTaskController<Buttons, Config>(registry) {}
 
     DELETE_COPY(Buttons)
     DELETE_MOVE(Buttons)
@@ -155,53 +149,15 @@ class Buttons : public HasLifecycle<Buttons, Config>,
                             : ButtonEventType::Released,
             .button = btnCfg.button,
         };
-        auto messageIdResult = _messagePool.store(pubSubEvent);
-        if (!messageIdResult) {
-            metrics().addPublishFailure();
-            FAIL_ERR_FWD(messageIdResult.error(),
-                         "Failed to store button event in PubSub pool");
-        }
-        const auto messageId = *messageIdResult;
-        _log_i("Button event: button=%u type=%s messageId=%u",
+        _log_i("Button event: button=%u type=%s",
                pubSubEvent.button,
                pubSubEvent.type == ButtonEventType::Pressed ? "Pressed"
-                                                            : "Released",
-               messageId);
-
-        auto envelopeDef = Totem::PubSubBackend::EnvelopeDef{
-            .owner = static_cast<void *>(&_messagePool),
-            .topic = NodeData::PubSub::Topic::Button,
-            .messageId = messageId,
-            .source = static_cast<Totem::PubSubBackend::NodeId>(
-                PubSubService::get().nodeId()),
-            .getPayloadPtr = MessagePool::getPtr,
-            .encodePayload = MessagePool::encodePayload,
-            .release = MessagePool::release,
-            .requireSyncedClock = false,
-        };
-
-        auto envelopeResult =
-            Totem::PubSubBackend::Envelope::make<ButtonEvent>(envelopeDef);
-        if (!envelopeResult) {
+                                                            : "Released");
+        auto publishResult = publishButtonEvent(pubSubEvent);
+        if (!publishResult.ok()) {
             metrics().addPublishFailure();
-            if (!_messagePool.release({.header = {.messageId = messageId}})
-                     .ok()) {
-                _log_e("Failed to release button event from PubSub pool after "
-                       "envelope creation failure");
-            }
-            FAIL_ERR_FWD(envelopeResult.error(),
-                         "Failed to create PubSub envelope for button event");
-        }
-
-        auto publishResult = PubSubService::get().publish(*envelopeResult);
-        if (!publishResult) {
-            metrics().addPublishFailure();
-            if (!_messagePool.release({.header = {.messageId = messageId}})) {
-                _log_e("Failed to release button event from PubSub pool after "
-                       "publish failure");
-            }
             FAIL_ERR_FWD(publishResult,
-                         "Failed to publish button event envelope to PubSub");
+                         "Failed to publish button event to PubSub");
         }
 
         metrics().addPublished();
@@ -300,8 +256,6 @@ class Buttons : public HasLifecycle<Buttons, Config>,
     std::array<bool, ButtonConfig::maxButtons> _levelsKnown{};
     std::atomic<uint32_t> _isrEvents{0};
     std::atomic<uint32_t> _isrDrops{0};
-
-    MessagePool _messagePool;
 
     static constexpr LogComponent logComponent =
         Totem::Buttons::detail::logComponent;

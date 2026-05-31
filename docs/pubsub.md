@@ -13,7 +13,8 @@ ESP32-class MCUs.
 The target topology is:
 
 - one master node that coordinates the bus and handles WiFi
-- one media node that publishes FFT and beat events from I2S audio
+- one media node that publishes FFT frames, peak events, and beat outcome events
+  from I2S audio
 - four GPU nodes that render LED segments locally
 - side nodes over RS485, I2C, and BLE for sensors, bulbs, and peripherals
 
@@ -36,9 +37,8 @@ current five-node graph:
 - GPU nodes subscribe through `LedDisplay` to animation and FFT-frame events.
   They share the same event interests in this prototype shape, matching the
   intended later four-GPU bus.
-- Media owns the audio/FFT pipeline and the low-speed SPI transport. Publishing
-  beat/FFT events into animation-capable consumers is intentionally deferred
-  until the animation command surface is ready.
+- Media owns the audio/FFT pipeline and the low-speed SPI transport. It publishes
+  FFT frames, peak/accent events, and sparse tempo-clock beat outcome events.
 
 The accepted behavior for this stage is reliable delivery, bounded static
 storage, graceful recovery after master or edge reset, and visibility through
@@ -52,8 +52,8 @@ backpressure, or recovery errors appear.
 PubSub uses two traffic classes:
 
 - `Critical`: control-plane traffic, currently the `PubSub` topic
-- `Noncritical`: normal application events such as FFT, beat, sensor, logs, and
-  metrics unless explicitly marked otherwise
+- `Noncritical`: normal application events such as FFT, peak, beat, sensor,
+  logs, and metrics unless explicitly marked otherwise
 
 Under arena pressure, noncritical frames may be dropped or evicted. Critical
 frames may evict older noncritical frames but should not silently displace

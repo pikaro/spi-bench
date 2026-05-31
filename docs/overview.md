@@ -5,14 +5,14 @@ ESP32-class microcontrollers, built with PlatformIO on top of ESP-IDF.
 
 The intended end state is a festival "rave stick": a reliable multi-node LED
 controller that can run unattended for many hours. A bus master handles WiFi and
-central coordination; a media node processes I2S audio and publishes FFT / beat
-events; four ESP32-S3 GPU nodes render LED frame segments; side nodes over
-RS485, I2C, and BLE provide sensors, bulbs, and future peripherals.
+central coordination; a media node processes I2S audio and publishes FFT, peak,
+and beat outcome events; four ESP32-S3 GPU nodes render LED frame segments; side
+nodes over RS485, I2C, and BLE provide sensors, bulbs, and future peripherals.
 
 The system is event-driven because full LED frame data is too expensive to
 publish at the target 125 fps. Nodes publish compact events such as FFT frames,
-beats, bell strikes, warnings, errors, and metrics. GPU nodes subscribe to those
-events and render their own LED segment locally.
+peaks, beat outcomes, bell strikes, warnings, errors, and metrics. GPU nodes
+subscribe to those events and render their own LED segment locally.
 
 ## Current Scope
 
@@ -98,7 +98,7 @@ organized as follows:
     `io` to publish wheel rotation events
 - `include/Audio/`: media-node compile-time selected I2S, LittleFS WAV,
     Bluedroid A2DP, or BTstack A2DP audio input, FFT analysis, magnitude
-    scaling, and beat detection; see
+    scaling, peak extraction, and first-pass tempo tracking; see
     [audio.md](audio.md)
 - `include/LedTopology/` and `include/LedDisplay/`: GPU-node logical LED
     topology, compile-time ownership, FastLED-backed output, local animation
@@ -156,7 +156,7 @@ callers can only address LEDs present in the node configuration.
 `PeripheralLedConfig::configured` marks populated static slots; unconfigured
 slots are ignored so nodes can own fewer LEDs than `LedPwmConfig::maxLeds`
 without creating dummy GPIO outputs. The media node uses the same `LedPwm`
-component for the active-high GPIO26 FFT beat indicator.
+component for the active-high GPIO26 FFT peak indicator.
 The same node owns the ship's bell input as an active-high GPIO button with an
 external pulldown. Button ISR events are queued and published locally through
 PubSub before higher-level lighting code reacts to them; the button task also

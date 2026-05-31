@@ -16,7 +16,6 @@ namespace Totem::Tools::PubSubUdp {
 
 enum class Topic : uint32_t {
     PubSub = 1U << 1,
-    Button = 1U << 8,
 };
 
 enum class NodeId : uint8_t {
@@ -33,15 +32,6 @@ enum class SubscribeEventType : uint8_t {
     Unregister = 1,
 };
 
-enum class ButtonEventType : uint8_t {
-    Pressed = 0,
-    Released = 1,
-};
-
-enum class PeripheralButton : uint8_t {
-    Bell = 0,
-};
-
 struct Header {
     uint32_t timestampMs = 0;
     uint64_t timestampUs = 0;
@@ -55,11 +45,6 @@ struct Header {
 struct PubSubEvent {
     uint32_t topic = 0;
     uint8_t type = 0;
-};
-
-struct ButtonEvent {
-    uint8_t type = 0;
-    uint8_t button = 0;
 };
 
 struct Frame {
@@ -154,14 +139,6 @@ inline std::vector<std::byte> encodePayload(const PubSubEvent &event) {
     return out;
 }
 
-inline std::vector<std::byte> encodePayload(const ButtonEvent &event) {
-    std::vector<std::byte> out;
-    out.reserve(2);
-    appendLe<uint8_t>(out, event.type);
-    appendLe<uint8_t>(out, event.button);
-    return out;
-}
-
 inline std::vector<std::byte> encodeFrame(Header header,
                                           std::span<const std::byte> payload) {
     header.payloadSize = static_cast<uint16_t>(payload.size());
@@ -224,38 +201,6 @@ inline std::optional<PubSubEvent> decodePubSubEvent(
     return event;
 }
 
-inline std::optional<ButtonEvent> decodeButtonEvent(
-    std::span<const std::byte> payload) {
-    if (payload.size() != 2) {
-        return std::nullopt;
-    }
-    ButtonEvent event{};
-    size_t offset = 0;
-    if (!readLe<uint8_t>(payload, offset, event.type) ||
-        !readLe<uint8_t>(payload, offset, event.button)) {
-        return std::nullopt;
-    }
-    return event;
-}
-
-inline std::string buttonTypeName(uint8_t value) {
-    switch (static_cast<ButtonEventType>(value)) {
-    case ButtonEventType::Pressed:
-        return "Pressed";
-    case ButtonEventType::Released:
-        return "Released";
-    }
-    return "Unknown";
-}
-
-inline std::string buttonName(uint8_t value) {
-    switch (static_cast<PeripheralButton>(value)) {
-    case PeripheralButton::Bell:
-        return "Bell";
-    }
-    return "Unknown";
-}
-
 inline std::string subscribeTypeName(uint8_t value) {
     switch (static_cast<SubscribeEventType>(value)) {
     case SubscribeEventType::Register:
@@ -292,21 +237,15 @@ inline std::vector<std::byte> makeHostFrame(uint32_t messageId, uint32_t topic,
 }
 
 inline std::vector<std::byte>
-makePubSubControlFrame(uint32_t messageId, Topic topic,
+makePubSubControlFrame(uint32_t messageId, uint32_t topic,
                        SubscribeEventType type) {
     const auto payload = encodePayload(PubSubEvent{
-        .topic = static_cast<uint32_t>(topic),
+        .topic = topic,
         .type = static_cast<uint8_t>(type),
     });
     return encodeFrame(makeHostHeader(messageId, Topic::PubSub,
                                       TrafficClass::Critical),
                        payload);
-}
-
-inline std::vector<std::byte> makeSubscribeFrame(uint32_t messageId,
-                                                 Topic topic) {
-    return makePubSubControlFrame(messageId, topic,
-                                  SubscribeEventType::Register);
 }
 
 } // namespace Totem::Tools::PubSubUdp

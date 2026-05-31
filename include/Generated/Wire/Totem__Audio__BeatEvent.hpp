@@ -9,10 +9,11 @@ namespace Totem::Generated::Wire {
 template <> struct FieldList<::Totem::Audio::BeatEvent> {
     using Type = ::Totem::Audio::BeatEvent;
     static constexpr auto fields = std::make_tuple(
-        Field<&Type::group>{"group"},
+        Field<&Type::kind>{"kind"},
         Field<&Type::bpm>{"bpm"},
+        Field<&Type::confidence>{"confidence"},
         Field<&Type::energy>{"energy"},
-        Field<&Type::tension>{"tension"}
+        Field<&Type::sequence>{"sequence"}
     );
 };
 

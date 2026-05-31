@@ -18,10 +18,19 @@ struct WIRE_MSG FftFrame {
 };
 
 struct WIRE_MSG BeatEvent {
-    BeatGroup group;
+    BeatEventKind kind;
     uint8_t bpm;
+    uint8_t confidence;
     uint8_t energy;
-    uint8_t tension;
+    uint32_t sequence;
+};
+
+struct WIRE_MSG PeakEvent {
+    PeakGroup group;
+    uint8_t energy;
+    uint8_t lowerBand;
+    uint8_t upperBand;
+    uint32_t frameSequence;
 };
 
 } // namespace Totem::Audio

@@ -55,8 +55,24 @@ constexpr Totem::Buttons::Config buttonsConfig{
             .pull = GpioPull::None,
             .activeLow = false,
         },
+        {
+            .pin = Pin::StrappingGPIO9,
+            .button = PeripheralButton::Calibration,
+            .pull = GpioPull::Down,
+            .activeLow = false,
+            .notifyReleased = false,
+        },
     }},
 };
+
+static_assert(buttonsConfig.buttons[1].pin !=
+                  rs485SlaveConfig.uartConfig.pins.rxPin,
+              "Calibration button must not share the IO RS485 RX pin");
+static_assert(buttonsConfig.buttons[1].pin !=
+                  rs485SlaveConfig.uartConfig.pins.txPin,
+              "Calibration button must not share the IO RS485 TX pin");
+static_assert(buttonsConfig.buttons[1].pin != rs485SlaveConfig.attentionPin,
+              "Calibration button must not share the IO RS485 attention pin");
 
 inline constexpr Totem::StatusLed::Config statusLedConfig{
     .configured = false,

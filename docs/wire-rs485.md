@@ -19,7 +19,7 @@ UART mode.
 In the active prototype, RS485 is a point-to-point master/IO edge of the PubSub
 star. The master owns the bus, `io` asserts the attention line when it has
 queued traffic, and PubSub uses the RS485 transport for `io` ingress plus
-master-to-IO routed beat events. The transport is expected to recover from
+master-to-IO routed lighting commands. The transport is expected to recover from
 master or slave reset by discarding stale transactions, replaying PubSub
 subscriptions after availability returns, and resuming normal delivery without
 manual intervention.

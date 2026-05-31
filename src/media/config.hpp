@@ -29,7 +29,7 @@ inline constexpr bool enableFftDebugDisplay = true;
 inline Totem::LedPwm::Config ledPwmConfig{
     .task =
         {
-            .name = "BeatLed",
+            .name = "PeakLed",
             .priority = 1,
             .core = Totem::TaskController::Config::CorePreference::specific(1),
             .stackSize = Totem::StaticConfig::TaskStacks::ledPwm,
@@ -38,7 +38,7 @@ inline Totem::LedPwm::Config ledPwmConfig{
         },
     .leds = {{
         {
-            .led = PeripheralLed::BeatIndicator,
+            .led = PeripheralLed::PeakIndicator,
             .pin = Pin::GPIO26,
             .configured = true,
         },
@@ -69,7 +69,7 @@ inline Totem::Wire::I2C::Ssd1306Config fftDisplayConfig{
 
 inline Totem::Audio::FftDisplayConfig fftDisplayVisualizerConfig{
     .showRawBands = false,
-    .beatBarHoldMs = 90,
+    .peakBarHoldMs = 90,
     .task =
         {
             .name = "FftDisplay",

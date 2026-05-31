@@ -3,13 +3,14 @@
 #include "Audio/Interfaces/AnalyzerConfig.hpp"
 #include "Audio/Interfaces/Types.hpp"
 #include "Audio/Interfaces/Wire.hpp"
-#include "Audio/detail/BeatTracker.hpp"
 #include "Audio/detail/Commands.hpp"
 #include "Audio/detail/FftBackend.hpp"
 #include "Audio/detail/MagnitudeCache.hpp"
 #include "Audio/detail/Metrics.hpp"
+#include "Audio/detail/PeakDetector.hpp"
 #include "Audio/detail/PlatformSelect.hpp"
 #include "Audio/detail/Sources/IAudioSource.hpp"
+#include "Audio/detail/TempoTracker.hpp"
 #include "Audio/detail/Types.hpp"
 #include "AudioTools/CoreAudio/AudioTypes.h"
 #include "Base/HasCommands.hpp"
@@ -68,6 +69,20 @@ class FftAnalyzer : public HasLifecycle<FftAnalyzer, FftAnalyzerConfig>,
         return ERR(CoreError, Overflow);
     }
 
+    ReturnCode addPeakHandler(PeakResultHandler handler) {
+        FAIL_IF_ACTIVE(ERR(CoreError, InvalidState),
+                       "Cannot add peak handler while analyzer is active");
+        FAIL_IF(!handler.valid(), ERR(CoreError, InvalidArgument),
+                "Invalid peak handler");
+        for (auto &slot : _peakHandlers) {
+            if (!slot.valid()) {
+                slot = handler;
+                return OK();
+            }
+        }
+        return ERR(CoreError, Overflow);
+    }
+
     ReturnCode addBeatHandler(BeatResultHandler handler) {
         FAIL_IF_ACTIVE(ERR(CoreError, InvalidState),
                        "Cannot add beat handler while analyzer is active");
@@ -92,6 +107,7 @@ class FftAnalyzer : public HasLifecycle<FftAnalyzer, FftAnalyzerConfig>,
                 _sourceUnavailableSkips.load(std::memory_order_acquire),
             .frames = _frames.load(std::memory_order_acquire),
             .droppedFrames = _droppedFrames.load(std::memory_order_acquire),
+            .peaks = _peaks.load(std::memory_order_acquire),
             .beats = _beats.load(std::memory_order_acquire),
             .maxCopyUs = _maxCopyUs.load(std::memory_order_acquire),
             .maxReadinessProbeUs =
@@ -103,22 +119,99 @@ class FftAnalyzer : public HasLifecycle<FftAnalyzer, FftAnalyzerConfig>,
                 _maxMagnitudeCacheUs.load(std::memory_order_acquire),
             .maxFrameDispatchUs =
                 _maxFrameDispatchUs.load(std::memory_order_acquire),
-            .maxBeatUpdateUs = _maxBeatUpdateUs.load(std::memory_order_acquire),
+            .maxPeakUpdateUs = _maxPeakUpdateUs.load(std::memory_order_acquire),
+            .maxPeakDispatchUs =
+                _maxPeakDispatchUs.load(std::memory_order_acquire),
+            .maxTempoUpdateUs =
+                _maxTempoUpdateUs.load(std::memory_order_acquire),
             .maxBeatDispatchUs =
                 _maxBeatDispatchUs.load(std::memory_order_acquire),
+            .backgroundCalibrationRequests =
+                _backgroundCalibrationRequests.load(std::memory_order_acquire),
+            .backgroundCalibrationCompleted =
+                _backgroundCalibrationCompleted.load(std::memory_order_acquire),
+            .backgroundCalibrationFrames =
+                _backgroundCalibrationFrames.load(std::memory_order_acquire),
         };
     }
 
-    [[nodiscard]] BeatTrackerStatus beatStatus() const {
+    [[nodiscard]] PeakDetectorStatus peakStatus() const {
         const auto nowMs = ::platform::get_time();
-        auto status = BeatTrackerStatus{
-            .primaryGroup = config().beatTracker.primaryGroup,
+        auto status = PeakDetectorStatus{
+            .indicatorGroup = config().peakDetector.indicatorGroup,
         };
-        for (size_t i = 0; i < beatGroupCount; ++i) {
-            status.groups[i] = _groupBeatStatus(i, nowMs);
+        for (size_t i = 0; i < peakGroupCount; ++i) {
+            status.groups[i] = _groupPeakStatus(i, nowMs);
         }
-        status.primary = status.groups[beatGroupIndex(status.primaryGroup)];
+        status.indicator =
+            status.groups[peakGroupIndex(status.indicatorGroup)];
         return status;
+    }
+
+    [[nodiscard]] TempoTrackerStatus tempoStatus() const {
+        const auto nowMs = ::platform::get_time();
+        const auto lastEventMs =
+            _lastBeatEventMs.load(std::memory_order_acquire);
+        return TempoTrackerStatus{
+            .locked = _tempoLocked.load(std::memory_order_acquire),
+            .lastKind = static_cast<BeatEventKind>(
+                _lastBeatKind.load(std::memory_order_acquire)),
+            .bpm = static_cast<uint8_t>(
+                _tempoBpm.load(std::memory_order_acquire)),
+            .confidence = static_cast<uint8_t>(
+                _tempoConfidence.load(std::memory_order_acquire)),
+            .beats = _beats.load(std::memory_order_acquire),
+            .hits = _beatHits.load(std::memory_order_acquire),
+            .misses = _beatMisses.load(std::memory_order_acquire),
+            .reacquired = _beatReacquired.load(std::memory_order_acquire),
+            .lost = _beatLost.load(std::memory_order_acquire),
+            .lastEventAgeMs = lastEventMs == 0 ? 0U : nowMs - lastEventMs,
+        };
+    }
+
+    [[nodiscard]] BackgroundCalibrationStatus backgroundCalibrationStatus()
+        const {
+        const auto nowMs = ::platform::get_time();
+        const auto untilMs =
+            _backgroundCalibrationUntilMs.load(std::memory_order_acquire);
+        return BackgroundCalibrationStatus{
+            .active =
+                _backgroundCalibrationActive.load(std::memory_order_acquire),
+            .requestId =
+                _backgroundCalibrationRequestId.load(std::memory_order_acquire),
+            .requests =
+                _backgroundCalibrationRequests.load(std::memory_order_acquire),
+            .completed =
+                _backgroundCalibrationCompleted.load(std::memory_order_acquire),
+            .frames =
+                _backgroundCalibrationFrames.load(std::memory_order_acquire),
+            .remainingMs = untilMs > nowMs ? untilMs - nowMs : 0U,
+        };
+    }
+
+    ReturnCode requestBackgroundCalibration(uint8_t durationSeconds,
+                                            uint32_t requestId) {
+        FAIL_IF(durationSeconds == 0, ERR(CoreError, InvalidArgument),
+                "Background calibration duration must be nonzero");
+        bool idle = false;
+        if (!_backgroundCalibrationBusy.compare_exchange_strong(
+                idle, true, std::memory_order_acq_rel,
+                std::memory_order_acquire)) {
+            return OK();
+        }
+        _pendingBackgroundCalibrationRequestId.store(
+            requestId, std::memory_order_release);
+        _pendingBackgroundCalibrationSeconds.store(
+            durationSeconds, std::memory_order_release);
+        _backgroundCalibrationRequests.fetch_add(1,
+                                                 std::memory_order_acq_rel);
+        if (_metrics != nullptr) {
+            _metrics->addCalibrationRequest();
+        }
+        _log_i("Queued background calibration request %lu for %us",
+               static_cast<unsigned long>(requestId),
+               static_cast<unsigned>(durationSeconds));
+        return OK();
     }
 
   private:
@@ -141,7 +234,9 @@ class FftAnalyzer : public HasLifecycle<FftAnalyzer, FftAnalyzerConfig>,
 
         _buildBandPlan();
         _magnitudeCache.reset(config().magnitudeCache);
-        _beatTracker.reset(config().beatTracker);
+        _peakDetector.reset(config().peakDetector);
+        _tempoTracker.reset(config().tempoTracker);
+        _backgroundFloor.fill(0.0F);
         _resetStats();
         prewarmMetrics();
         _metrics = &metrics();
@@ -354,10 +449,21 @@ class FftAnalyzer : public HasLifecycle<FftAnalyzer, FftAnalyzerConfig>,
             .stride = config().stride,
         };
 
+        const auto frameStartedMs = static_cast<uint32_t>(startedUs / 1000LL);
+        _startPendingBackgroundCalibration(frameStartedMs);
+
         const auto bandStartedUs = _profilingTimestampUs();
         for (size_t i = 0; i < fftBandCount; ++i) {
-            frame.bands[i] = _computeBand(fft, _bandPlan[i]);
+            frame.bands[i] = _computeBand(fft, _bandPlan[i], i);
         }
+        if (_backgroundCalibrationActive.load(std::memory_order_acquire)) {
+            _backgroundCalibrationFrames.fetch_add(1,
+                                                   std::memory_order_acq_rel);
+            if (_metrics != nullptr) {
+                _metrics->addCalibrationFrame();
+            }
+        }
+        _finishBackgroundCalibrationIfDue(frameStartedMs);
         const auto bandElapsedUs = _profilingElapsedUs(bandStartedUs);
         _recordMax(_maxBandComputeUs, bandElapsedUs);
         if (_metrics != nullptr) {
@@ -372,13 +478,41 @@ class FftAnalyzer : public HasLifecycle<FftAnalyzer, FftAnalyzerConfig>,
             _metrics->addMagnitudeCache(cacheElapsedUs);
         }
 
-        const auto beatUpdateStartedUs = _profilingTimestampUs();
-        auto beatEvents = _beatTracker.update(frame);
-        const auto beatUpdateElapsedUs =
-            static_cast<uint32_t>(_profilingElapsedUs(beatUpdateStartedUs));
-        _recordMax(_maxBeatUpdateUs, beatUpdateElapsedUs);
+        const auto peakUpdateStartedUs = _profilingTimestampUs();
+        auto peakEvents = _peakDetector.update(frame);
+        const auto peakUpdateElapsedUs =
+            static_cast<uint32_t>(_profilingElapsedUs(peakUpdateStartedUs));
+        _recordMax(_maxPeakUpdateUs, peakUpdateElapsedUs);
         if (_metrics != nullptr) {
-            _metrics->addBeatUpdate(beatUpdateElapsedUs);
+            _metrics->addPeakUpdate(peakUpdateElapsedUs);
+        }
+
+        for (const auto &peak : peakEvents) {
+            if (!peak.has_value()) {
+                continue;
+            }
+            _peaks.fetch_add(1, std::memory_order_acq_rel);
+            _recordPeakStatus(*peak);
+            if (_metrics != nullptr) {
+                _metrics->addPeak(*peak);
+            }
+            const auto peakDispatchStartedUs = _profilingTimestampUs();
+            _dispatchPeak(*peak);
+            const auto peakDispatchElapsedUs =
+                _profilingElapsedUs(peakDispatchStartedUs);
+            _recordMax(_maxPeakDispatchUs, peakDispatchElapsedUs);
+            if (_metrics != nullptr) {
+                _metrics->addPeakDispatch(peakDispatchElapsedUs);
+            }
+        }
+
+        const auto tempoUpdateStartedUs = _profilingTimestampUs();
+        auto beatEvents = _tempoTracker.update(frame, peakEvents);
+        const auto tempoUpdateElapsedUs =
+            static_cast<uint32_t>(_profilingElapsedUs(tempoUpdateStartedUs));
+        _recordMax(_maxTempoUpdateUs, tempoUpdateElapsedUs);
+        if (_metrics != nullptr) {
+            _metrics->addTempoUpdate(tempoUpdateElapsedUs);
         }
 
         for (const auto &beat : beatEvents) {
@@ -388,8 +522,7 @@ class FftAnalyzer : public HasLifecycle<FftAnalyzer, FftAnalyzerConfig>,
             _beats.fetch_add(1, std::memory_order_acq_rel);
             _recordBeatStatus(*beat);
             if (_metrics != nullptr) {
-                _metrics->addBeat(*beat, beat->group ==
-                                             config().beatTracker.primaryGroup);
+                _metrics->addBeat(*beat);
             }
             const auto beatDispatchStartedUs = _profilingTimestampUs();
             _dispatchBeat(*beat);
@@ -419,7 +552,7 @@ class FftAnalyzer : public HasLifecycle<FftAnalyzer, FftAnalyzerConfig>,
     }
 
     FftBandValue _computeBand(Platform::AudioFftBase &fft,
-                              const BandPlan &plan) const {
+                              const BandPlan &plan, size_t index) {
         float sum = 0.0F;
         float squareSum = 0.0F;
         uint16_t count = 0;
@@ -447,6 +580,18 @@ class FftAnalyzer : public HasLifecycle<FftAnalyzer, FftAnalyzerConfig>,
             break;
         }
 
+        const auto preparedMagnitude = magnitude * plan.preparationGain;
+        if (_backgroundCalibrationActive.load(std::memory_order_acquire)) {
+            _backgroundCalibrationSums[index] +=
+                std::isfinite(preparedMagnitude) && preparedMagnitude > 0.0F
+                    ? preparedMagnitude
+                    : 0.0F;
+            ++_backgroundCalibrationSamples[index];
+        }
+
+        const auto adjustedMagnitude = std::max(
+            0.0F, preparedMagnitude - _backgroundFloor[index]);
+
         return FftBandValue{
             .band = plan.band,
             .lowerHz = plan.lowerHz,
@@ -454,9 +599,60 @@ class FftAnalyzer : public HasLifecycle<FftAnalyzer, FftAnalyzerConfig>,
             .lowerBin = plan.lowerBin,
             .upperBin = plan.upperBin,
             .magnitude = magnitude,
-            .weightedMagnitude =
-                _compressMagnitude(magnitude * plan.preparationGain),
+            .weightedMagnitude = _compressMagnitude(adjustedMagnitude),
         };
+    }
+
+    void _startPendingBackgroundCalibration(uint32_t nowMs) {
+        const auto seconds = _pendingBackgroundCalibrationSeconds.exchange(
+            0, std::memory_order_acq_rel);
+        if (seconds == 0) {
+            _backgroundCalibrationBusy.store(false, std::memory_order_release);
+            return;
+        }
+
+        const auto requestId = _pendingBackgroundCalibrationRequestId.load(
+            std::memory_order_acquire);
+        _backgroundCalibrationSums.fill(0.0F);
+        _backgroundCalibrationSamples.fill(0);
+        _backgroundCalibrationRequestId.store(requestId,
+                                              std::memory_order_release);
+        _backgroundCalibrationUntilMs.store(
+            nowMs + (static_cast<uint32_t>(seconds) * 1000U),
+            std::memory_order_release);
+        _backgroundCalibrationActive.store(true, std::memory_order_release);
+        _log_i("Started background calibration request %lu for %us",
+               static_cast<unsigned long>(requestId),
+               static_cast<unsigned>(seconds));
+    }
+
+    void _finishBackgroundCalibrationIfDue(uint32_t nowMs) {
+        if (!_backgroundCalibrationActive.load(std::memory_order_acquire)) {
+            return;
+        }
+        const auto untilMs =
+            _backgroundCalibrationUntilMs.load(std::memory_order_acquire);
+        if (static_cast<int32_t>(untilMs - nowMs) > 0) {
+            return;
+        }
+
+        for (size_t i = 0; i < fftBandCount; ++i) {
+            const auto samples = _backgroundCalibrationSamples[i];
+            _backgroundFloor[i] =
+                samples == 0 ? 0.0F
+                             : _backgroundCalibrationSums[i] /
+                                   static_cast<float>(samples);
+        }
+        _backgroundCalibrationActive.store(false, std::memory_order_release);
+        _backgroundCalibrationBusy.store(false, std::memory_order_release);
+        _backgroundCalibrationCompleted.fetch_add(1,
+                                                  std::memory_order_acq_rel);
+        if (_metrics != nullptr) {
+            _metrics->addCalibrationComplete();
+        }
+        _log_i("Completed background calibration request %lu",
+               static_cast<unsigned long>(_backgroundCalibrationRequestId.load(
+                   std::memory_order_acquire)));
     }
 
     [[nodiscard]] float _compressMagnitude(float magnitude) const {
@@ -492,18 +688,30 @@ class FftAnalyzer : public HasLifecycle<FftAnalyzer, FftAnalyzerConfig>,
         }
     }
 
-    void _dispatchBeat(const BeatResult &event) {
-        if (event.group == config().beatTracker.primaryGroup) {
-            _dispatchBeatHandler(config().beatIndicator, event,
-                                 "Configured beat indicator");
+    void _dispatchPeak(const PeakResult &event) {
+        if (event.group == config().peakDetector.indicatorGroup) {
+            _dispatchPeakHandler(config().peakIndicator, event,
+                                 "Configured peak indicator");
         }
-        for (const auto &handler : _beatHandlers) {
-            _dispatchBeatHandler(handler, event, "Beat handler");
+        for (const auto &handler : _peakHandlers) {
+            _dispatchPeakHandler(handler, event, "Peak handler");
         }
     }
 
-    void _dispatchBeatHandler(const BeatResultHandler &handler,
-                              const BeatResult &event,
+    void _dispatchBeat(const BeatResult &event) {
+        for (const auto &handler : _beatHandlers) {
+            if (!handler.valid()) {
+                continue;
+            }
+            auto ret = handler.callback(handler.owner, event);
+            if (!ret.ok()) {
+                _log_w("Beat handler failed: " ERR_FMT, ERR_ARG(ret));
+            }
+        }
+    }
+
+    void _dispatchPeakHandler(const PeakResultHandler &handler,
+                              const PeakResult &event,
                               const char *label) const {
         if (!handler.valid()) {
             return;
@@ -514,35 +722,64 @@ class FftAnalyzer : public HasLifecycle<FftAnalyzer, FftAnalyzerConfig>,
         }
     }
 
-    [[nodiscard]] BeatGroupStatus _groupBeatStatus(size_t index,
+    [[nodiscard]] PeakGroupStatus _groupPeakStatus(size_t index,
                                                    uint32_t nowMs) const {
-        const auto lastBeatMs =
-            _groupLastBeatMs[index].load(std::memory_order_acquire);
-        return BeatGroupStatus{
-            .hasBeat = lastBeatMs != 0,
-            .beats = _groupBeats[index].load(std::memory_order_acquire),
-            .bpmHundredths =
-                _groupBpmHundredths[index].load(std::memory_order_acquire),
+        const auto lastPeakMs =
+            _groupLastPeakMs[index].load(std::memory_order_acquire);
+        return PeakGroupStatus{
+            .hasPeak = lastPeakMs != 0,
+            .peaks = _groupPeaks[index].load(std::memory_order_acquire),
+            .ratePerMinuteHundredths =
+                _groupPeakRateHundredths[index].load(std::memory_order_acquire),
             .energy = static_cast<uint8_t>(
-                _groupLastBeatEnergy[index].load(std::memory_order_acquire)),
-            .lastBeatAgeMs = lastBeatMs == 0 ? 0U : nowMs - lastBeatMs,
+                _groupLastPeakEnergy[index].load(std::memory_order_acquire)),
+            .lastPeakAgeMs = lastPeakMs == 0 ? 0U : nowMs - lastPeakMs,
         };
     }
 
-    void _recordBeatStatus(const BeatResult &event) {
-        const auto index = beatGroupIndex(event.group);
-        if (index >= beatGroupCount) {
+    void _recordPeakStatus(const PeakResult &event) {
+        const auto index = peakGroupIndex(event.group);
+        if (index >= peakGroupCount) {
             return;
         }
-        _groupBeats[index].fetch_add(1, std::memory_order_acq_rel);
-        _groupLastBeatEnergy[index].store(event.energy,
+        _groupPeaks[index].fetch_add(1, std::memory_order_acq_rel);
+        _groupLastPeakEnergy[index].store(event.energy,
                                           std::memory_order_release);
-        _groupLastBeatMs[index].store(
+        _groupLastPeakMs[index].store(
             static_cast<uint32_t>(event.timestampUs / 1000ULL),
             std::memory_order_release);
-        _groupBpmHundredths[index].store(
-            static_cast<uint32_t>(std::lround(event.bpm * 100.0F)),
+        _groupPeakRateHundredths[index].store(
+            static_cast<uint32_t>(std::lround(event.ratePerMinute * 100.0F)),
             std::memory_order_release);
+    }
+
+    void _recordBeatStatus(const BeatResult &event) {
+        _tempoBpm.store(event.bpm, std::memory_order_release);
+        _tempoConfidence.store(event.confidence, std::memory_order_release);
+        _lastBeatKind.store(static_cast<uint8_t>(event.kind),
+                            std::memory_order_release);
+        _lastBeatEventMs.store(static_cast<uint32_t>(event.timestampUs / 1000ULL),
+                               std::memory_order_release);
+        switch (event.kind) {
+        case BeatEventKind::ExpectedHit:
+            _tempoLocked.store(true, std::memory_order_release);
+            _beatHits.fetch_add(1, std::memory_order_acq_rel);
+            break;
+        case BeatEventKind::ExpectedMiss:
+            _tempoLocked.store(true, std::memory_order_release);
+            _beatMisses.fetch_add(1, std::memory_order_acq_rel);
+            break;
+        case BeatEventKind::Reacquired:
+            _tempoLocked.store(true, std::memory_order_release);
+            _beatReacquired.fetch_add(1, std::memory_order_acq_rel);
+            break;
+        case BeatEventKind::Lost:
+            _tempoLocked.store(false, std::memory_order_release);
+            _beatLost.fetch_add(1, std::memory_order_acq_rel);
+            break;
+        default:
+            break;
+        }
     }
 
     static int64_t _profilingTimestampUs() {
@@ -581,12 +818,23 @@ class FftAnalyzer : public HasLifecycle<FftAnalyzer, FftAnalyzerConfig>,
         _sourceUnavailableSkips.store(0, std::memory_order_release);
         _frames.store(0, std::memory_order_release);
         _droppedFrames.store(0, std::memory_order_release);
+        _peaks.store(0, std::memory_order_release);
         _beats.store(0, std::memory_order_release);
-        for (size_t i = 0; i < beatGroupCount; ++i) {
-            _groupBeats[i].store(0, std::memory_order_release);
-            _groupLastBeatEnergy[i].store(0, std::memory_order_release);
-            _groupLastBeatMs[i].store(0, std::memory_order_release);
-            _groupBpmHundredths[i].store(0, std::memory_order_release);
+        _beatHits.store(0, std::memory_order_release);
+        _beatMisses.store(0, std::memory_order_release);
+        _beatReacquired.store(0, std::memory_order_release);
+        _beatLost.store(0, std::memory_order_release);
+        _tempoBpm.store(0, std::memory_order_release);
+        _tempoConfidence.store(0, std::memory_order_release);
+        _tempoLocked.store(false, std::memory_order_release);
+        _lastBeatKind.store(static_cast<uint8_t>(BeatEventKind::Lost),
+                            std::memory_order_release);
+        _lastBeatEventMs.store(0, std::memory_order_release);
+        for (size_t i = 0; i < peakGroupCount; ++i) {
+            _groupPeaks[i].store(0, std::memory_order_release);
+            _groupLastPeakEnergy[i].store(0, std::memory_order_release);
+            _groupLastPeakMs[i].store(0, std::memory_order_release);
+            _groupPeakRateHundredths[i].store(0, std::memory_order_release);
         }
         _maxCopyUs.store(0, std::memory_order_release);
         _maxReadinessProbeUs.store(0, std::memory_order_release);
@@ -594,8 +842,21 @@ class FftAnalyzer : public HasLifecycle<FftAnalyzer, FftAnalyzerConfig>,
         _maxBandComputeUs.store(0, std::memory_order_release);
         _maxMagnitudeCacheUs.store(0, std::memory_order_release);
         _maxFrameDispatchUs.store(0, std::memory_order_release);
-        _maxBeatUpdateUs.store(0, std::memory_order_release);
+        _maxPeakUpdateUs.store(0, std::memory_order_release);
+        _maxPeakDispatchUs.store(0, std::memory_order_release);
+        _maxTempoUpdateUs.store(0, std::memory_order_release);
         _maxBeatDispatchUs.store(0, std::memory_order_release);
+        _backgroundCalibrationRequests.store(0, std::memory_order_release);
+        _backgroundCalibrationCompleted.store(0, std::memory_order_release);
+        _backgroundCalibrationFrames.store(0, std::memory_order_release);
+        _backgroundCalibrationActive.store(false, std::memory_order_release);
+        _backgroundCalibrationBusy.store(false, std::memory_order_release);
+        _backgroundCalibrationUntilMs.store(0, std::memory_order_release);
+        _backgroundCalibrationRequestId.store(0, std::memory_order_release);
+        _pendingBackgroundCalibrationSeconds.store(0,
+                                                   std::memory_order_release);
+        _pendingBackgroundCalibrationRequestId.store(0,
+                                                     std::memory_order_release);
         _nextFrameSequence = 1;
         _handlingFrame.store(false, std::memory_order_release);
     }
@@ -606,9 +867,14 @@ class FftAnalyzer : public HasLifecycle<FftAnalyzer, FftAnalyzerConfig>,
     Platform::HammingWindow _hamming;
     Platform::HannWindow _hann;
     std::array<BandPlan, fftBandCount> _bandPlan{};
+    std::array<float, fftBandCount> _backgroundFloor{};
+    std::array<float, fftBandCount> _backgroundCalibrationSums{};
+    std::array<uint32_t, fftBandCount> _backgroundCalibrationSamples{};
     MagnitudeCache _magnitudeCache{};
-    BeatTracker _beatTracker{};
+    PeakDetector _peakDetector{};
+    TempoTracker _tempoTracker{};
     std::array<FftResultHandler, fftMaxFrameHandlers> _frameHandlers{};
+    std::array<PeakResultHandler, fftMaxPeakHandlers> _peakHandlers{};
     std::array<BeatResultHandler, fftMaxBeatHandlers> _beatHandlers{};
     Metrics *_metrics = nullptr;
     Totem::TaskController::RunnerKey _task = 0;
@@ -621,19 +887,41 @@ class FftAnalyzer : public HasLifecycle<FftAnalyzer, FftAnalyzerConfig>,
     std::atomic<uint32_t> _sourceUnavailableSkips{0};
     std::atomic<uint32_t> _frames{0};
     std::atomic<uint32_t> _droppedFrames{0};
+    std::atomic<uint32_t> _peaks{0};
     std::atomic<uint32_t> _beats{0};
-    std::array<std::atomic<uint32_t>, beatGroupCount> _groupBeats{};
-    std::array<std::atomic<uint32_t>, beatGroupCount> _groupLastBeatEnergy{};
-    std::array<std::atomic<uint32_t>, beatGroupCount> _groupLastBeatMs{};
-    std::array<std::atomic<uint32_t>, beatGroupCount> _groupBpmHundredths{};
+    std::atomic<uint32_t> _beatHits{0};
+    std::atomic<uint32_t> _beatMisses{0};
+    std::atomic<uint32_t> _beatReacquired{0};
+    std::atomic<uint32_t> _beatLost{0};
+    std::atomic<uint32_t> _tempoBpm{0};
+    std::atomic<uint32_t> _tempoConfidence{0};
+    std::atomic<bool> _tempoLocked{false};
+    std::atomic<uint32_t> _lastBeatEventMs{0};
+    std::atomic<uint32_t> _lastBeatKind{
+        static_cast<uint8_t>(BeatEventKind::Lost)};
+    std::array<std::atomic<uint32_t>, peakGroupCount> _groupPeaks{};
+    std::array<std::atomic<uint32_t>, peakGroupCount> _groupLastPeakEnergy{};
+    std::array<std::atomic<uint32_t>, peakGroupCount> _groupLastPeakMs{};
+    std::array<std::atomic<uint32_t>, peakGroupCount> _groupPeakRateHundredths{};
     std::atomic<uint32_t> _maxCopyUs{0};
     std::atomic<uint32_t> _maxReadinessProbeUs{0};
     std::atomic<uint32_t> _maxFrameUs{0};
     std::atomic<uint32_t> _maxBandComputeUs{0};
     std::atomic<uint32_t> _maxMagnitudeCacheUs{0};
     std::atomic<uint32_t> _maxFrameDispatchUs{0};
-    std::atomic<uint32_t> _maxBeatUpdateUs{0};
+    std::atomic<uint32_t> _maxPeakUpdateUs{0};
+    std::atomic<uint32_t> _maxPeakDispatchUs{0};
+    std::atomic<uint32_t> _maxTempoUpdateUs{0};
     std::atomic<uint32_t> _maxBeatDispatchUs{0};
+    std::atomic<uint32_t> _pendingBackgroundCalibrationSeconds{0};
+    std::atomic<uint32_t> _pendingBackgroundCalibrationRequestId{0};
+    std::atomic<bool> _backgroundCalibrationBusy{false};
+    std::atomic<bool> _backgroundCalibrationActive{false};
+    std::atomic<uint32_t> _backgroundCalibrationUntilMs{0};
+    std::atomic<uint32_t> _backgroundCalibrationRequestId{0};
+    std::atomic<uint32_t> _backgroundCalibrationRequests{0};
+    std::atomic<uint32_t> _backgroundCalibrationCompleted{0};
+    std::atomic<uint32_t> _backgroundCalibrationFrames{0};
 };
 
 inline constexpr CommandsContract<FftAnalyzer, Commands<FftAnalyzer>>

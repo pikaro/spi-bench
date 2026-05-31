@@ -55,6 +55,9 @@ Build output notes:
     `bin/monitor-multi --timeout 5s --strip-ansi master media`
 - Capture only high-signal lines:
     `bin/monitor-multi --timeout 10s --strip-ansi --include 'WRN|ERR' master`
+- Print repeated lines instead of the default sequential-identical-line
+    suppression:
+    `bin/monitor-multi --no-suppress-repeats --strip-ansi master`
 - Capture matching lines with surrounding context:
     `bin/monitor-multi --strip-ansi --include ERR --context 2 master`
 - Stop after a small number of printed lines:
@@ -83,8 +86,11 @@ for the same environment attach to that spool and apply their own filters. A
 single FIFO is not used for monitor output because multiple FIFO readers split
 bytes instead of each receiving the full stream.
 
-The timeout option accepts `ms`, `s`, and `m` suffixes. `--include` and
-`--exclude` may be repeated and match the ANSI-stripped line, including the
+The timeout option accepts `ms`, `s`, and `m` suffixes. Sequential identical
+terminal output lines are collapsed by default after normalizing ESP log
+timestamp counters, while full logs and spool files still receive every line;
+pass `--no-suppress-repeats` to print every line. `--include` and `--exclude`
+may be repeated and match the ANSI-stripped line, including the
 environment prefix only in multi-environment mode. `--before`, `--after`, and
 `--context` print surrounding lines around matches. Use `--baud` for
 non-default monitor baud rates in `bin/monitor-multi`; trailing positional baud
@@ -198,8 +204,30 @@ cannot mount the raw image.
 
 Useful audio-source validation command:
 
+- Start media FFT background calibration through the existing button-event
+    PubSub path:
+    `!master /calibrate-audio`
 - Generate a short media-node WAV fixture:
     `bin/wavgen.py test.wav beat --sample-rate 16000 --duration-ms 12000 --bpm 100 --freq 100`
+
+Useful host PubSub UDP bridge commands:
+
+- Run the host UDP participant and expose a local Unix-domain socket for
+    arbitrary local PubSub tools:
+    `bin/pubsub-udp-peer --mcu-ip <master-ip> --bind-ip <host-ip> --local-socket /tmp/totem-pubsub.sock`
+- Render local FFT, peak, and beat events from that socket:
+    `bin/pubsub-audio-view --socket /tmp/totem-pubsub.sock`
+    Press `c` in the viewer to publish the same calibration button event as the
+    IO GPIO input (`Button` topic, `Pressed`, `PeripheralButton::Calibration`).
+    The current IO placeholder input is active-high GPIO3 with pulldown; GPIO0
+    is already the IO RS485 RX pin.
+- Local socket clients use newline-delimited JSON. Subscribe to a topic mask:
+    `{"op":"subscribe","topic":16}`
+- Publish a raw payload to a topic:
+    `{"op":"publish","topic":16,"traffic_class":0,"payload_hex":"0001"}`
+- Forwarded events are generic PubSub JSON with `header` and `payload_hex`.
+    Message-specific decoding belongs in the local consumer script, not in the
+    UDP bridge.
 
 ## Generated Wire Code
 

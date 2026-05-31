@@ -164,10 +164,10 @@ Goal:
 - Let the device send PubSub frames to one UDP peer on the same WiFi network.
 - Let the device receive PubSub frames from that UDP peer.
 - Build host-side C++ PubSub components for send/receive operation.
-- Add a Python notify bridge with async per-type handlers and Pydantic payload
-  models.
-- Start with a ship-bell/button handler that logs one line, while keeping the
-  host trusted for arbitrary generated PubSub publish/subscribe.
+- Add a Python notify bridge with generic local fanout for arbitrary PubSub
+  events.
+- Keep application payload decoding in local consumer/producer scripts or
+  generated bindings, not in the transport participant.
 
 UDP transport direction:
 
@@ -203,10 +203,9 @@ Host build direction:
 Python participant direction:
 
 - Use C++ host PubSub code for UDP send/receive and frame encode/decode.
-- Bridge decoded PubSub messages into async Python handlers by generated message
-  type.
+- Bridge PubSub envelopes into generic local newline-delimited JSON with
+  `payload_hex`.
 - Represent packets with `timestampUs = 0` until time sync exists.
-- Start with a ship-bell/button subscription handler that emits a log line.
 - Keep the host trusted: arbitrary generated PubSub messages should be possible
   from the host.
 

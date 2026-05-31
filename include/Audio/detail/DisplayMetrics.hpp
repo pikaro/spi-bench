@@ -45,6 +45,11 @@ struct DisplayMetrics {
         .type = MetricType::Counter,
         .unit = MetricUnit::None,
     };
+    static constexpr MetricDesc peaksDef = {
+        .name = "peak",
+        .type = MetricType::Counter,
+        .unit = MetricUnit::None,
+    };
     static constexpr MetricDesc beatsDef = {
         .name = "beat",
         .type = MetricType::Counter,
@@ -74,6 +79,7 @@ struct DisplayMetrics {
 
         REGISTER_METRICS_GROUP("AudioDisplay", group);
         REGISTER_METRIC("AudioDisplay", captures, Counter, group);
+        REGISTER_METRIC("AudioDisplay", peaks, Counter, group);
         REGISTER_METRIC("AudioDisplay", beats, Counter, group);
         REGISTER_METRIC("AudioDisplay", flushes, Counter, group);
 
@@ -89,6 +95,7 @@ struct DisplayMetrics {
             .flushFail = flushFail,
             .group = group,
             .captures = captures,
+            .peaks = peaks,
             .beats = beats,
             .flushes = flushes,
             .profileGroup = profileGroup,
@@ -99,6 +106,7 @@ struct DisplayMetrics {
 
     void addCapturedFrame() const { METRIC_INCR(group, captures, 1); }
     void addDroppedFrame() const { METRIC_INCR(coreGroup, drops, 1); }
+    void addPeak() const { METRIC_INCR(group, peaks, 1); }
     void addBeat() const { METRIC_INCR(group, beats, 1); }
 
     void addFlush(ReturnCode result, uint32_t durationUs) {
@@ -120,6 +128,7 @@ struct DisplayMetrics {
     CounterHandle flushFail;
     GroupHandle group;
     CounterHandle captures;
+    CounterHandle peaks;
     CounterHandle beats;
     CounterHandle flushes;
     GroupHandle profileGroup;

@@ -6,18 +6,19 @@
 
 - `Audio/Facade.hpp` exports the public audio classes.
 - `Audio/Interfaces/Types.hpp` contains value-type configuration and callback
-    payloads for I2S input, FFT frames, magnitude scaling, and beat events.
+    payloads for I2S input, FFT frames, magnitude scaling, peak/accent events,
+    and tempo-clock beat outcome events.
 - `Audio/detail/Sources/` owns the concrete audio inputs. The media app
     instantiates exactly one source object and passes it to `FftAnalyzer`
     through `IAudioSource`.
 - `Audio/detail/FftAnalyzer.hpp` feeds the source into arduino-audio-tools'
     stream/sink FFT path, calculates fixed FFT bands, updates the magnitude
-    cache, and emits frame/beat callbacks.
+    cache, and emits frame/peak/beat callbacks.
 - `Audio/detail/FftBackend.hpp` selects the active arduino-audio-tools FFT
     implementation and exposes it to `FftAnalyzer` through the common
     `AudioFFTBase` surface.
 - `Audio/detail/FftDisplay.hpp` is an optional media-node debug visualizer for
-    a 128x32 SSD1306 I2C display. It subscribes to FFT frames and beats but
+    a 128x32 SSD1306 I2C display. It subscribes to FFT frames and peaks but
     flushes the display from its own task.
 - `Audio/detail/platform/PlatformESP32.hpp` is the component-owned ESP32
     platform layer for arduino-audio-tools I2S/FFT types.
@@ -121,8 +122,8 @@ config before unattended runtime use.
 
 FFT band magnitudes are reduced exactly once per band. The raw reduced value is
 kept as `FftBandValue::magnitude`; `FftAnalyzerConfig::signalPipeline` prepares
-the separate `weightedMagnitude` value used by the magnitude cache and beat
-tracker. This avoids the legacy double-averaging bug where band sums were
+the separate `weightedMagnitude` value used by the magnitude cache and peak
+detector. This avoids the legacy double-averaging bug where band sums were
 averaged once in the callback and then divided by bin count again during
 scaling.
 
@@ -130,8 +131,8 @@ scaling.
 default because it uses Espressif's DSP FFT implementation through
 `AudioEspressifFFT.h`; `RealFft` remains available for comparison against
 arduino-audio-tools' portable real FFT path. Both backends feed the same
-`AudioFFTBase` callback into the analyzer, so band reduction, scaling, beat
-tracking, display output, and metrics stay backend-independent. The ESP-DSP
+`AudioFFTBase` callback into the analyzer, so band reduction, scaling, peak
+extraction, display output, and metrics stay backend-independent. The ESP-DSP
 component dependency is declared in `src/idf_component.yml`.
 
 The analyzer defaults are conservative public API defaults. The active media
@@ -142,9 +143,9 @@ without monopolizing the SPI-facing core:
     1024-sample FFT frames and stride, which keeps the same roughly 32 ms frame
     cadence and 31.25 Hz bin spacing as the earlier 64 kHz / 2048-sample setup
     while roughly halving the I2S byte rate and FFT length.
-- The audio FFT, debug display, and beat LED tasks are pinned to core 1. The
-    media SPI task config is pinned to core 0 so the FFT workload is isolated
-    from the bus-facing task when SPI is re-enabled.
+- The audio FFT, debug display, and peak indicator LED tasks are pinned to core
+    1. The media SPI task config is pinned to core 0 so the FFT workload is
+    isolated from the bus-facing task when SPI is re-enabled.
 - The FFT copy buffer is 512 bytes. At 32 kHz / 32-bit mono this is roughly
     4 ms of audio per source read, which keeps individual blocking copy windows
     much shorter than the previous 2048-byte reads.
@@ -199,43 +200,64 @@ is prevented from catching up to the current signal closely enough to erase a
 steady tone, so a constant test tone should settle to a stable nonzero band
 instead of decaying to black.
 
-The beat tracker runs separate onset detectors for bass, mid, and high groups.
-Each `BeatGroupConfig` has its own band range, ambient floor, sensitivity,
-onset, refractory, and BPM bounds. Beat detection consumes prepared
+The peak detector runs separate onset detectors for bass, mid, and high groups.
+Each `PeakGroupConfig` has its own band range, ambient floor, sensitivity, onset,
+refractory, and rate bounds. Peak detection consumes prepared
 `weightedMagnitude`, not display-scaled values, so visual cache tuning does not
-move the beat thresholds. A group can trigger on either positive onset flux or a
-strong breakout over its slow energy baseline. Candidate beats do not update the
+move the peak thresholds. A group can trigger on either positive onset flux or a
+strong breakout over its slow energy baseline. Candidate peaks do not update the
 ambient/baseline trackers, so isolated transients do not raise the threshold for
-the next real beat. Higher-level musical beat prediction is intentionally not
-implemented yet because reliable prediction needs tuning against real audio and
-latency measurements.
+the next transient.
 
-The `/bpm` console command prints the analyzer's current estimate, last beat
-energy, beat count, and last-beat age for every group, and marks the configured
-primary group. The GPIO26 indicator LED is driven only by that primary group,
-which defaults to bass.
+Peak events are not tempo beats. They are local accent/transient observations for
+animation accents, tracker evidence, and diagnostics. The first tempo-tracking
+stage consumes the configured evidence group, currently bass by default, and
+maintains one explicit beat clock. That clock publishes `BeatEvent` outcomes:
+`ExpectedHit`, `ExpectedMiss`, `Reacquired`, and `Lost`. The initial tracker is a
+small deterministic inter-onset/phase tracker, not the final EDM-grade tracker;
+it is intentionally instrumented so WAV fixtures and live input can show whether
+the evidence group, BPM bounds, hit window, and confidence rules are plausible.
 
-`FftAnalyzerConfig::beatIndicator` is an optional single beat callback slot for
+The `/peaks` console command prints the analyzer's current peak rate estimate,
+last peak energy, peak count, and last-peak age for every group, and marks the
+configured indicator group. The `/tempo` command prints tracker lock state, BPM,
+confidence, last beat outcome, and hit/miss/reacquire/lost counters. The GPIO26
+indicator LED is driven only by the peak indicator group, which defaults to bass.
+Tempo confidence is capped by recent expected-hit / expected-miss stability, so
+a consistent but frequently lost/reacquired lock cannot report full confidence.
+While locked, off-window peak events do not update the tempo interval history.
+Candidate tempo intervals must also agree with the evidence group's own peak
+rate estimate, allowing octave-related half/double-time matches, so isolated
+short bass transients do not override a slower stable peak cadence.
+
+`FftAnalyzerConfig::peakIndicator` is an optional single peak callback slot for
 local hardware indicators. `src/media/main.cpp` wires it to a `LedPwm` pulse on
-active-high GPIO26 so physical beat timing can be compared against the display
+active-high GPIO26 so physical peak timing can be compared against the display
 without relying on serial logs.
 
 The analyzer registers metrics through `include/Audio/detail/Metrics.hpp`.
 `audCore` keeps rare frame-drop counters, `audFft` keeps diagnostic
-copy/readiness/frame/beat counters plus primary-group last beat energy and BPM,
-and `audProf` keeps profiling-only timing totals and max subphase durations. The
-profiling group is disabled by default to leave Bluetooth builds with more
-internal-heap headroom; define `TOTEM_ENABLE_AUDIO_PROFILING_METRICS=1` for a
+copy/readiness/frame/peak/beat counters plus indicator-group last peak energy,
+peak rate, BPM, and tempo confidence, and `audProf` keeps profiling-only timing
+totals and max subphase durations. The profiling group is disabled by default to
+leave Bluetooth builds with more internal-heap headroom; define
+`TOTEM_ENABLE_AUDIO_PROFILING_METRICS=1` for a
 temporary profiling firmware when investigating FFT phase timings. The
 main metric groups are:
 
 - `copy`, `copyB`, `empty`, `skip`, and `probe` for source feeding.
-- `frame` and `beat` in `audFft`, plus `drop` in `audCore`, for analyzer
+- `frame`, `peak`, `pkBass`, `pkMid`, `pkHigh`, `beat`, `btHit`, `btMiss`,
+    `btReq`, and `btLost` in `audFft`, plus `drop` in `audCore`, for analyzer
     output.
-- `bandUs`, `cacheUs`, `dispUs`, `btUpdUs`, and `btDisUs` for frame-processing
-    phase totals in `audProf`.
-- `bandMax`, `cacheMx`, `dispMax`, `btUpdMx`, and `btDisMx` for worst observed
-    phase duration in `audProf`.
+- `peakE` and `pkRate` in `audFft` for the latest indicator-group peak energy
+    and estimated peak rate per minute.
+- `bpm` and `btConf` in `audFft` for the current tempo estimate and confidence.
+- `calReq`, `calFrm`, `calDone`, and `calAct` in `audFft` for background-floor
+    calibration requests, sampled frames, completions, and active state.
+- `bandUs`, `cacheUs`, `dispUs`, `pkUpdUs`, `pkDisUs`, `tmpUpdUs`, and `btDisUs`
+    for frame-processing phase totals in `audProf`.
+- `bandMax`, `cacheMx`, `dispMax`, `pkUpdMx`, `pkDisMx`, `tmpUpdMx`, and
+    `btDisMx` for worst observed phase duration in `audProf`.
 
 ## SSD1306 Debug Display
 
@@ -253,7 +275,27 @@ adjacent full-height bars: raw magnitude first, then effective cached/scaled
 value. Raw values are normalized to the loudest raw band in the current frame;
 effective values use the `0..255` cache output. When raw display is disabled,
 only the effective bars are drawn and each band gets the wider display slot.
-Beat events draw a short top bar over the related group's band range; the
-display intentionally does not draw a full-display beat border.
+Peak events draw a short top bar over the related group's band range; the
+display draws beat outcomes as a separate full-width bottom bar under the FFT
+bands. `Reacquired` uses the configured full beat-bar height, `ExpectedHit` uses
+a shorter solid bar, and `ExpectedMiss` / `Lost` use a one-pixel bar so tempo
+state is visible without confusing beat outcomes with per-group peak markers.
 Display-side metrics live in `dispCore`, `audDisp`, and `dispProf` for frame
-drops / flush failures, captured frame and beat counts, and flush timing.
+drops / flush failures, captured frame, peak, and beat counts, and flush timing.
+
+## Host Audio Viewer
+
+`bin/pubsub-audio-view` is a local Pygame consumer for the UDP bridge's generic
+Unix-domain socket fanout. Start the bridge with `--local-socket`, then start
+the viewer against the same path:
+
+`bin/pubsub-udp-peer --mcu-ip <master-ip> --bind-ip <host-ip> --local-socket /tmp/totem-pubsub.sock`
+
+`bin/pubsub-audio-view --socket /tmp/totem-pubsub.sock`
+
+The viewer subscribes to the numeric `Beat`, `FftFrame`, and `Peak` topic masks
+through the local socket. Audio wire decoding is contained in the viewer
+consumer; the generic UDP bridge still forwards arbitrary PubSub events as
+`header` plus `payload_hex` and does not know about FFT, peak, or beat payloads.
+Pressing `c` in the viewer publishes the existing `Button` topic payload for a
+pressed `PeripheralButton::Calibration`, matching the IO GPIO path.

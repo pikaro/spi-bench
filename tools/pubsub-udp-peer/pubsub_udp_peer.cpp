@@ -35,7 +35,6 @@ struct Args {
     uint16_t port = defaultPort;
     uint32_t keepaliveMs = 1000;
     uint32_t timeoutMs = 0;
-    bool subscribeButton = true;
     bool help = false;
 };
 
@@ -45,7 +44,6 @@ struct Stats {
     uint32_t framesTx = 0;
     uint32_t framesRx = 0;
     uint32_t badFrames = 0;
-    uint32_t buttonEvents = 0;
 };
 
 volatile std::sig_atomic_t stopping = 0;
@@ -63,7 +61,6 @@ Options:
   --port PORT           Local and remote UDP port. Defaults to 2026.
   --keepalive-ms MS     Keepalive interval. Defaults to 1000.
   --timeout-ms MS       Stop after this many milliseconds. Defaults to no timeout.
-  --no-button-sub       Do not send the initial Button topic subscription.
   --help                Show this help.
 
 Stdin commands:
@@ -165,8 +162,6 @@ bool parseArgs(int argc, char **argv, Args &args, std::string &error) {
                 error = "invalid --timeout-ms value";
                 return false;
             }
-        } else if (arg == "--no-button-sub") {
-            args.subscribeButton = false;
         } else {
             error = "unknown argument: " + std::string(arg);
             return false;
@@ -221,8 +216,7 @@ void emitStats(const Stats &stats) {
               << ",\"keepalive_rx\":" << stats.keepaliveRx
               << ",\"frames_tx\":" << stats.framesTx
               << ",\"frames_rx\":" << stats.framesRx
-              << ",\"bad_frames\":" << stats.badFrames
-              << ",\"button_events\":" << stats.buttonEvents << "}"
+              << ",\"bad_frames\":" << stats.badFrames << "}"
               << std::endl;
 }
 
@@ -238,24 +232,36 @@ void emitHeaderJson(const Header &header) {
               << ",\"payload_size\":" << header.payloadSize << "}";
 }
 
-void emitButtonEvent(const Header &header, const ButtonEvent &event) {
-    std::cout << "{\"kind\":\"pubsub\","
-              << "\"message_type\":\"Totem.Buttons.ButtonEvent\",";
-    emitHeaderJson(header);
-    std::cout << ",\"payload\":{"
-              << "\"type\":\"" << buttonTypeName(event.type) << "\","
-              << "\"button\":\"" << buttonName(event.button) << "\""
-              << "}}" << std::endl;
+void emitPayloadHexJson(std::span<const std::byte> payload) {
+    static constexpr char hex[] = "0123456789abcdef";
+    std::cout << "\"payload_hex\":\"";
+    for (const auto value : payload) {
+        const auto byte = std::to_integer<uint8_t>(value);
+        std::cout << hex[(byte >> 4U) & 0x0FU] << hex[byte & 0x0FU];
+    }
+    std::cout << "\"";
 }
 
-void emitPubSubEvent(const Header &header, const PubSubEvent &event) {
+void emitPubSubEvent(const Header &header, const PubSubEvent &event,
+                     std::span<const std::byte> payload) {
     std::cout << "{\"kind\":\"pubsub\","
               << "\"message_type\":\"Totem.PubSub.Event\",";
     emitHeaderJson(header);
+    std::cout << ",";
+    emitPayloadHexJson(payload);
     std::cout << ",\"payload\":{"
               << "\"topic\":" << event.topic << ","
               << "\"type\":\"" << subscribeTypeName(event.type) << "\""
               << "}}" << std::endl;
+}
+
+void emitRawEvent(const Header &header, std::span<const std::byte> payload) {
+    std::cout << "{\"kind\":\"pubsub\","
+              << "\"message_type\":\"raw\",";
+    emitHeaderJson(header);
+    std::cout << ",";
+    emitPayloadHexJson(payload);
+    std::cout << "}" << std::endl;
 }
 
 bool parseIpv4(const std::string &ip, in_addr &out, std::string &error) {
@@ -394,29 +400,17 @@ bool handleFrame(std::span<const std::byte> datagram, Stats &stats) {
     }
 
     ++stats.framesRx;
-    if (frame->header.topic == static_cast<uint32_t>(Topic::Button)) {
-        auto button = decodeButtonEvent(frame->payload);
-        if (!button.has_value()) {
-            ++stats.badFrames;
-            emitStatus("bad-button-payload");
-            return true;
-        }
-        ++stats.buttonEvents;
-        emitButtonEvent(frame->header, *button);
-        return true;
-    }
     if (frame->header.topic == static_cast<uint32_t>(Topic::PubSub)) {
         auto event = decodePubSubEvent(frame->payload);
         if (event.has_value()) {
-            emitPubSubEvent(frame->header, *event);
+            emitPubSubEvent(frame->header, *event, frame->payload);
+        } else {
+            emitRawEvent(frame->header, frame->payload);
         }
         return true;
     }
 
-    std::cout << "{\"kind\":\"pubsub\","
-              << "\"message_type\":\"unknown\",";
-    emitHeaderJson(frame->header);
-    std::cout << "}" << std::endl;
+    emitRawEvent(frame->header, frame->payload);
     return true;
 }
 
@@ -499,7 +493,7 @@ bool handleCommand(std::string_view line, int fd, const sockaddr_in &remote,
             return true;
         }
         auto frame = makePubSubControlFrame(
-            nextMessageId++, static_cast<Topic>(topicValue),
+            nextMessageId++, topicValue,
             command == "subscribe" ? SubscribeEventType::Register
                                    : SubscribeEventType::Unregister);
         if (!sendFrame(fd, remote, frame, stats, error)) {
@@ -547,7 +541,6 @@ int run(const Args &args) {
     uint32_t nextMessageId = 1;
     uint64_t nextKeepaliveMs = 0;
     const auto startMs = nowMs();
-    bool subscriptionSent = false;
     bool stdinOpen = true;
     std::string inputBuffer;
     emitStatus("started");
@@ -567,17 +560,6 @@ int run(const Args &args) {
                 ++stats.keepaliveTx;
             }
             nextKeepaliveMs = currentMs + args.keepaliveMs;
-        }
-
-        if (args.subscribeButton && !subscriptionSent) {
-            auto frame = makeSubscribeFrame(nextMessageId++, Topic::Button);
-            if (!sendDatagram(fd, remote, frame, error)) {
-                emitStatus("subscription-send-error", error);
-            } else {
-                ++stats.framesTx;
-                emitStatus("subscribed-button");
-                subscriptionSent = true;
-            }
         }
 
         fd_set readfds;

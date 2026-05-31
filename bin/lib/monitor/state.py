@@ -53,6 +53,7 @@ class Config:
     exclude: list[re.Pattern[str]]
     before: int
     after: int
+    suppress_repeats: bool
     summary: bool
     max_lines: int | None
     log_file: Path | None
@@ -90,6 +91,7 @@ class Runtime:
     stop_reason: str | None = None
     ignored_stdin_warned: bool = False
     summary: dict[tuple[str, str], SummaryEntry] = field(default_factory=dict)
+    last_printed_repeat_key: str | None = None
 
 
 def plain_label_for(env: str, width: int) -> str:

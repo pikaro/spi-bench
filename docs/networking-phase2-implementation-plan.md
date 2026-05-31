@@ -19,10 +19,12 @@ Status as of 2026-05-25:
   peer state, and hands received PubSub frames to the existing PubSub transport
   path through a bounded queue.
 - MCU-side UDP PubSub metrics are implemented in the `psUdp` group.
-- A host C++ UDP peer builds locally and sends keepalives plus an initial
-  `Button` topic subscription control frame.
-- A Python async notify bridge wraps the C++ peer, validates decoded events with
-  Pydantic, and installs the initial ship-bell/button log handler.
+- A host C++ UDP peer builds locally and sends keepalives. Subscriptions are
+  explicit command or local-socket requests; it does not auto-subscribe to an
+  application topic.
+- A Python async notify bridge wraps the C++ peer, validates PubSub envelopes
+  with Pydantic, and can expose arbitrary topics through a local Unix-domain
+  socket as raw newline-delimited JSON.
 - The Python bridge can now ask the trusted C++ peer to publish arbitrary raw
   PubSub frames by topic and payload bytes. Generated per-type publish helpers
   are still future work.
@@ -285,9 +287,11 @@ Encoding direction:
 
 Current bridge shape:
 
-- The C++ subprocess owns the UDP socket, keepalives, binary frame
-  encode/decode, and compact JSONL notification output.
-- The Python bridge owns Pydantic validation and async per-type dispatch.
+- The C++ subprocess owns the UDP socket, keepalives, binary PubSub envelope
+  encode/decode, CRC validation, and compact JSONL notification output. It
+  emits raw `payload_hex` for arbitrary application topics.
+- The Python bridge owns Pydantic validation, optional explicit per-type
+  dispatch, and generic local socket fanout.
 - Python sends trusted control commands to C++ over stdin:
   `publish <topic> <traffic-class> [payload-hex]`, `subscribe <topic>`,
   `unsubscribe <topic>`, `stats`, and `quit`.
@@ -298,6 +302,11 @@ Current bridge shape:
   `--subscribe-topic`, `--unsubscribe-topic`, and `--send` options, plus
   optional stdin forwarding. This lets the host tool send and receive PubSub
   traffic without attaching a serial monitor for basic validation.
+- `--local-socket <path>` exposes a Unix-domain socket for local scripts.
+  Clients send newline-delimited JSON `subscribe`, `unsubscribe`, and `publish`
+  operations with numeric topic masks and raw payload hex. The bridge
+  reference-counts local subscriptions and forwards matching raw PubSub event
+  JSON to each client.
 
 ## Trusted Host PubSub Surface
 
@@ -435,8 +444,8 @@ Minimum hardware verification:
 6. Confirm host receives MCU-originated PubSub control/replay traffic or
    keepalive response.
 7. Send a host subscription control frame and confirm the MCU receives it.
-8. Publish a ship-bell/button event from the MCU side and confirm the host
-   Python async handler emits its log line.
+8. Publish an MCU-side application event on a subscribed topic and confirm a
+   local socket client receives the generic `header` plus `payload_hex` JSON.
 9. Publish at least one host-originated PubSub frame and confirm the MCU receives
    and routes it as expected.
 10. Let the host keepalive stop and confirm the MCU resets the learned peer
@@ -495,10 +504,11 @@ Milestone 3: Master integration
 Milestone 4: Host C++ peer and Python bridge
 
 - Add host C++ peer code that can send and receive PubSub frames.
-- Add Python bridge with async per-type dispatch.
-- Add Pydantic payload models or adapters for decoded wire structs.
+- Add Python bridge with generic notification dispatch.
+- Keep message-specific Pydantic payload models or generated adapters outside
+  the generic UDP participant path.
 - Add host subscription control-frame send path.
-- Add the first ship-bell/button handler that logs one line.
+- Add local Unix-domain socket fanout for arbitrary local consumers/producers.
 - Validate bidirectional traffic, MCU receive metrics, and host observation.
 - Status: initial implementation complete and host-build validated; live
   bidirectional traffic validation is still pending.
@@ -543,7 +553,7 @@ Observed on 2026-05-25 with host `192.168.179.6` and master
   `bin/pubsub-udp-peer --mcu-ip 192.168.179.5 --bind-ip 192.168.179.6 --port 2026 --timeout 3s --publish-raw 256 0 0000 --send stats --no-stdin --verbose`
   exited cleanly with final host stats:
   `keepalive_tx=3`, `keepalive_rx=2`, `frames_tx=2`, `frames_rx=30`,
-  `bad_frames=0`, `button_events=0`.
+  `bad_frames=0`.
 
 ## Pause Points
 

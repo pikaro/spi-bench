@@ -5,6 +5,8 @@ import sys
 
 from .state import BufferedLine, Monitor, Runtime, SummaryEntry, plain_label_for
 
+ESP_LOG_TIME_RE = re.compile(r'\b((?:[A-Z]{3}|[A-Z]) )\(\d+\)(?: \(\d+\))?')
+
 
 def strip_ansi(text: str) -> str:
     from .state import ANSI_RE
@@ -64,6 +66,24 @@ def summary_key(monitor: Monitor, line: str) -> tuple[str, str]:
     return (monitor.env, text)
 
 
+def repeat_key(monitor: Monitor, line: str, runtime: Runtime) -> str:
+    text = strip_ansi(display_line(monitor, line, runtime))
+    return ESP_LOG_TIME_RE.sub(r'\1(t)', text)
+
+
+def print_output_line(monitor: Monitor, line: str, runtime: Runtime) -> None:
+    output_line = display_line(monitor, line, runtime)
+    print(output_line)
+    runtime.last_printed_repeat_key = repeat_key(monitor, line, runtime)
+    runtime.printed_lines += 1
+
+    if (
+        runtime.config.max_lines is not None
+        and runtime.printed_lines >= runtime.config.max_lines
+    ):
+        runtime.stop_reason = "max line limit reached"
+
+
 def write_log(monitor: Monitor, line: str, runtime: Runtime) -> None:
     if runtime.log is None:
         return
@@ -103,15 +123,14 @@ def print_monitor_line(
             last=output_line,
         )
 
-    print(display_line(monitor, buffered.text, runtime))
-    monitor.emitted_until = buffered.number
-    runtime.printed_lines += 1
+    if runtime.config.suppress_repeats:
+        key = repeat_key(monitor, buffered.text, runtime)
+        if key == runtime.last_printed_repeat_key:
+            monitor.emitted_until = buffered.number
+            return
 
-    if (
-        runtime.config.max_lines is not None
-        and runtime.printed_lines >= runtime.config.max_lines
-    ):
-        runtime.stop_reason = "max line limit reached"
+    print_output_line(monitor, buffered.text, runtime)
+    monitor.emitted_until = buffered.number
 
 
 def remember_before(monitor: Monitor, buffered: BufferedLine, runtime: Runtime) -> None:

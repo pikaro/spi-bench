@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Audio/Interfaces/BeatTrackerConfig.hpp"
+#include "Audio/Interfaces/PeakDetectorConfig.hpp"
 #include "Audio/Interfaces/Types.hpp"
 #include <algorithm>
 #include <array>
@@ -10,11 +10,11 @@
 
 namespace Totem::Audio::detail {
 
-class BeatTracker {
+class PeakDetector {
   public:
-    using Events = std::array<std::optional<BeatResult>, beatGroupCount>;
+    using Events = std::array<std::optional<PeakResult>, peakGroupCount>;
 
-    void reset(const BeatTrackerConfig &config) {
+    void reset(const PeakDetectorConfig &config) {
         _config = config;
         for (auto &state : _states) {
             state.reset();
@@ -24,7 +24,7 @@ class BeatTracker {
     [[nodiscard]] Events update(const FftResult &frame) {
         Events events{};
         for (const auto &groupConfig : _config.groups) {
-            const auto index = beatGroupIndex(groupConfig.group);
+            const auto index = peakGroupIndex(groupConfig.group);
             if (index >= _states.size()) {
                 continue;
             }
@@ -33,8 +33,8 @@ class BeatTracker {
         return events;
     }
 
-    [[nodiscard]] BeatGroup primaryGroup() const {
-        return _config.primaryGroup;
+    [[nodiscard]] PeakGroup indicatorGroup() const {
+        return _config.indicatorGroup;
     }
 
   private:
@@ -47,24 +47,24 @@ class BeatTracker {
             fluxBaselineInitialized = false;
             ambientFloorInitialized = false;
             lastEnergy = 0.0F;
-            lastBeatUs = 0;
-            bpm = 0.0F;
+            lastPeakUs = 0;
+            ratePerMinute = 0.0F;
             ibi.fill(0);
             ibiCount = 0;
             ibiHead = 0;
         }
 
-        [[nodiscard]] std::optional<BeatResult>
-        update(const FftResult &frame, const BeatGroupConfig &config) {
+        [[nodiscard]] std::optional<PeakResult>
+        update(const FftResult &frame, const PeakGroupConfig &config) {
             const auto energy = _energy(frame, config.energyBands);
             const auto previousBaseline =
                 baselineInitialized ? baseline : 0.0F;
             const auto previousAmbientFloor =
                 ambientFloorInitialized ? ambientFloor : 0.0F;
             const bool refractoryOk =
-                lastBeatUs == 0 ||
+                lastPeakUs == 0 ||
                 frame.timestampUs >=
-                    lastBeatUs +
+                    lastPeakUs +
                         (static_cast<uint64_t>(config.refractoryMs) * 1000ULL);
             const auto ambientThreshold = std::max(
                 config.minEnergy,
@@ -91,16 +91,15 @@ class BeatTracker {
             }
 
             if (candidate && refractoryOk) {
-                registerBeat(frame.timestampUs, config);
+                registerPeak(frame.timestampUs, config);
                 lastEnergy = energy;
-                return BeatResult{
-                    .kind = BeatEventKind::Detected,
+                return PeakResult{
                     .group = config.group,
                     .bands = config.energyBands,
                     .frameSequence = frame.sequence,
                     .timestampUs = frame.timestampUs,
                     .energy = _eventEnergy(energy),
-                    .bpm = bpm,
+                    .ratePerMinute = ratePerMinute,
                 };
             }
 
@@ -128,7 +127,7 @@ class BeatTracker {
                 std::clamp(std::lround(energy), 0L, 255L));
         }
 
-        void updateBaseline(float energy, const BeatGroupConfig &config) {
+        void updateBaseline(float energy, const PeakGroupConfig &config) {
             if (!baselineInitialized) {
                 baseline = energy;
                 baselineInitialized = true;
@@ -138,7 +137,7 @@ class BeatTracker {
                        (config.baselineAlpha * energy);
         }
 
-        void updateFluxBaseline(float flux, const BeatGroupConfig &config) {
+        void updateFluxBaseline(float flux, const PeakGroupConfig &config) {
             if (!fluxBaselineInitialized) {
                 fluxBaseline = flux;
                 fluxBaselineInitialized = true;
@@ -148,7 +147,7 @@ class BeatTracker {
                            (config.baselineAlpha * flux);
         }
 
-        void updateAmbientFloor(float energy, const BeatGroupConfig &config) {
+        void updateAmbientFloor(float energy, const PeakGroupConfig &config) {
             if (!ambientFloorInitialized) {
                 ambientFloor = energy;
                 ambientFloorInitialized = true;
@@ -162,19 +161,21 @@ class BeatTracker {
                            (config.ambientAlpha * energy);
         }
 
-        void registerBeat(uint64_t nowUs, const BeatGroupConfig &config) {
-            if (lastBeatUs != 0 && nowUs > lastBeatUs) {
-                pushIbi(static_cast<uint32_t>(nowUs - lastBeatUs), config);
-                updateBpm(config);
+        void registerPeak(uint64_t nowUs, const PeakGroupConfig &config) {
+            if (lastPeakUs != 0 && nowUs > lastPeakUs) {
+                pushIbi(static_cast<uint32_t>(nowUs - lastPeakUs), config);
+                updateRate(config);
             }
-            lastBeatUs = nowUs;
+            lastPeakUs = nowUs;
         }
 
-        void pushIbi(uint32_t intervalUs, const BeatGroupConfig &config) {
+        void pushIbi(uint32_t intervalUs, const PeakGroupConfig &config) {
             const auto maxIbi = static_cast<uint32_t>(
-                60000000ULL / std::max<uint16_t>(1, config.minBpm));
+                60000000ULL /
+                std::max<uint16_t>(1, config.minRatePerMinute));
             const auto minIbi = static_cast<uint32_t>(
-                60000000ULL / std::max<uint16_t>(1, config.maxBpm));
+                60000000ULL /
+                std::max<uint16_t>(1, config.maxRatePerMinute));
             if (intervalUs < minIbi || intervalUs > maxIbi) {
                 return;
             }
@@ -187,7 +188,7 @@ class BeatTracker {
             }
         }
 
-        void updateBpm(const BeatGroupConfig &config) {
+        void updateRate(const PeakGroupConfig &config) {
             if (ibiCount < 2) {
                 return;
             }
@@ -206,10 +207,11 @@ class BeatTracker {
                 return;
             }
 
-            const auto calculatedBpm =
+            const auto calculatedRate =
                 60.0F * 1000000.0F / static_cast<float>(intervalUs);
-            bpm = std::clamp(calculatedBpm, static_cast<float>(config.minBpm),
-                             static_cast<float>(config.maxBpm));
+            ratePerMinute = std::clamp(
+                calculatedRate, static_cast<float>(config.minRatePerMinute),
+                static_cast<float>(config.maxRatePerMinute));
         }
 
         float baseline = 0.0F;
@@ -219,15 +221,15 @@ class BeatTracker {
         bool fluxBaselineInitialized = false;
         bool ambientFloorInitialized = false;
         float lastEnergy = 0.0F;
-        uint64_t lastBeatUs = 0;
-        float bpm = 0.0F;
+        uint64_t lastPeakUs = 0;
+        float ratePerMinute = 0.0F;
         std::array<uint32_t, 16> ibi{};
         uint8_t ibiCount = 0;
         uint8_t ibiHead = 0;
     };
 
-    BeatTrackerConfig _config{};
-    std::array<GroupState, beatGroupCount> _states{};
+    PeakDetectorConfig _config{};
+    std::array<GroupState, peakGroupCount> _states{};
 };
 
 } // namespace Totem::Audio::detail

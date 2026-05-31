@@ -34,7 +34,7 @@ PubSubNetworkSpiEdgeSetup<Totem::Wire::Spi::Slave,
 
 namespace {
 
-class BeatIndicatorLed {
+class PeakIndicatorLed {
   public:
     ReturnCode bind(Totem::LedPwm::LedContext context) {
         _context = context;
@@ -42,18 +42,18 @@ class BeatIndicatorLed {
         return OK();
     }
 
-    static ReturnCode onBeat(void *owner,
-                             const Totem::Audio::BeatResult &event) {
-        auto *self = static_cast<BeatIndicatorLed *>(owner);
+    static ReturnCode onPeak(void *owner,
+                             const Totem::Audio::PeakResult &event) {
+        auto *self = static_cast<PeakIndicatorLed *>(owner);
         FAIL_IF_NULL(self, ERR(CoreError, InvalidArgument),
-                     "Beat indicator owner is null");
+                     "Peak indicator owner is null");
         return self->pulse(event);
     }
 
   private:
-    ReturnCode pulse(const Totem::Audio::BeatResult & /*unused*/) {
+    ReturnCode pulse(const Totem::Audio::PeakResult & /*unused*/) {
         FAIL_IF(!_bound, ERR(CoreError, InvalidState),
-                "Beat indicator LED is not bound");
+                "Peak indicator LED is not bound");
         auto command = Totem::LedPwm::LedCommand::pulse({
             .peak = Totem::LedPwm::Brightness::full(),
             .riseMs = 0,
@@ -68,7 +68,7 @@ class BeatIndicatorLed {
     bool _bound = false;
 };
 
-BeatIndicatorLed beatIndicatorLed{};
+PeakIndicatorLed peakIndicatorLed{};
 
 } // namespace
 
@@ -80,14 +80,14 @@ void setup() {
     _log_i("Core setup complete");
 
     ABORT_IF_ERR_BEGIN(ledPwm.begin(ledPwmConfig));
-    ABORT_IF_UNEXPECTED(beatLedContext,
-                        ledPwm.getLedContext(PeripheralLed::BeatIndicator),
-                        "Failed to get beat indicator LED context");
-    ABORT_IF_ERR(beatIndicatorLed.bind(beatLedContext),
-                 "Failed to bind beat indicator LED");
-    fftAnalyzerConfig.beatIndicator = {
-        .owner = &beatIndicatorLed,
-        .callback = BeatIndicatorLed::onBeat,
+    ABORT_IF_UNEXPECTED(peakLedContext,
+                        ledPwm.getLedContext(PeripheralLed::PeakIndicator),
+                        "Failed to get peak indicator LED context");
+    ABORT_IF_ERR(peakIndicatorLed.bind(peakLedContext),
+                 "Failed to bind peak indicator LED");
+    fftAnalyzerConfig.peakIndicator = {
+        .owner = &peakIndicatorLed,
+        .callback = PeakIndicatorLed::onPeak,
     };
 
     if constexpr (enableFftDebugDisplay) {

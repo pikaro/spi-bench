@@ -71,8 +71,48 @@ struct Metrics {
         .type = MetricType::Counter,
         .unit = MetricUnit::None,
     };
+    static constexpr MetricDesc peaksDef = {
+        .name = "peak",
+        .type = MetricType::Counter,
+        .unit = MetricUnit::None,
+    };
     static constexpr MetricDesc beatsDef = {
         .name = "beat",
+        .type = MetricType::Counter,
+        .unit = MetricUnit::None,
+    };
+    static constexpr MetricDesc beatHitsDef = {
+        .name = "btHit",
+        .type = MetricType::Counter,
+        .unit = MetricUnit::None,
+    };
+    static constexpr MetricDesc beatMissesDef = {
+        .name = "btMiss",
+        .type = MetricType::Counter,
+        .unit = MetricUnit::None,
+    };
+    static constexpr MetricDesc beatReacquiredDef = {
+        .name = "btReq",
+        .type = MetricType::Counter,
+        .unit = MetricUnit::None,
+    };
+    static constexpr MetricDesc beatLostDef = {
+        .name = "btLost",
+        .type = MetricType::Counter,
+        .unit = MetricUnit::None,
+    };
+    static constexpr MetricDesc peakBassDef = {
+        .name = "pkBass",
+        .type = MetricType::Counter,
+        .unit = MetricUnit::None,
+    };
+    static constexpr MetricDesc peakMidDef = {
+        .name = "pkMid",
+        .type = MetricType::Counter,
+        .unit = MetricUnit::None,
+    };
+    static constexpr MetricDesc peakHighDef = {
+        .name = "pkHigh",
         .type = MetricType::Counter,
         .unit = MetricUnit::None,
     };
@@ -106,8 +146,18 @@ struct Metrics {
         .type = MetricType::Counter,
         .unit = MetricUnit::Microseconds,
     };
-    static constexpr MetricDesc beatUpdateUsDef = {
-        .name = "btUpdUs",
+    static constexpr MetricDesc peakUpdateUsDef = {
+        .name = "pkUpdUs",
+        .type = MetricType::Counter,
+        .unit = MetricUnit::Microseconds,
+    };
+    static constexpr MetricDesc peakDispatchUsDef = {
+        .name = "pkDisUs",
+        .type = MetricType::Counter,
+        .unit = MetricUnit::Microseconds,
+    };
+    static constexpr MetricDesc tempoUpdateUsDef = {
+        .name = "tmpUpdUs",
         .type = MetricType::Counter,
         .unit = MetricUnit::Microseconds,
     };
@@ -152,8 +202,20 @@ struct Metrics {
         .unit = MetricUnit::Microseconds,
         .gaugeIsMax = true,
     };
-    static constexpr MetricDesc beatUpdateMaxDef = {
-        .name = "btUpdMx",
+    static constexpr MetricDesc peakUpdateMaxDef = {
+        .name = "pkUpdMx",
+        .type = MetricType::Gauge,
+        .unit = MetricUnit::Microseconds,
+        .gaugeIsMax = true,
+    };
+    static constexpr MetricDesc peakDispatchMaxDef = {
+        .name = "pkDisMx",
+        .type = MetricType::Gauge,
+        .unit = MetricUnit::Microseconds,
+        .gaugeIsMax = true,
+    };
+    static constexpr MetricDesc tempoUpdateMaxDef = {
+        .name = "tmpUpdMx",
         .type = MetricType::Gauge,
         .unit = MetricUnit::Microseconds,
         .gaugeIsMax = true,
@@ -167,13 +229,43 @@ struct Metrics {
     // Per-band magnitudes are intentionally omitted: recording gauges for each
     // band on every FFT frame would add atomics in the audio callback and
     // duplicate the already-published FftFrame payload.
-    static constexpr MetricDesc beatEnergyDef = {
-        .name = "beatE",
+    static constexpr MetricDesc peakEnergyDef = {
+        .name = "peakE",
+        .type = MetricType::Gauge,
+        .unit = MetricUnit::None,
+    };
+    static constexpr MetricDesc peakRateDef = {
+        .name = "pkRate",
         .type = MetricType::Gauge,
         .unit = MetricUnit::None,
     };
     static constexpr MetricDesc bpmDef = {
         .name = "bpm",
+        .type = MetricType::Gauge,
+        .unit = MetricUnit::None,
+    };
+    static constexpr MetricDesc beatConfidenceDef = {
+        .name = "btConf",
+        .type = MetricType::Gauge,
+        .unit = MetricUnit::None,
+    };
+    static constexpr MetricDesc calibrationRequestsDef = {
+        .name = "calReq",
+        .type = MetricType::Counter,
+        .unit = MetricUnit::None,
+    };
+    static constexpr MetricDesc calibrationFramesDef = {
+        .name = "calFrm",
+        .type = MetricType::Counter,
+        .unit = MetricUnit::None,
+    };
+    static constexpr MetricDesc calibrationCompletedDef = {
+        .name = "calDone",
+        .type = MetricType::Counter,
+        .unit = MetricUnit::None,
+    };
+    static constexpr MetricDesc calibrationActiveDef = {
+        .name = "calAct",
         .type = MetricType::Gauge,
         .unit = MetricUnit::None,
     };
@@ -190,9 +282,23 @@ struct Metrics {
         REGISTER_METRIC("AudioFft", skips, Counter, group);
         REGISTER_METRIC("AudioFft", probes, Counter, group);
         REGISTER_METRIC("AudioFft", frames, Counter, group);
+        REGISTER_METRIC("AudioFft", peaks, Counter, group);
         REGISTER_METRIC("AudioFft", beats, Counter, group);
-        REGISTER_METRIC("AudioFft", beatEnergy, Gauge, group);
+        REGISTER_METRIC("AudioFft", beatHits, Counter, group);
+        REGISTER_METRIC("AudioFft", beatMisses, Counter, group);
+        REGISTER_METRIC("AudioFft", beatReacquired, Counter, group);
+        REGISTER_METRIC("AudioFft", beatLost, Counter, group);
+        REGISTER_METRIC("AudioFft", peakBass, Counter, group);
+        REGISTER_METRIC("AudioFft", peakMid, Counter, group);
+        REGISTER_METRIC("AudioFft", peakHigh, Counter, group);
+        REGISTER_METRIC("AudioFft", peakEnergy, Gauge, group);
+        REGISTER_METRIC("AudioFft", peakRate, Gauge, group);
         REGISTER_METRIC("AudioFft", bpm, Gauge, group);
+        REGISTER_METRIC("AudioFft", beatConfidence, Gauge, group);
+        REGISTER_METRIC("AudioFft", calibrationRequests, Counter, group);
+        REGISTER_METRIC("AudioFft", calibrationFrames, Counter, group);
+        REGISTER_METRIC("AudioFft", calibrationCompleted, Counter, group);
+        REGISTER_METRIC("AudioFft", calibrationActive, Gauge, group);
 
         REGISTER_METRICS_GROUP("AudioProfiling", profileGroup);
         REGISTER_METRIC("AudioProfiling", copyUs, Counter, profileGroup);
@@ -201,16 +307,21 @@ struct Metrics {
         REGISTER_METRIC("AudioProfiling", bandUs, Counter, profileGroup);
         REGISTER_METRIC("AudioProfiling", cacheUs, Counter, profileGroup);
         REGISTER_METRIC("AudioProfiling", dispatchUs, Counter, profileGroup);
-        REGISTER_METRIC("AudioProfiling", beatUpdateUs, Counter, profileGroup);
-        REGISTER_METRIC("AudioProfiling", beatDispatchUs, Counter,
+        REGISTER_METRIC("AudioProfiling", peakUpdateUs, Counter, profileGroup);
+        REGISTER_METRIC("AudioProfiling", peakDispatchUs, Counter,
                         profileGroup);
+        REGISTER_METRIC("AudioProfiling", tempoUpdateUs, Counter, profileGroup);
+        REGISTER_METRIC("AudioProfiling", beatDispatchUs, Counter, profileGroup);
         REGISTER_METRIC("AudioProfiling", copyMax, Gauge, profileGroup);
         REGISTER_METRIC("AudioProfiling", probeMax, Gauge, profileGroup);
         REGISTER_METRIC("AudioProfiling", frameMax, Gauge, profileGroup);
         REGISTER_METRIC("AudioProfiling", bandMax, Gauge, profileGroup);
         REGISTER_METRIC("AudioProfiling", cacheMax, Gauge, profileGroup);
         REGISTER_METRIC("AudioProfiling", dispatchMax, Gauge, profileGroup);
-        REGISTER_METRIC("AudioProfiling", beatUpdateMax, Gauge, profileGroup);
+        REGISTER_METRIC("AudioProfiling", peakUpdateMax, Gauge, profileGroup);
+        REGISTER_METRIC("AudioProfiling", peakDispatchMax, Gauge,
+                        profileGroup);
+        REGISTER_METRIC("AudioProfiling", tempoUpdateMax, Gauge, profileGroup);
         REGISTER_METRIC("AudioProfiling", beatDispatchMax, Gauge, profileGroup);
 
         return Metrics{
@@ -224,9 +335,23 @@ struct Metrics {
             .skips = skips,
             .probes = probes,
             .frames = frames,
+            .peaks = peaks,
             .beats = beats,
-            .beatEnergy = beatEnergy,
+            .beatHits = beatHits,
+            .beatMisses = beatMisses,
+            .beatReacquired = beatReacquired,
+            .beatLost = beatLost,
+            .peakBass = peakBass,
+            .peakMid = peakMid,
+            .peakHigh = peakHigh,
+            .peakEnergy = peakEnergy,
+            .peakRate = peakRate,
             .bpm = bpm,
+            .beatConfidence = beatConfidence,
+            .calibrationRequests = calibrationRequests,
+            .calibrationFrames = calibrationFrames,
+            .calibrationCompleted = calibrationCompleted,
+            .calibrationActive = calibrationActive,
             .profileGroup = profileGroup,
             .copyUs = copyUs,
             .probeUs = probeUs,
@@ -234,7 +359,9 @@ struct Metrics {
             .bandUs = bandUs,
             .cacheUs = cacheUs,
             .dispatchUs = dispatchUs,
-            .beatUpdateUs = beatUpdateUs,
+            .peakUpdateUs = peakUpdateUs,
+            .peakDispatchUs = peakDispatchUs,
+            .tempoUpdateUs = tempoUpdateUs,
             .beatDispatchUs = beatDispatchUs,
             .copyMax = copyMax,
             .probeMax = probeMax,
@@ -242,7 +369,9 @@ struct Metrics {
             .bandMax = bandMax,
             .cacheMax = cacheMax,
             .dispatchMax = dispatchMax,
-            .beatUpdateMax = beatUpdateMax,
+            .peakUpdateMax = peakUpdateMax,
+            .peakDispatchMax = peakDispatchMax,
+            .tempoUpdateMax = tempoUpdateMax,
             .beatDispatchMax = beatDispatchMax,
         };
     }
@@ -289,9 +418,19 @@ struct Metrics {
         recordMax(dispatchMax, dispatchMaxValue, durationUs);
     }
 
-    void addBeatUpdate(uint32_t durationUs) {
-        METRIC_INCR(profileGroup, beatUpdateUs, durationUs);
-        recordMax(beatUpdateMax, beatUpdateMaxValue, durationUs);
+    void addPeakUpdate(uint32_t durationUs) {
+        METRIC_INCR(profileGroup, peakUpdateUs, durationUs);
+        recordMax(peakUpdateMax, peakUpdateMaxValue, durationUs);
+    }
+
+    void addPeakDispatch(uint32_t durationUs) {
+        METRIC_INCR(profileGroup, peakDispatchUs, durationUs);
+        recordMax(peakDispatchMax, peakDispatchMaxValue, durationUs);
+    }
+
+    void addTempoUpdate(uint32_t durationUs) {
+        METRIC_INCR(profileGroup, tempoUpdateUs, durationUs);
+        recordMax(tempoUpdateMax, tempoUpdateMaxValue, durationUs);
     }
 
     void addBeatDispatch(uint32_t durationUs) {
@@ -299,13 +438,58 @@ struct Metrics {
         recordMax(beatDispatchMax, beatDispatchMaxValue, durationUs);
     }
 
-    void addBeat(const BeatResult &event, bool primary) {
-        METRIC_INCR(group, beats, 1);
-        if (!primary) {
-            return;
+    void addPeak(const PeakResult &event) {
+        METRIC_INCR(group, peaks, 1);
+        METRIC_SET(group, peakEnergy, event.energy);
+        METRIC_SET(group, peakRate,
+                   static_cast<uint32_t>(std::lround(event.ratePerMinute)));
+        switch (event.group) {
+        case PeakGroup::Bass:
+            METRIC_INCR(group, peakBass, 1);
+            break;
+        case PeakGroup::Mid:
+            METRIC_INCR(group, peakMid, 1);
+            break;
+        case PeakGroup::High:
+            METRIC_INCR(group, peakHigh, 1);
+            break;
+        default:
+            break;
         }
-        METRIC_SET(group, beatEnergy, event.energy);
-        METRIC_SET(group, bpm, static_cast<uint32_t>(std::lround(event.bpm)));
+    }
+
+    void addBeat(const BeatResult &event) {
+        METRIC_INCR(group, beats, 1);
+        METRIC_SET(group, bpm, event.bpm);
+        METRIC_SET(group, beatConfidence, event.confidence);
+        switch (event.kind) {
+        case BeatEventKind::ExpectedHit:
+            METRIC_INCR(group, beatHits, 1);
+            break;
+        case BeatEventKind::ExpectedMiss:
+            METRIC_INCR(group, beatMisses, 1);
+            break;
+        case BeatEventKind::Reacquired:
+            METRIC_INCR(group, beatReacquired, 1);
+            break;
+        case BeatEventKind::Lost:
+            METRIC_INCR(group, beatLost, 1);
+            break;
+        default:
+            break;
+        }
+    }
+
+    void addCalibrationRequest() {
+        METRIC_INCR(group, calibrationRequests, 1);
+        METRIC_SET(group, calibrationActive, 1);
+    }
+
+    void addCalibrationFrame() { METRIC_INCR(group, calibrationFrames, 1); }
+
+    void addCalibrationComplete() {
+        METRIC_INCR(group, calibrationCompleted, 1);
+        METRIC_SET(group, calibrationActive, 0);
     }
 
     void recordCopyDuration(uint32_t durationUs) {
@@ -333,9 +517,23 @@ struct Metrics {
     CounterHandle skips;
     CounterHandle probes;
     CounterHandle frames;
+    CounterHandle peaks;
     CounterHandle beats;
-    GaugeHandle beatEnergy;
+    CounterHandle beatHits;
+    CounterHandle beatMisses;
+    CounterHandle beatReacquired;
+    CounterHandle beatLost;
+    CounterHandle peakBass;
+    CounterHandle peakMid;
+    CounterHandle peakHigh;
+    GaugeHandle peakEnergy;
+    GaugeHandle peakRate;
     GaugeHandle bpm;
+    GaugeHandle beatConfidence;
+    CounterHandle calibrationRequests;
+    CounterHandle calibrationFrames;
+    CounterHandle calibrationCompleted;
+    GaugeHandle calibrationActive;
     GroupHandle profileGroup;
     CounterHandle copyUs;
     CounterHandle probeUs;
@@ -343,7 +541,9 @@ struct Metrics {
     CounterHandle bandUs;
     CounterHandle cacheUs;
     CounterHandle dispatchUs;
-    CounterHandle beatUpdateUs;
+    CounterHandle peakUpdateUs;
+    CounterHandle peakDispatchUs;
+    CounterHandle tempoUpdateUs;
     CounterHandle beatDispatchUs;
     GaugeHandle copyMax;
     GaugeHandle probeMax;
@@ -351,7 +551,9 @@ struct Metrics {
     GaugeHandle bandMax;
     GaugeHandle cacheMax;
     GaugeHandle dispatchMax;
-    GaugeHandle beatUpdateMax;
+    GaugeHandle peakUpdateMax;
+    GaugeHandle peakDispatchMax;
+    GaugeHandle tempoUpdateMax;
     GaugeHandle beatDispatchMax;
     uint32_t copyMaxValue = 0;
     uint32_t probeMaxValue = 0;
@@ -359,7 +561,9 @@ struct Metrics {
     uint32_t bandMaxValue = 0;
     uint32_t cacheMaxValue = 0;
     uint32_t dispatchMaxValue = 0;
-    uint32_t beatUpdateMaxValue = 0;
+    uint32_t peakUpdateMaxValue = 0;
+    uint32_t peakDispatchMaxValue = 0;
+    uint32_t tempoUpdateMaxValue = 0;
     uint32_t beatDispatchMaxValue = 0;
 
     static constexpr auto component = MetricsBackend::MetricComponent::Audio;

@@ -6,6 +6,7 @@
 #include "Generated/Wire/PubSubTest__Message.hpp"
 #include "Generated/Wire/Totem__Audio__BeatEvent.hpp"
 #include "Generated/Wire/Totem__Audio__FftFrame.hpp"
+#include "Generated/Wire/Totem__Audio__PeakEvent.hpp"
 #include "Generated/Wire/Totem__Buttons__ButtonEvent.hpp"
 #include "Generated/Wire/Totem__LedDisplay__AnimationCommand.hpp"
 #include "Generated/Wire/Totem__LedDisplay__Animations__CenterWaveConfig.hpp"

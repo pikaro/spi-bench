@@ -28,26 +28,13 @@ class HeaderModel(BaseModel):
     payload_size: int
 
 
-class ButtonEventModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    type: Literal["Pressed", "Released", "Unknown"]
-    button: Literal["Bell", "Unknown"]
-
-
-class PubSubEventModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    topic: int
-    type: Literal["Register", "Unregister", "Unknown"]
-
-
 class PubSubNotification(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["pubsub"]
     message_type: str
     header: HeaderModel
+    payload_hex: str | None = None
     payload: dict[str, Any] | None = None
 
 
@@ -65,7 +52,10 @@ class RawPublishCommand(BaseModel):
     payload: bytes = Field(default=b"", max_length=2048)
 
 
-ButtonHandler = Callable[[HeaderModel, ButtonEventModel], Awaitable[None]]
+NotificationHandler = Callable[
+    [PubSubNotification, dict[str, Any]],
+    Awaitable[None],
+]
 _DURATION_RE = re.compile(r"^(?P<value>[1-9][0-9]*)(?P<unit>ms|s|m)?$")
 
 
@@ -138,16 +128,248 @@ def parse_raw_publish_arg(values: list[str]) -> RawPublishCommand:
     )
 
 
+def parse_topic_value(value: Any) -> int:
+    if isinstance(value, int):
+        topic = value
+    elif isinstance(value, str):
+        topic = parse_int_arg(value)
+    else:
+        raise ValueError("topic must be an integer or integer string")
+    if topic < 0 or topic > 0xFFFFFFFF:
+        raise ValueError("topic must fit in uint32")
+    return topic
+
+
+def parse_traffic_class_value(value: Any) -> Literal[0, 1]:
+    if value is None:
+        return 0
+    if isinstance(value, int):
+        traffic_class = value
+    elif isinstance(value, str):
+        traffic_class = parse_int_arg(value)
+    else:
+        raise ValueError("traffic_class must be 0 or 1")
+    if traffic_class not in {0, 1}:
+        raise ValueError("traffic_class must be 0 or 1")
+    return traffic_class  # type: ignore[return-value]
+
+
+class LocalFanout:
+    def __init__(self, bridge: "PubSubBridge", path: Path, max_buffer: int) -> None:
+        self._bridge = bridge
+        self._path = path
+        self._max_buffer = max_buffer
+        self._server: asyncio.AbstractServer | None = None
+        self._clients: dict[asyncio.StreamWriter, set[int]] = {}
+        self._topic_refs: dict[int, int] = {}
+        self._log = logging.getLogger("pubsub_udp_peer.local")
+
+    async def start(self) -> None:
+        if self._path.exists():
+            self._path.unlink()
+        self._server = await asyncio.start_unix_server(
+            self._handle_client,
+            path=str(self._path),
+        )
+        self._log.info("local PubSub fanout socket listening at %s", self._path)
+
+    async def stop(self) -> None:
+        if self._server is not None:
+            self._server.close()
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(self._server.wait_closed(), timeout=0.5)
+            self._server = None
+        for writer in list(self._clients):
+            await self._close_client(writer, send_unsubscribe=False)
+        with contextlib.suppress(FileNotFoundError):
+            self._path.unlink()
+
+    async def on_notification(
+        self,
+        notification: PubSubNotification,
+        data: dict[str, Any],
+    ) -> None:
+        topic = notification.header.topic
+        encoded = (json.dumps(data, separators=(",", ":")) + "\n").encode(
+            "utf-8"
+        )
+        for writer, subscriptions in list(self._clients.items()):
+            if not any((topic & mask) != 0 for mask in subscriptions):
+                continue
+            transport = writer.transport
+            if (
+                transport is not None
+                and transport.get_write_buffer_size() > self._max_buffer
+            ):
+                self._log.warning("dropping local PubSub event for slow client")
+                continue
+            writer.write(encoded)
+
+    async def _handle_client(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        self._clients[writer] = set()
+        await self._write_local(writer, {"kind": "local", "event": "connected"})
+        try:
+            async for raw_line in reader:
+                line = raw_line.decode("utf-8", "replace").strip()
+                if line:
+                    await self._handle_client_line(writer, line)
+        finally:
+            await self._close_client(writer, send_unsubscribe=True)
+
+    async def _handle_client_line(
+        self,
+        writer: asyncio.StreamWriter,
+        line: str,
+    ) -> None:
+        try:
+            data = json.loads(line)
+            op = data.get("op")
+        except json.JSONDecodeError as exc:
+            await self._write_error(writer, str(exc))
+            return
+
+        try:
+            if op == "subscribe":
+                await self._subscribe(writer, parse_topic_value(data.get("topic")))
+                return
+            if op == "unsubscribe":
+                await self._unsubscribe(
+                    writer,
+                    parse_topic_value(data.get("topic")),
+                    send_unsubscribe=True,
+                )
+                return
+            if op == "publish":
+                await self._publish(writer, data)
+                return
+        except ValueError as exc:
+            await self._write_error(writer, str(exc))
+            return
+
+        await self._write_error(writer, f"unknown op {op!r}")
+
+    async def _subscribe(self, writer: asyncio.StreamWriter, topic: int) -> None:
+        subscriptions = self._clients[writer]
+        if topic in subscriptions:
+            await self._write_local(
+                writer, {"kind": "local", "event": "subscribed", "topic": topic}
+            )
+            return
+        subscriptions.add(topic)
+        previous = self._topic_refs.get(topic, 0)
+        self._topic_refs[topic] = previous + 1
+        if previous == 0 and not self._bridge.has_persistent_subscription(topic):
+            await self._bridge.subscribe_topic(topic)
+        await self._write_local(
+            writer, {"kind": "local", "event": "subscribed", "topic": topic}
+        )
+
+    async def _unsubscribe(
+        self,
+        writer: asyncio.StreamWriter,
+        topic: int,
+        *,
+        send_unsubscribe: bool,
+    ) -> None:
+        subscriptions = self._clients.get(writer)
+        if subscriptions is None or topic not in subscriptions:
+            await self._write_local(
+                writer, {"kind": "local", "event": "unsubscribed", "topic": topic}
+            )
+            return
+        subscriptions.remove(topic)
+        remaining = max(0, self._topic_refs.get(topic, 0) - 1)
+        if remaining == 0:
+            self._topic_refs.pop(topic, None)
+            if send_unsubscribe and not self._bridge.has_persistent_subscription(topic):
+                await self._bridge.unsubscribe_topic(topic)
+        else:
+            self._topic_refs[topic] = remaining
+        await self._write_local(
+            writer, {"kind": "local", "event": "unsubscribed", "topic": topic}
+        )
+
+    async def _publish(
+        self,
+        writer: asyncio.StreamWriter,
+        data: dict[str, Any],
+    ) -> None:
+        topic = parse_topic_value(data.get("topic"))
+        traffic_class = parse_traffic_class_value(data.get("traffic_class"))
+        payload_hex = str(data.get("payload_hex", ""))
+        try:
+            payload = bytes.fromhex(payload_hex)
+        except ValueError as exc:
+            raise ValueError("payload_hex must contain hex bytes") from exc
+        await self._bridge.publish_raw(
+            topic=topic,
+            traffic_class=traffic_class,
+            payload=payload,
+        )
+        await self._write_local(
+            writer, {"kind": "local", "event": "published", "topic": topic}
+        )
+
+    async def _close_client(
+        self,
+        writer: asyncio.StreamWriter,
+        *,
+        send_unsubscribe: bool,
+    ) -> None:
+        topics = list(self._clients.get(writer, set()))
+        for topic in topics:
+            remaining = max(0, self._topic_refs.get(topic, 0) - 1)
+            if remaining == 0:
+                self._topic_refs.pop(topic, None)
+                if send_unsubscribe and not self._bridge.has_persistent_subscription(
+                    topic
+                ):
+                    await self._bridge.unsubscribe_topic(topic)
+            else:
+                self._topic_refs[topic] = remaining
+        self._clients.pop(writer, None)
+        writer.close()
+        with contextlib.suppress(BrokenPipeError, ConnectionResetError, TimeoutError):
+            await asyncio.wait_for(writer.wait_closed(), timeout=0.5)
+
+    async def _write_error(self, writer: asyncio.StreamWriter, detail: str) -> None:
+        await self._write_local(
+            writer,
+            {"kind": "local", "event": "error", "detail": detail},
+        )
+
+    @staticmethod
+    async def _write_local(
+        writer: asyncio.StreamWriter,
+        payload: dict[str, Any],
+    ) -> None:
+        writer.write(
+            (json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8")
+        )
+        await writer.drain()
+
+
 class PubSubBridge:
     def __init__(self, cpp_peer: Path, args: argparse.Namespace) -> None:
         self._cpp_peer = cpp_peer
         self._args = args
-        self._button_handlers: list[ButtonHandler] = []
+        self._notification_handlers: list[NotificationHandler] = []
         self._log = logging.getLogger("pubsub_udp_peer")
         self._stdin: asyncio.StreamWriter | None = None
+        self._write_lock = asyncio.Lock()
+        self._persistent_topics = set(args.subscribe_topic)
 
-    def on_button(self, handler: ButtonHandler) -> None:
-        self._button_handlers.append(handler)
+    def on_notification(self, handler: NotificationHandler) -> None:
+        self._notification_handlers.append(handler)
+
+    def has_persistent_subscription(self, topic: int) -> bool:
+        return any(
+            (topic & persistent) == topic for persistent in self._persistent_topics
+        )
 
     async def publish_raw(
         self,
@@ -187,8 +409,6 @@ class PubSubBridge:
         ]
         if self._args.timeout_ms is not None:
             command.extend(["--timeout-ms", str(self._args.timeout_ms)])
-        if not self._args.subscribe_button:
-            command.append("--no-button-sub")
 
         process = await asyncio.create_subprocess_exec(
             *command,
@@ -200,6 +420,16 @@ class PubSubBridge:
         assert process.stdin is not None
         assert process.stdout is not None
         assert process.stderr is not None
+
+        fanout: LocalFanout | None = None
+        if self._args.local_socket is not None:
+            fanout = LocalFanout(
+                self,
+                self._args.local_socket,
+                self._args.local_client_buffer,
+            )
+            self.on_notification(fanout.on_notification)
+            await fanout.start()
 
         stderr_task = asyncio.create_task(self._drain_stderr(process.stderr))
         startup_task = asyncio.create_task(self._send_startup_commands())
@@ -223,6 +453,8 @@ class PubSubBridge:
                 stdin_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await stdin_task
+            if fanout is not None:
+                await fanout.stop()
             await self._close_stdin()
             if process.returncode is None:
                 try:
@@ -263,8 +495,11 @@ class PubSubBridge:
     async def _write_command(self, command: str) -> None:
         if self._stdin is None:
             raise RuntimeError("C++ PubSub peer is not running")
-        self._stdin.write(command.encode("utf-8"))
-        await self._stdin.drain()
+        async with self._write_lock:
+            if self._stdin is None:
+                raise RuntimeError("C++ PubSub peer is not running")
+            self._stdin.write(command.encode("utf-8"))
+            await self._stdin.drain()
 
     async def _send_startup_commands(self) -> None:
         for topic in self._args.subscribe_topic:
@@ -329,21 +564,8 @@ class PubSubBridge:
             return
 
         notification = PubSubNotification.model_validate(data)
-        if notification.message_type == "Totem.Buttons.ButtonEvent":
-            payload = ButtonEventModel.model_validate(notification.payload)
-            for handler in self._button_handlers:
-                await handler(notification.header, payload)
-
-
-async def log_bell_event(header: HeaderModel, event: ButtonEventModel) -> None:
-    if event.button != "Bell":
-        return
-    logging.getLogger("pubsub_udp_peer").info(
-        "bell event type=%s message_id=%s source=%s",
-        event.type,
-        header.message_id,
-        header.source,
-    )
+        for handler in self._notification_handlers:
+            await handler(notification, data)
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -396,6 +618,22 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         metavar="COMMAND",
         help="Send a raw C++ peer command after startup. Repeatable.",
     )
+    parser.add_argument(
+        "--local-socket",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help=(
+            "Expose arbitrary PubSub events to local scripts as raw newline "
+            "JSON over a Unix-domain socket."
+        ),
+    )
+    parser.add_argument(
+        "--local-client-buffer",
+        type=int,
+        default=65536,
+        help="Drop forwarded events for a local client above this buffer size.",
+    )
     stdin_group = parser.add_mutually_exclusive_group()
     stdin_group.add_argument(
         "--stdin",
@@ -409,12 +647,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         dest="forward_stdin",
         action="store_false",
         help="Do not forward stdin, even when attached to a terminal.",
-    )
-    parser.add_argument(
-        "--no-button-sub",
-        dest="subscribe_button",
-        action="store_false",
-        default=True,
     )
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args(argv)
@@ -439,7 +671,6 @@ async def amain(argv: list[str]) -> int:
     root = repo_root()
     cpp_peer = build_cpp_peer(root)
     bridge = PubSubBridge(cpp_peer, args)
-    bridge.on_button(log_bell_event)
     return await bridge.run()
 
 

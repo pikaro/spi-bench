@@ -64,6 +64,15 @@ class FftDisplay : public HasLifecycle<FftDisplay, FftDisplayConfig>,
             _registeredFrameHandler = true;
         }
 
+        if (!_registeredPeakHandler) {
+            FAIL_IF_ERR_FWD(_analyzer.addPeakHandler(PeakResultHandler{
+                                .owner = this,
+                                .callback = _onPeak,
+                            }),
+                            "Failed to register FFT display peak handler");
+            _registeredPeakHandler = true;
+        }
+
         if (!_registeredBeatHandler) {
             FAIL_IF_ERR_FWD(_analyzer.addBeatHandler(BeatResultHandler{
                                 .owner = this,
@@ -77,10 +86,13 @@ class FftDisplay : public HasLifecycle<FftDisplay, FftDisplayConfig>,
         _hasFrame.store(false, std::memory_order_release);
         _capturedFrames.store(0, std::memory_order_release);
         _droppedFrames.store(0, std::memory_order_release);
-        for (size_t i = 0; i < beatGroupCount; ++i) {
-            _beatUntilMs[i].store(0, std::memory_order_release);
-            _beatRanges[i].store(0, std::memory_order_release);
+        for (size_t i = 0; i < peakGroupCount; ++i) {
+            _peakUntilMs[i].store(0, std::memory_order_release);
+            _peakRanges[i].store(0, std::memory_order_release);
         }
+        _beatUntilMs.store(0, std::memory_order_release);
+        _lastBeatKind.store(static_cast<uint8_t>(BeatEventKind::Lost),
+                            std::memory_order_release);
         _acceptingFrames.store(true, std::memory_order_release);
 
         DEFAULT_TASK();
@@ -129,6 +141,14 @@ class FftDisplay : public HasLifecycle<FftDisplay, FftDisplayConfig>,
         return self->_captureFrame(frame);
     }
 
+    static ReturnCode _onPeak(void *owner, const PeakResult &event) {
+        auto *self = static_cast<FftDisplay *>(owner);
+        if (self == nullptr) {
+            return ERR(CoreError, InvalidArgument);
+        }
+        return self->_capturePeak(event);
+    }
+
     static ReturnCode _onBeat(void *owner, const BeatResult &event) {
         auto *self = static_cast<FftDisplay *>(owner);
         if (self == nullptr) {
@@ -155,41 +175,55 @@ class FftDisplay : public HasLifecycle<FftDisplay, FftDisplayConfig>,
         return OK();
     }
 
+    ReturnCode _capturePeak(const PeakResult &event) {
+        if (!_acceptingFrames.load(std::memory_order_acquire)) {
+            return OK();
+        }
+        const auto index = peakGroupIndex(event.group);
+        if (index >= peakGroupCount) {
+            return OK();
+        }
+        _peakRanges[index].store(_packRange(event.bands),
+                                 std::memory_order_release);
+        _peakUntilMs[index].store(::platform::get_time() +
+                                      config().peakBarHoldMs,
+                                  std::memory_order_release);
+        displayMetrics().addPeak();
+        return OK();
+    }
+
     ReturnCode _captureBeat(const BeatResult &event) {
         if (!_acceptingFrames.load(std::memory_order_acquire)) {
             return OK();
         }
-        const auto index = beatGroupIndex(event.group);
-        if (index >= beatGroupCount) {
-            return OK();
-        }
-        _beatRanges[index].store(_packRange(event.bands),
-                                 std::memory_order_release);
-        _beatUntilMs[index].store(::platform::get_time() +
-                                      config().beatBarHoldMs,
-                                  std::memory_order_release);
+        _lastBeatKind.store(static_cast<uint8_t>(event.kind),
+                            std::memory_order_release);
+        _beatUntilMs.store(::platform::get_time() + config().beatBarHoldMs,
+                           std::memory_order_release);
         displayMetrics().addBeat();
         return OK();
     }
 
-    [[nodiscard]] bool _beatActive(size_t groupIndex, uint32_t nowMs) const {
+    [[nodiscard]] bool _peakActive(size_t groupIndex, uint32_t nowMs) const {
         return static_cast<int32_t>(
-                   _beatUntilMs[groupIndex].load(std::memory_order_acquire) -
+                   _peakUntilMs[groupIndex].load(std::memory_order_acquire) -
                    nowMs) > 0;
     }
 
     void _drawFrame(const FftResult &frame, uint32_t nowMs) {
         const auto width = _display.width();
         const auto height = _display.height();
+        const auto bandHeight = _bandAreaHeight(height);
 
         _display.clear();
         if (config().showRawBands) {
-            _drawRawAndEffectiveBands(frame, width, height);
+            _drawRawAndEffectiveBands(frame, width, bandHeight);
         } else {
-            _drawEffectiveBands(frame, width, height);
+            _drawEffectiveBands(frame, width, bandHeight);
         }
 
-        _drawBeatBars(nowMs, width);
+        _drawPeakBars(nowMs, width);
+        _drawBeatBar(nowMs, width, height);
     }
 
     void _drawRawAndEffectiveBands(const FftResult &frame, uint8_t width,
@@ -247,17 +281,53 @@ class FftDisplay : public HasLifecycle<FftDisplay, FftDisplayConfig>,
         _display.fillRect(x, y, width, barHeight);
     }
 
-    void _drawBeatBars(uint32_t nowMs, uint8_t displayWidth) {
-        for (size_t i = 0; i < beatGroupCount; ++i) {
-            if (!_beatActive(i, nowMs)) {
+    void _drawPeakBars(uint32_t nowMs, uint8_t displayWidth) {
+        for (size_t i = 0; i < peakGroupCount; ++i) {
+            if (!_peakActive(i, nowMs)) {
                 continue;
             }
             const auto range =
-                _unpackRange(_beatRanges[i].load(std::memory_order_acquire));
+                _unpackRange(_peakRanges[i].load(std::memory_order_acquire));
             const auto x = _bandRangeX(range, displayWidth);
             const auto width = _bandRangeWidth(range, displayWidth, x);
             _display.fillRect(x, 0, width, 2);
         }
+    }
+
+    void _drawBeatBar(uint32_t nowMs, uint8_t displayWidth,
+                      uint8_t displayHeight) {
+        const auto untilMs = _beatUntilMs.load(std::memory_order_acquire);
+        if (static_cast<int32_t>(untilMs - nowMs) <= 0) {
+            return;
+        }
+        const auto kind = static_cast<BeatEventKind>(
+            _lastBeatKind.load(std::memory_order_acquire));
+        const auto maxHeight =
+            std::min<uint8_t>(config().beatBarHeightPx, displayHeight);
+        uint8_t height = 1;
+        switch (kind) {
+        case BeatEventKind::Reacquired:
+            height = maxHeight;
+            break;
+        case BeatEventKind::ExpectedHit:
+            height = std::min<uint8_t>(2, maxHeight);
+            break;
+        case BeatEventKind::ExpectedMiss:
+        case BeatEventKind::Lost:
+        default:
+            height = 1;
+            break;
+        }
+        const auto y = static_cast<uint8_t>(displayHeight - height);
+        _display.fillRect(0, y, displayWidth, height);
+    }
+
+    [[nodiscard]] uint8_t _bandAreaHeight(uint8_t displayHeight) const {
+        const auto reserved =
+            std::min<uint8_t>(config().beatBarHeightPx, displayHeight);
+        return displayHeight > reserved
+                   ? static_cast<uint8_t>(displayHeight - reserved)
+                   : displayHeight;
     }
 
     [[nodiscard]] uint8_t _bandRangeX(FftBandIndexRange range,
@@ -356,13 +426,16 @@ class FftDisplay : public HasLifecycle<FftDisplay, FftDisplayConfig>,
     FftResult _latestFrame{};
     Totem::TaskController::RunnerKey _task = 0;
     bool _registeredFrameHandler = false;
+    bool _registeredPeakHandler = false;
     bool _registeredBeatHandler = false;
     std::atomic<bool> _acceptingFrames{false};
     std::atomic<bool> _hasFrame{false};
     std::atomic<uint32_t> _capturedFrames{0};
     std::atomic<uint32_t> _droppedFrames{0};
-    std::array<std::atomic<uint32_t>, beatGroupCount> _beatUntilMs{};
-    std::array<std::atomic<uint32_t>, beatGroupCount> _beatRanges{};
+    std::array<std::atomic<uint32_t>, peakGroupCount> _peakUntilMs{};
+    std::array<std::atomic<uint32_t>, peakGroupCount> _peakRanges{};
+    std::atomic<uint32_t> _beatUntilMs{0};
+    std::atomic<uint32_t> _lastBeatKind{static_cast<uint8_t>(BeatEventKind::Lost)};
 };
 
 } // namespace Totem::Audio::detail

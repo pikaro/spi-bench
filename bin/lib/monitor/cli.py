@@ -177,6 +177,13 @@ def parse_args(argv: list[str]) -> Config:
         help='print N lines before and after each matching monitor line',
     )
     parser.add_argument(
+        '--no-suppress-repeats',
+        dest='suppress_repeats',
+        action='store_false',
+        default=True,
+        help='print sequential identical monitor lines instead of collapsing them',
+    )
+    parser.add_argument(
         '--summary',
         action='store_true',
         help='print the first matching line and summarize repeats at exit',
@@ -218,6 +225,7 @@ def parse_args(argv: list[str]) -> Config:
         exclude=parsed.exclude,
         before=before,
         after=after,
+        suppress_repeats=parsed.suppress_repeats,
         summary=parsed.summary,
         max_lines=parsed.max_lines,
         log_file=parsed.log_file,

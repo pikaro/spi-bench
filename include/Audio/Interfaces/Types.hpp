@@ -12,6 +12,7 @@ namespace Totem::Audio {
 
 inline constexpr size_t fftBandCount = 8;
 inline constexpr size_t fftMaxFrameHandlers = 4;
+inline constexpr size_t fftMaxPeakHandlers = 4;
 inline constexpr size_t fftMaxBeatHandlers = 4;
 inline constexpr size_t i2sMaxProbeBytes = 256;
 
@@ -307,40 +308,43 @@ struct FftBandIndexRange {
     }
 };
 
-inline constexpr size_t beatGroupCount = 3;
+inline constexpr size_t peakGroupCount = 3;
 
-enum class BeatGroup : uint8_t {
+enum class PeakGroup : uint8_t {
     Bass,
     Mid,
     High,
 };
 
-constexpr bool isBeatGroup(BeatGroup group) {
+constexpr bool isPeakGroup(PeakGroup group) {
     switch (group) {
-    case BeatGroup::Bass:
-    case BeatGroup::Mid:
-    case BeatGroup::High:
+    case PeakGroup::Bass:
+    case PeakGroup::Mid:
+    case PeakGroup::High:
         return true;
     default:
         return false;
     }
 }
 
-constexpr size_t beatGroupIndex(BeatGroup group) {
+constexpr size_t peakGroupIndex(PeakGroup group) {
     switch (group) {
-    case BeatGroup::Bass:
+    case PeakGroup::Bass:
         return 0;
-    case BeatGroup::Mid:
+    case PeakGroup::Mid:
         return 1;
-    case BeatGroup::High:
+    case PeakGroup::High:
         return 2;
     default:
-        return beatGroupCount;
+        return peakGroupCount;
     }
 }
 
 enum class BeatEventKind : uint8_t {
-    Detected,
+    ExpectedHit,
+    ExpectedMiss,
+    Reacquired,
+    Lost,
 };
 
 struct FftBandValue {
@@ -365,28 +369,58 @@ struct FftResult {
     std::array<FftBandValue, fftBandCount> bands{};
 };
 
-struct BeatResult {
-    BeatEventKind kind = BeatEventKind::Detected;
-    BeatGroup group = BeatGroup::Bass;
+struct PeakResult {
+    PeakGroup group = PeakGroup::Bass;
     FftBandIndexRange bands{};
     uint32_t frameSequence = 0;
     uint64_t timestampUs = 0;
     uint8_t energy = 0;
-    float bpm = 0.0F;
+    float ratePerMinute = 0.0F;
 };
 
-struct BeatGroupStatus {
-    bool hasBeat = false;
-    uint32_t beats = 0;
-    uint32_t bpmHundredths = 0;
+struct BeatResult {
+    BeatEventKind kind = BeatEventKind::Lost;
+    uint8_t bpm = 0;
+    uint8_t confidence = 0;
     uint8_t energy = 0;
-    uint32_t lastBeatAgeMs = 0;
+    uint32_t sequence = 0;
+    uint64_t timestampUs = 0;
 };
 
-struct BeatTrackerStatus {
-    BeatGroup primaryGroup = BeatGroup::Bass;
-    BeatGroupStatus primary{};
-    std::array<BeatGroupStatus, beatGroupCount> groups{};
+struct PeakGroupStatus {
+    bool hasPeak = false;
+    uint32_t peaks = 0;
+    uint32_t ratePerMinuteHundredths = 0;
+    uint8_t energy = 0;
+    uint32_t lastPeakAgeMs = 0;
+};
+
+struct PeakDetectorStatus {
+    PeakGroup indicatorGroup = PeakGroup::Bass;
+    PeakGroupStatus indicator{};
+    std::array<PeakGroupStatus, peakGroupCount> groups{};
+};
+
+struct TempoTrackerStatus {
+    bool locked = false;
+    BeatEventKind lastKind = BeatEventKind::Lost;
+    uint8_t bpm = 0;
+    uint8_t confidence = 0;
+    uint32_t beats = 0;
+    uint32_t hits = 0;
+    uint32_t misses = 0;
+    uint32_t reacquired = 0;
+    uint32_t lost = 0;
+    uint32_t lastEventAgeMs = 0;
+};
+
+struct BackgroundCalibrationStatus {
+    bool active = false;
+    uint32_t requestId = 0;
+    uint32_t requests = 0;
+    uint32_t completed = 0;
+    uint32_t frames = 0;
+    uint32_t remainingMs = 0;
 };
 
 struct FftRuntimeStats {
@@ -397,6 +431,7 @@ struct FftRuntimeStats {
     uint32_t sourceUnavailableSkips = 0;
     uint32_t frames = 0;
     uint32_t droppedFrames = 0;
+    uint32_t peaks = 0;
     uint32_t beats = 0;
     uint32_t maxCopyUs = 0;
     uint32_t maxReadinessProbeUs = 0;
@@ -404,16 +439,29 @@ struct FftRuntimeStats {
     uint32_t maxBandComputeUs = 0;
     uint32_t maxMagnitudeCacheUs = 0;
     uint32_t maxFrameDispatchUs = 0;
-    uint32_t maxBeatUpdateUs = 0;
+    uint32_t maxPeakUpdateUs = 0;
+    uint32_t maxPeakDispatchUs = 0;
+    uint32_t maxTempoUpdateUs = 0;
     uint32_t maxBeatDispatchUs = 0;
+    uint32_t backgroundCalibrationRequests = 0;
+    uint32_t backgroundCalibrationCompleted = 0;
+    uint32_t backgroundCalibrationFrames = 0;
 };
 
 using FftFrameCallback = ReturnCode (*)(void *owner, const FftResult &frame);
+using PeakCallback = ReturnCode (*)(void *owner, const PeakResult &event);
 using BeatCallback = ReturnCode (*)(void *owner, const BeatResult &event);
 
 struct FftResultHandler {
     void *owner = nullptr;
     FftFrameCallback callback = nullptr;
+
+    [[nodiscard]] bool valid() const { return callback != nullptr; }
+};
+
+struct PeakResultHandler {
+    void *owner = nullptr;
+    PeakCallback callback = nullptr;
 
     [[nodiscard]] bool valid() const { return callback != nullptr; }
 };

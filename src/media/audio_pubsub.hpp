@@ -2,13 +2,12 @@
 
 #include "Audio/Interfaces/Types.hpp"
 #include "Audio/Interfaces/Wire.hpp"
+#include "Buttons/Interfaces/Wire.hpp"
 #include "Macros/Facade.hpp"
 #include "PubSubBackend/Interfaces/Envelope.hpp"
 #include "Queue/Facade.hpp"
 #include "Services/PubSub.hpp"
 #include "Types/Error.hpp"
-#include <algorithm>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 
@@ -16,13 +15,17 @@ namespace MediaAudioPubSub {
 
 struct Config {
     bool publishFftFrames = true;
+    bool publishPeakEvents = true;
     bool publishBeatEvents = true;
+    uint8_t backgroundCalibrationSeconds = 30;
 };
 
 inline constexpr Config config{};
 inline constexpr size_t fftFrameQueueSize = 2;
+inline constexpr size_t peakEventQueueSize = 8;
 inline constexpr size_t beatEventQueueSize = 8;
 inline constexpr size_t fftPublishPoolSize = 4;
+inline constexpr size_t peakPublishPoolSize = 8;
 inline constexpr size_t beatPublishPoolSize = 8;
 
 namespace detail {
@@ -30,15 +33,22 @@ namespace detail {
 inline Totem::Queue::Platform::Storage<Totem::Audio::FftFrame,
                                        fftFrameQueueSize>
     fftFrameQueueStorage{};
+inline Totem::Queue::Platform::Storage<Totem::Audio::PeakEvent,
+                                       peakEventQueueSize>
+    peakEventQueueStorage{};
 inline Totem::Queue::Platform::Storage<Totem::Audio::BeatEvent,
                                        beatEventQueueSize>
     beatEventQueueStorage{};
 inline Totem::Queue::Handle fftFrameQueue = nullptr;
+inline Totem::Queue::Handle peakEventQueue = nullptr;
 inline Totem::Queue::Handle beatEventQueue = nullptr;
 inline Totem::PubSubBackend::Pool<Totem::Audio::FftFrame, fftPublishPoolSize>
     fftPool{PubSubService::nextMessageId};
+inline Totem::PubSubBackend::Pool<Totem::Audio::PeakEvent, peakPublishPoolSize>
+    peakPool{PubSubService::nextMessageId};
 inline Totem::PubSubBackend::Pool<Totem::Audio::BeatEvent, beatPublishPoolSize>
     beatPool{PubSubService::nextMessageId};
+inline Totem::PubSubBackend::SubscriberKey buttonSubscription = 0;
 inline uint32_t droppedBackpressurePayloads = 0;
 
 inline bool isBackpressure(ReturnCode ret) {
@@ -56,14 +66,6 @@ inline void noteBackpressureDrop(NodeData::PubSub::Topic topic,
     }
 }
 
-inline uint8_t clampU8(float value) {
-    if (!std::isfinite(value) || value <= 0.0F) {
-        return 0;
-    }
-    return static_cast<uint8_t>(
-        std::min<long>(std::lround(value), 255L));
-}
-
 inline Totem::Audio::FftFrame makeWireFrame(
     const Totem::Audio::FftResult &frame) {
     return Totem::Audio::FftFrame{
@@ -78,13 +80,25 @@ inline Totem::Audio::FftFrame makeWireFrame(
     };
 }
 
+inline Totem::Audio::PeakEvent makeWirePeak(
+    const Totem::Audio::PeakResult &event) {
+    return Totem::Audio::PeakEvent{
+        .group = event.group,
+        .energy = event.energy,
+        .lowerBand = event.bands.lower,
+        .upperBand = event.bands.upper,
+        .frameSequence = event.frameSequence,
+    };
+}
+
 inline Totem::Audio::BeatEvent makeWireBeat(
     const Totem::Audio::BeatResult &event) {
     return Totem::Audio::BeatEvent{
-        .group = event.group,
-        .bpm = clampU8(event.bpm),
+        .kind = event.kind,
+        .bpm = event.bpm,
+        .confidence = event.confidence,
         .energy = event.energy,
-        .tension = 0,
+        .sequence = event.sequence,
     };
 }
 
@@ -153,6 +167,16 @@ inline ReturnCode onFrame(void * /*unused*/,
     return OK();
 }
 
+inline ReturnCode onPeak(void * /*unused*/,
+                         const Totem::Audio::PeakResult &event) {
+    if (!config.publishPeakEvents || peakEventQueue == nullptr) {
+        return OK();
+    }
+    const auto peak = makeWirePeak(event);
+    (void)Totem::Queue::Platform::send(peakEventQueue, &peak, 0);
+    return OK();
+}
+
 inline ReturnCode onBeat(void * /*unused*/,
                          const Totem::Audio::BeatResult &event) {
     if (!config.publishBeatEvents || beatEventQueue == nullptr) {
@@ -161,6 +185,25 @@ inline ReturnCode onBeat(void * /*unused*/,
     const auto beat = makeWireBeat(event);
     (void)Totem::Queue::Platform::send(beatEventQueue, &beat, 0);
     return OK();
+}
+
+template <typename Analyzer>
+inline ReturnCode onButtonEnvelope(void *owner,
+                                   const Totem::PubSubBackend::Envelope &envelope) {
+    auto *analyzer = static_cast<Analyzer *>(owner);
+    FAIL_IF_NULL(analyzer, ERR(CoreError, InvalidArgument),
+                 "Media audio button subscriber has no analyzer owner");
+    FAIL_IF_UNEXPECTED_FWD(event,
+                           envelope.getPayloadAs<Totem::Buttons::ButtonEvent>(),
+                           "Failed to decode media audio button event");
+
+    if (event.type != Totem::Buttons::ButtonEventType::Pressed ||
+        event.button != PeripheralButton::Calibration) {
+        return OK();
+    }
+
+    return analyzer->requestBackgroundCalibration(
+        config.backgroundCalibrationSeconds, envelope.header.messageId);
 }
 
 } // namespace detail
@@ -175,6 +218,15 @@ inline ReturnCode begin(Analyzer &analyzer) {
                          "Failed to create media FFT PubSub queue");
         }
         detail::fftFrameQueue = *queueResult;
+    }
+    if (detail::peakEventQueue == nullptr) {
+        auto queueResult =
+            Totem::Queue::Platform::create(detail::peakEventQueueStorage);
+        if (!queueResult) {
+            FAIL_ERR_FWD(queueResult.error(),
+                         "Failed to create media peak PubSub queue");
+        }
+        detail::peakEventQueue = *queueResult;
     }
     if (detail::beatEventQueue == nullptr) {
         auto queueResult =
@@ -193,12 +245,30 @@ inline ReturnCode begin(Analyzer &analyzer) {
                         }),
                         "Failed to register media FFT PubSub handler");
     }
+    if (config.publishPeakEvents) {
+        FAIL_IF_ERR_FWD(analyzer.addPeakHandler({
+                            .owner = nullptr,
+                            .callback = detail::onPeak,
+                        }),
+                        "Failed to register media peak PubSub handler");
+    }
     if (config.publishBeatEvents) {
         FAIL_IF_ERR_FWD(analyzer.addBeatHandler({
                             .owner = nullptr,
                             .callback = detail::onBeat,
                         }),
                         "Failed to register media beat PubSub handler");
+    }
+    if (detail::buttonSubscription == 0) {
+        FAIL_IF_UNEXPECTED_FWD(
+            sub,
+            PubSubService::get().subscribe(
+                "media-audio-btn",
+                {.subscriber = &analyzer,
+                 .callback = detail::onButtonEnvelope<Analyzer>},
+                PubSubService::Topic::Button),
+            "Failed to subscribe media audio to button events");
+        detail::buttonSubscription = sub;
     }
     return OK();
 }
@@ -213,6 +283,18 @@ inline ReturnCode work() {
                                 beat, NodeData::PubSub::Topic::Beat,
                                 detail::beatPool),
                             "Failed to publish queued beat event");
+        }
+    }
+
+    if (detail::peakEventQueue != nullptr) {
+        Totem::Audio::PeakEvent peak{};
+        while (
+            Totem::Queue::Platform::receive(detail::peakEventQueue, &peak, 0)
+                .ok()) {
+            FAIL_IF_ERR_FWD(detail::publish(
+                                peak, NodeData::PubSub::Topic::Peak,
+                                detail::peakPool),
+                            "Failed to publish queued peak event");
         }
     }
 

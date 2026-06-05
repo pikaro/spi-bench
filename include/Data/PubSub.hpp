@@ -30,9 +30,17 @@ enum class Topic : uint32_t {
     Logs = 1U << 6,
     Metrics = 1U << 7,
     Button = 1U << 8,
-    Animation = 1U << 9,
-    LedPwm = 1U << 10,
-    Peak = 1U << 11,
+    AnimationPlay = 1U << 9,
+    AnimationUpdate = 1U << 10,
+    AnimationStop = 1U << 11,
+    AnimationSetHueOffset = 1U << 12,
+    AnimationSetRotationOffset = 1U << 13,
+    AnimationSetBrightness = 1U << 14,
+    AnimationSetLayerActive = 1U << 15,
+    AnimationSetLayerOpacity = 1U << 16,
+    AnimationFadeLayerSwap = 1U << 17,
+    LedPwm = 1U << 18,
+    Peak = 1U << 19,
 };
 
 enum class SPIOnlyTransport : uint8_t {

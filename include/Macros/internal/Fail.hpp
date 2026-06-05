@@ -31,7 +31,7 @@
 #define INTERNAL_ABORT_DELAYED                                                 \
     do {                                                                       \
         (void)StatusLedService::recordCritical();                              \
-        ::platform::delay(::platform::ms_to_ticks(100));                       \
+        ::platform::delay(::platform::ms_to_ticks(1000));                      \
         abort();                                                               \
     } while (0)
 

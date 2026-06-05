@@ -8,16 +8,15 @@
 #include "Data/Peripherals.hpp"
 #include "LedDisplay/Animations/CenterWave/Command.hpp"
 #include "LedDisplay/Animations/OrbitSparks/Command.hpp"
-#include "LedDisplay/Animations/SpectralIris/Command.hpp"
-#include "LedDisplay/Animations/SpectralWeave/Command.hpp"
 #include "LedDisplay/Animations/SineWave/Command.hpp"
 #include "LedDisplay/Animations/SineWave/Config.hpp"
+#include "LedDisplay/Animations/SpectralIris/Command.hpp"
+#include "LedDisplay/Animations/SpectralWeave/Command.hpp"
 #include "LedDisplay/Animations/StainedCells/Command.hpp"
 #include "LedDisplay/Animations/WheelIndicator/Command.hpp"
 #include "LedDisplay/Animations/WheelIndicator/Config.hpp"
 #include "LedDisplay/Interfaces/AnimationCommand.hpp"
 #include "LedDisplay/Interfaces/AnimationCommandFactory.hpp"
-#include "LedDisplay/Interfaces/LayerControl.hpp"
 #include "LedPwm/Interfaces/CommandEvent.hpp"
 #include "LedPwm/Interfaces/CommandEventFactory.hpp"
 #include "LedPwm/Interfaces/Types.hpp"
@@ -40,7 +39,7 @@ namespace MasterOrchestration {
 
 struct WheelMapping {
     bool publishHueOffset = true;
-    bool publishRotationOffset = true;
+    bool publishRotationOffset = false;
     bool publishIndicatorUpdate = false;
     float hueTurnsPerWheelTurn = 1.0F;
     float rotationTurnsPerWheelTurn = 1.0F;
@@ -463,7 +462,7 @@ inline ReturnCode publishWheelEffects() {
                                       WheelIndicatorCommand::defaultRequestId),
             "Failed to build orchestrated wheel indicator update");
         FAIL_IF_ERR_FWD(
-            Totem::LedDisplay::publishAnimationCommand(indicatorCmd),
+            Totem::LedDisplay::publishAnimationUpdateCommand(indicatorCmd),
             "Failed to publish orchestrated wheel indicator update");
     }
 
@@ -481,10 +480,10 @@ inline uint16_t requestIdForFftLayer(Totem::LedDisplay::Layer layer) {
 }
 
 inline ReturnCode publishFftPreset(size_t presetIndex,
-                                   Totem::LedDisplay::Layer layer,
+    Totem::LedDisplay::Layer layer,
                                    uint16_t requestId) {
     const auto &preset = fftPreset(presetIndex);
-    Totem::LedDisplay::AnimationCommand cmd{};
+    Totem::LedDisplay::AnimationPlayCommand cmd{};
     switch (preset.kind) {
     case FftVisualKind::SpectralWeave: {
         FAIL_IF_UNEXPECTED_FWD(
@@ -539,10 +538,10 @@ inline ReturnCode publishFftPreset(size_t presetIndex,
              "Unknown orchestrated FFT visual kind");
     }
 
-    FAIL_IF_ERR_FWD(Totem::LedDisplay::publishAnimationCommand(cmd),
+    FAIL_IF_ERR_FWD(Totem::LedDisplay::publishAnimationPlayCommand(cmd),
                     "Failed to publish orchestrated FFT visual animation");
-    _log_d("Published FFT visual preset=%s layer=%u request=%u",
-           preset.name, static_cast<unsigned>(layer), requestId);
+    _log_d("Published FFT visual preset=%s layer=%u request=%u", preset.name,
+           static_cast<unsigned>(layer), requestId);
     return OK();
 }
 
@@ -568,8 +567,8 @@ inline ReturnCode publishInitialFftVisual(uint32_t nowMs) {
     lastFftSwitchMs = nowMs;
     fftVisualPublished = true;
     const auto &preset = fftPreset(activeFftPresetIndex);
-    _log_i("Started FFT visual preset=%s layer=%u request=%u",
-           preset.name, static_cast<unsigned>(activeFftLayer),
+    _log_i("Started FFT visual preset=%s layer=%u request=%u", preset.name,
+           static_cast<unsigned>(activeFftLayer),
            requestIdForFftLayer(activeFftLayer));
     return OK();
 }
@@ -611,9 +610,9 @@ inline ReturnCode stageNextFftVisual(uint32_t nowMs) {
                     "Failed to zero hidden FFT layer opacity");
     FAIL_IF_ERR_FWD(publishFftPreset(nextPreset, hiddenFftLayer, requestId),
                     "Failed to publish staged FFT visual");
-    FAIL_IF_ERR_FWD(publishLayerSwap(activeFftLayer, hiddenFftLayer,
-                                     preset.fadeMs),
-                    "Failed to publish FFT visual layer swap");
+    FAIL_IF_ERR_FWD(
+        publishLayerSwap(activeFftLayer, hiddenFftLayer, preset.fadeMs),
+        "Failed to publish FFT visual layer swap");
 
     pendingFftPresetIndex = nextPreset;
     fftFadeInProgress = true;
@@ -740,25 +739,25 @@ onButtonEnvelope(void * /*unused*/,
 }
 
 inline ReturnCode
-onAnimationEnvelope(void * /*unused*/,
-                    const Totem::PubSubBackend::Envelope &envelope) {
+onAnimationStopEnvelope(void * /*unused*/,
+                        const Totem::PubSubBackend::Envelope &envelope) {
     FAIL_IF_UNEXPECTED_FWD(
-        cmd, envelope.getPayloadAs<Totem::LedDisplay::AnimationCommand>(),
-        "Failed to decode orchestrated animation command");
+        stop, envelope.getPayloadAs<Totem::LedDisplay::AnimationStopCommand>(),
+        "Failed to decode orchestrated animation stop command");
 
-    const auto stopsFftVisual =
-        cmd.type == Totem::LedDisplay::AnimationCommandType::Stop &&
-        (cmd.requestId == 0 ||
-         cmd.requestId == config.fftVisuals.fftRequestId ||
-         cmd.requestId == config.fftVisuals.fftAltRequestId);
+    const auto stopsFftVisual = stop.requestId == 0 ||
+                                stop.requestId == config.fftVisuals.fftRequestId ||
+                                stop.requestId ==
+                                    config.fftVisuals.fftAltRequestId;
     if (stopsFftVisual && !fftVisualSuppressed) {
         fftVisualSuppressed = true;
         fftVisualPublished = false;
         fftFadeInProgress = false;
         lastFftVisualPublishMs = 0;
         lastFftSwitchMs = 0;
-        _log_i("Suppressed FFT visual sequencing after animation stop request=%u",
-               cmd.requestId);
+        _log_i(
+            "Suppressed FFT visual sequencing after animation stop request=%u",
+            stop.requestId);
     }
 
     return OK();
@@ -864,11 +863,11 @@ inline ReturnCode begin() {
         FAIL_IF_UNEXPECTED_FWD(
             sub,
             PubSubService::get().subscribe(
-                "master-orch-anim",
+                "master-orch-stop",
                 {.subscriber = nullptr,
-                 .callback = detail::onAnimationEnvelope},
-                PubSubService::Topic::Animation),
-            "Failed to subscribe master orchestration to animation commands");
+                 .callback = detail::onAnimationStopEnvelope},
+                PubSubService::Topic::AnimationStop),
+            "Failed to subscribe master orchestration to animation stop commands");
         detail::animationSubscription = sub;
     }
     if (!detail::calibrateAudioCommandRegistered) {
@@ -932,7 +931,7 @@ inline ReturnCode handlePeakWave(const Totem::Audio::PeakEvent &event,
              .wake = config.peakWave.wake},
             0, config.peakWave.lifetimeMs),
         "Failed to build peak center wave command");
-    return Totem::LedDisplay::publishAnimationCommand(cmd);
+    return Totem::LedDisplay::publishAnimationPlayCommand(cmd);
 }
 
 inline ReturnCode handleDropWave(const Totem::Audio::PeakEvent &event,
@@ -974,7 +973,7 @@ inline ReturnCode handleDropWave(const Totem::Audio::PeakEvent &event,
         "Failed to build drop center wave command");
     _log_i("Published drop center wave after %lums quiet",
            static_cast<unsigned long>(nowMs - lastPeakMs));
-    return Totem::LedDisplay::publishAnimationCommand(cmd);
+    return Totem::LedDisplay::publishAnimationPlayCommand(cmd);
 }
 
 inline ReturnCode handleIoPeak(const Totem::Audio::PeakEvent &event,
@@ -1077,7 +1076,7 @@ inline ReturnCode handleButton(const Totem::Buttons::ButtonEvent &event,
         Totem::LedDisplay::Animations::SineWaveCommand::makeCommand(
             config.bell.config),
         "Failed to build bell bell command");
-    return Totem::LedDisplay::publishAnimationCommand(cmd);
+    return Totem::LedDisplay::publishAnimationPlayCommand(cmd);
 }
 
 inline ReturnCode work(uint32_t nowMs, bool allowNormalOperation = true) {

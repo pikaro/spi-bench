@@ -8,12 +8,11 @@
 namespace Totem::LedDisplay::Animations {
 
 struct PolarLatticeCommand : PolarLatticeSpec {
-    static std::expected<AnimationCommand, ReturnCode>
+    static std::expected<AnimationPlayCommand, ReturnCode>
     makeCommand(PolarLatticeConfig commandConfig = {}, uint16_t requestId = 0,
                 uint16_t lifetimeMs = defaultLifetimeMs,
                 Layer layer = defaultLayer) {
-        auto cmd = AnimationCommand{.type = AnimationCommandType::Play,
-                                    .kind = kind,
+        auto cmd = AnimationPlayCommand{.kind = kind,
                                     .requestId = requestId,
                                     .layer = layer,
                                     .lifetimeMs = lifetimeMs};

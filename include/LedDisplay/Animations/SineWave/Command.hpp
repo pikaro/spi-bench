@@ -8,13 +8,12 @@
 namespace Totem::LedDisplay::Animations {
 
 struct SineWaveCommand : SineWaveSpec {
-    static std::expected<AnimationCommand, ReturnCode>
+    static std::expected<AnimationPlayCommand, ReturnCode>
     makeCommand(SineWaveConfig commandConfig = {}, uint16_t requestId = 0,
                 uint16_t lifetimeMs = 0, Layer layer = defaultLayer) {
         const auto resolvedLifetime =
             lifetimeMs == 0 ? projectedLifetimeMs(commandConfig) : lifetimeMs;
-        auto cmd = AnimationCommand{.type = AnimationCommandType::Play,
-                                    .kind = kind,
+        auto cmd = AnimationPlayCommand{.kind = kind,
                                     .requestId = requestId,
                                     .layer = layer,
                                     .lifetimeMs = resolvedLifetime};

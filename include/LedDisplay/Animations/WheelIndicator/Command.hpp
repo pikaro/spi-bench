@@ -8,12 +8,11 @@
 namespace Totem::LedDisplay::Animations {
 
 struct WheelIndicatorCommand : WheelIndicatorSpec {
-    static std::expected<AnimationCommand, ReturnCode>
+    static std::expected<AnimationPlayCommand, ReturnCode>
     makeCommand(WheelIndicatorConfig commandConfig = {}, uint16_t requestId = 0,
                 uint16_t lifetimeMs = defaultLifetimeMs,
                 Layer layer = defaultLayer) {
-        auto cmd = AnimationCommand{.type = AnimationCommandType::Play,
-                                    .kind = kind,
+        auto cmd = AnimationPlayCommand{.kind = kind,
                                     .requestId = requestId,
                                     .layer = layer,
                                     .lifetimeMs = lifetimeMs};
@@ -23,14 +22,11 @@ struct WheelIndicatorCommand : WheelIndicatorSpec {
         return cmd;
     }
 
-    static std::expected<AnimationCommand, ReturnCode>
+    static std::expected<AnimationUpdateCommand, ReturnCode>
     makeUpdateCommand(WheelIndicatorConfig commandConfig = {},
-                      uint16_t requestId = 0, Layer layer = defaultLayer) {
-        auto cmd = AnimationCommand{.type = AnimationCommandType::Update,
-                                    .kind = kind,
-                                    .requestId = requestId,
-                                    .layer = layer,
-                                    .lifetimeMs = defaultLifetimeMs};
+                      uint16_t requestId = 0) {
+        auto cmd = AnimationUpdateCommand{.kind = kind,
+                                          .requestId = requestId};
         FAIL_IF_ERR_FWD_UNEXPECTED(
             ::Totem::LedDisplay::encodeCommandPayload(cmd, commandConfig),
             "Failed to encode wheel indicator update config");

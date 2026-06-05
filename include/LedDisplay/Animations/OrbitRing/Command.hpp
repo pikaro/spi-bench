@@ -8,12 +8,11 @@
 namespace Totem::LedDisplay::Animations {
 
 struct OrbitRingCommand : OrbitRingSpec {
-    static std::expected<AnimationCommand, ReturnCode>
+    static std::expected<AnimationPlayCommand, ReturnCode>
     makeCommand(OrbitRingConfig commandConfig = {}, uint16_t requestId = 0,
                 uint16_t lifetimeMs = defaultLifetimeMs,
                 Layer layer = defaultLayer) {
-        auto cmd = AnimationCommand{.type = AnimationCommandType::Play,
-                                    .kind = kind,
+        auto cmd = AnimationPlayCommand{.kind = kind,
                                     .requestId = requestId,
                                     .layer = layer,
                                     .lifetimeMs = lifetimeMs};

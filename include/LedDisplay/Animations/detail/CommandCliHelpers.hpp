@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <expected>
 #include <limits>
+#include <type_traits>
 
 namespace Totem::LedDisplay::Animations::detail {
 
@@ -62,10 +63,36 @@ inline Angle<uint8_t> degreesAngleU8(uint32_t degrees) {
         static_cast<float>(degrees % degreesPerTurn));
 }
 
-inline ReturnCode publishCommand(
-    std::expected<Totem::LedDisplay::AnimationCommand, ReturnCode> result) {
+template <typename Command>
+inline ReturnCode publishCommand(std::expected<Command, ReturnCode> result) {
     FAIL_IF_UNEXPECTED_FWD(cmd, result, "Failed to build animation command");
-    return Totem::LedDisplay::publishAnimationCommand(cmd);
+    if constexpr (std::is_same_v<Command,
+                                 Totem::LedDisplay::AnimationPlayCommand>) {
+        return Totem::LedDisplay::publishAnimationPlayCommand(cmd);
+    } else if constexpr (std::is_same_v<
+                             Command,
+                             Totem::LedDisplay::AnimationUpdateCommand>) {
+        return Totem::LedDisplay::publishAnimationUpdateCommand(cmd);
+    } else if constexpr (
+        std::is_same_v<Command, Totem::LedDisplay::AnimationStopCommand> ||
+        std::is_same_v<Command,
+                       Totem::LedDisplay::AnimationSetHueOffsetCommand> ||
+        std::is_same_v<Command,
+                       Totem::LedDisplay::AnimationSetRotationOffsetCommand> ||
+        std::is_same_v<Command,
+                       Totem::LedDisplay::AnimationSetBrightnessCommand> ||
+        std::is_same_v<Command,
+                       Totem::LedDisplay::AnimationSetLayerActiveCommand> ||
+        std::is_same_v<Command,
+                       Totem::LedDisplay::AnimationSetLayerOpacityCommand> ||
+        std::is_same_v<Command,
+                       Totem::LedDisplay::AnimationFadeLayerSwapCommand>) {
+        return Totem::LedDisplay::publishAnimationCommand(cmd);
+    } else {
+        static_assert(std::is_same_v<Command, void>,
+                      "Unsupported LED animation command type");
+        return ERR(CoreError, InvalidArgument);
+    }
 }
 
 } // namespace Totem::LedDisplay::Animations::detail

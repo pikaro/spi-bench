@@ -11,9 +11,8 @@ inline ReturnCode handleAnimationStopCommand(CommandDesc::ParsedArgs args,
                                              void * /*unused*/) {
     FAIL_IF_UNEXPECTED_FWD(requestId, detail::optionalU32(args, 0, 0),
                            "Invalid animation request ID argument");
-    return Totem::LedDisplay::publishAnimationCommand(
-        Totem::LedDisplay::makeStopAnimationCommand(
-            detail::clampU16(requestId)));
+    return detail::publishCommand(Totem::LedDisplay::makeStopAnimationCommand(
+        detail::clampU16(requestId)));
 }
 
 inline constexpr CommandDesc animationStopSubcommand = {

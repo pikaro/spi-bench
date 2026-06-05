@@ -2,7 +2,7 @@
 
 #include "CommandBackend/Interfaces/CommandDesc.hpp"
 #include "CommandBackend/detail/Store.hpp"
-#include "LedDisplay/Animations/AnimationControlCommandDesc.hpp"
+#include "LedDisplay/Animations/AnimationStopCommandDesc.hpp"
 #include "LedDisplay/Animations/Bolt/CommandDesc.hpp"
 #include "LedDisplay/Animations/BreathingRings/CommandDesc.hpp"
 #include "LedDisplay/Animations/CenterWave/CommandDesc.hpp"

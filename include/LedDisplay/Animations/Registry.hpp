@@ -40,7 +40,7 @@ static_assert(std::is_trivially_copyable_v<Payload>,
               "Animation payload must remain queue-copyable");
 
 inline std::expected<Payload, ReturnCode>
-makePayload(const AnimationCommand &cmd) {
+makePayload(const AnimationPlayCommand &cmd) {
     switch (cmd.kind) {
     case AnimationKind::DiagnosticFill: {
         FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
@@ -169,7 +169,7 @@ makePayload(const AnimationCommand &cmd) {
     }
 }
 
-inline ReturnCode update(Payload &payload, const AnimationCommand &cmd) {
+inline ReturnCode update(Payload &payload, const AnimationUpdateCommand &cmd) {
     return std::visit(
         [&cmd](auto &animation) -> ReturnCode {
             if (cmd.kind != animation.kind) {

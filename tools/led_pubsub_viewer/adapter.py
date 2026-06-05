@@ -8,7 +8,7 @@ import tempfile
 from led_render import Trace
 from totem_wire import encode_model
 
-from .catalog import ANIMATION_COMMAND_MODEL, EventDefinition, command_defaults, payload_defaults
+from .catalog import ANIMATION_COMMAND_MODELS, EventDefinition, command_defaults, payload_defaults
 
 
 ANIMATION_COMMAND_PAYLOAD_BYTES = 32
@@ -71,12 +71,12 @@ def payload_bytes_for_event(
         command.update(command_values)
         command["payloadSize"] = len(nested_payload)
         command["payload"] = _payload_array(nested_payload)
-        return encode_model(ANIMATION_COMMAND_MODEL, command)
+        return encode_model(event.payload_model, command)
 
-    if event.payload_model == ANIMATION_COMMAND_MODEL and event.payload_template:
+    if event.payload_model in ANIMATION_COMMAND_MODELS and event.payload_template:
         command = command_defaults(event)
         command.update(command_values)
-        return encode_model(ANIMATION_COMMAND_MODEL, command)
+        return encode_model(event.payload_model, command)
 
     values = payload_defaults(event)
     values.update(payload_values)

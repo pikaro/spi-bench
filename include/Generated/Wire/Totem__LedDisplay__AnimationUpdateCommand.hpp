@@ -6,14 +6,11 @@
 
 namespace Totem::Generated::Wire {
 
-template <> struct FieldList<::Totem::LedDisplay::AnimationCommand> {
-    using Type = ::Totem::LedDisplay::AnimationCommand;
+template <> struct FieldList<::Totem::LedDisplay::AnimationUpdateCommand> {
+    using Type = ::Totem::LedDisplay::AnimationUpdateCommand;
     static constexpr auto fields = std::make_tuple(
-        Field<&Type::type>{"type"},
         Field<&Type::kind>{"kind"},
         Field<&Type::requestId>{"requestId"},
-        Field<&Type::layer>{"layer"},
-        Field<&Type::lifetimeMs>{"lifetimeMs"},
         Field<&Type::payloadSize>{"payloadSize"},
         Field<&Type::payload>{"payload"}
     );

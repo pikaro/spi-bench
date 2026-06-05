@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
-import re
 
 from totem_wire import ENUMS, MODELS, default_model
 
-
-ANIMATION_COMMAND_MODEL = "::Totem::LedDisplay::AnimationCommand"
-ANIMATION_CONFIG_PREFIX = "::Totem::LedDisplay::Animations::"
-ANIMATION_CONFIG_SUFFIX = "Config"
-PUBSUB_TOPIC_ENUM = "::Totem::Data::PubSub::Topic"
+ANIMATION_PLAY_COMMAND_MODEL = '::Totem::LedDisplay::AnimationPlayCommand'
+ANIMATION_UPDATE_COMMAND_MODEL = '::Totem::LedDisplay::AnimationUpdateCommand'
+ANIMATION_COMMAND_MODELS = {
+    ANIMATION_PLAY_COMMAND_MODEL,
+    ANIMATION_UPDATE_COMMAND_MODEL,
+}
+ANIMATION_CONFIG_PREFIX = '::Totem::LedDisplay::Animations::'
+ANIMATION_CONFIG_SUFFIX = 'Config'
+PUBSUB_TOPIC_ENUM = '::Totem::Data::PubSub::Topic'
 
 
 @dataclass(frozen=True)
@@ -45,7 +49,7 @@ def topic_value(name: str) -> int:
 
 
 def short_model_name(model_name: str) -> str:
-    return model_name.strip(":").split("::")[-1]
+    return model_name.strip(':').split('::')[-1]
 
 
 def animation_name_for_config(model_name: str) -> str | None:
@@ -59,28 +63,28 @@ def animation_name_for_config(model_name: str) -> str | None:
 
 def _spec_defaults(model_name: str, animation_name: str) -> tuple[str | None, int | None]:
     include_path = MODELS[model_name].include_path
-    header = repo_root() / "include" / include_path
+    header = repo_root() / 'include' / include_path
     if not header.exists():
         return None, None
 
-    text = header.read_text(encoding="utf-8")
+    text = header.read_text(encoding='utf-8')
     match = re.search(
-        rf"struct\s+{re.escape(animation_name)}Spec\s*\{{(?P<body>.*?)\n\}};",
+        rf'struct\s+{re.escape(animation_name)}Spec\s*\{{(?P<body>.*?)\n\}};',
         text,
-        re.S,
+        re.DOTALL,
     )
     if match is None:
         return None, None
 
-    body = match.group("body")
+    body = match.group('body')
     layer = None
     lifetime_ms = None
-    layer_match = re.search(r"defaultLayer\s*=\s*Layer::([A-Za-z_][A-Za-z0-9_]*)", body)
+    layer_match = re.search(r'defaultLayer\s*=\s*Layer::([A-Za-z_][A-Za-z0-9_]*)', body)
     if layer_match is not None:
         layer = layer_match.group(1)
-    lifetime_match = re.search(
-        r"defaultLifetimeMs\s*=\s*([0-9]+)", body
-    ) or re.search(r"defaultDurationMs\s*=\s*([0-9]+)", body)
+    lifetime_match = re.search(r'defaultLifetimeMs\s*=\s*([0-9]+)', body) or re.search(
+        r'defaultDurationMs\s*=\s*([0-9]+)', body,
+    )
     if lifetime_match is not None:
         lifetime_ms = int(lifetime_match.group(1))
     return layer, lifetime_ms
@@ -89,19 +93,18 @@ def _spec_defaults(model_name: str, animation_name: str) -> tuple[str | None, in
 def _animation_event(model_name: str, animation_name: str) -> EventDefinition:
     default_layer, default_lifetime_ms = _spec_defaults(model_name, animation_name)
     template = {
-        "type": "Play",
-        "kind": animation_name,
+        'kind': animation_name,
     }
     if default_layer is not None:
-        template["layer"] = default_layer
+        template['layer'] = default_layer
     if default_lifetime_ms is not None:
-        template["lifetimeMs"] = default_lifetime_ms
+        template['lifetimeMs'] = default_lifetime_ms
     return EventDefinition(
-        label=f"Animation / Play {animation_name}",
-        topic_name="Animation",
-        topic=topic_value("Animation"),
+        label=f'Animation / Play {animation_name}',
+        topic_name='AnimationPlay',
+        topic=topic_value('AnimationPlay'),
         traffic_class=0,
-        payload_model=ANIMATION_COMMAND_MODEL,
+        payload_model=ANIMATION_PLAY_COMMAND_MODEL,
         payload_template=template,
         config_model=model_name,
         renderable=True,
@@ -112,63 +115,83 @@ def _animation_event(model_name: str, animation_name: str) -> EventDefinition:
 
 
 def _animation_control_events() -> list[EventDefinition]:
-    topic = topic_value("Animation")
     return [
         EventDefinition(
-            label="Animation / Stop",
-            topic_name="Animation",
-            topic=topic,
+            label='Playback / Stop',
+            topic_name='AnimationStop',
+            topic=topic_value('AnimationStop'),
             traffic_class=0,
-            payload_model=ANIMATION_COMMAND_MODEL,
-            payload_template={"type": "Stop", "kind": "None", "payloadSize": 0},
+            payload_model='::Totem::LedDisplay::AnimationStopCommand',
+            payload_template={},
         ),
         EventDefinition(
-            label="Animation / Set Layer Active",
-            topic_name="Animation",
-            topic=topic,
+            label='Display / Hue Offset',
+            topic_name='AnimationSetHueOffset',
+            topic=topic_value('AnimationSetHueOffset'),
             traffic_class=0,
-            payload_model=ANIMATION_COMMAND_MODEL,
-            payload_template={"type": "SetLayerActive", "kind": "None"},
-            config_model="::Totem::LedDisplay::LayerActive",
+            payload_model='::Totem::LedDisplay::AnimationSetHueOffsetCommand',
+            payload_template={},
         ),
         EventDefinition(
-            label="Animation / Set Layer Opacity",
-            topic_name="Animation",
-            topic=topic,
+            label='Display / Rotation Offset',
+            topic_name='AnimationSetRotationOffset',
+            topic=topic_value('AnimationSetRotationOffset'),
             traffic_class=0,
-            payload_model=ANIMATION_COMMAND_MODEL,
-            payload_template={"type": "SetLayerOpacity", "kind": "None"},
-            config_model="::Totem::LedDisplay::LayerOpacity",
+            payload_model='::Totem::LedDisplay::AnimationSetRotationOffsetCommand',
+            payload_template={},
         ),
         EventDefinition(
-            label="Animation / Fade Layer Swap",
-            topic_name="Animation",
-            topic=topic,
+            label='Display / Brightness',
+            topic_name='AnimationSetBrightness',
+            topic=topic_value('AnimationSetBrightness'),
             traffic_class=0,
-            payload_model=ANIMATION_COMMAND_MODEL,
-            payload_template={"type": "FadeLayerSwap", "kind": "None"},
-            config_model="::Totem::LedDisplay::LayerFadeSwap",
+            payload_model='::Totem::LedDisplay::AnimationSetBrightnessCommand',
+            payload_template={},
+        ),
+        EventDefinition(
+            label='Layer / Active',
+            topic_name='AnimationSetLayerActive',
+            topic=topic_value('AnimationSetLayerActive'),
+            traffic_class=0,
+            payload_model='::Totem::LedDisplay::AnimationSetLayerActiveCommand',
+            payload_template={},
+        ),
+        EventDefinition(
+            label='Layer / Opacity',
+            topic_name='AnimationSetLayerOpacity',
+            topic=topic_value('AnimationSetLayerOpacity'),
+            traffic_class=0,
+            payload_model='::Totem::LedDisplay::AnimationSetLayerOpacityCommand',
+            payload_template={},
+        ),
+        EventDefinition(
+            label='Layer / Fade Swap',
+            topic_name='AnimationFadeLayerSwap',
+            topic=topic_value('AnimationFadeLayerSwap'),
+            traffic_class=0,
+            payload_model='::Totem::LedDisplay::AnimationFadeLayerSwapCommand',
+            payload_template={},
         ),
     ]
 
 
 DIRECT_MODEL_TOPICS = {
-    "::Totem::Audio::BeatEvent": "Beat",
-    "::Totem::Audio::FftFrame": "FftFrame",
-    "::Totem::Audio::PeakEvent": "Peak",
-    "::Totem::Buttons::ButtonEvent": "Button",
-    "::Totem::LedPwm::CommandEvent": "LedPwm",
-    "::Totem::PubSubBackend::detail::PubSubEvent": "PubSub",
-    "::Totem::Wheel::WheelState": "Wheel",
+    '::Totem::Audio::BeatEvent': 'Beat',
+    '::Totem::Audio::FftFrame': 'FftFrame',
+    '::Totem::Audio::PeakEvent': 'Peak',
+    '::Totem::Buttons::ButtonEvent': 'Button',
+    '::Totem::LedPwm::CommandEvent': 'LedPwm',
+    '::Totem::PubSubBackend::detail::PubSubEvent': 'PubSub',
+    '::Totem::Wheel::WheelState': 'Wheel',
 }
 
 
 def _direct_payload_event(model_name: str) -> EventDefinition:
     topic_name = DIRECT_MODEL_TOPICS.get(model_name)
     topic = topic_value(topic_name) if topic_name else 0
-    label_prefix = "Payload" if topic_name else "Wire Model"
+    label_prefix = 'Payload' if topic_name else 'Wire Model'
     return EventDefinition(
-        label=f"{label_prefix} / {short_model_name(model_name)}",
+        label=f'{label_prefix} / {short_model_name(model_name)}',
         topic_name=topic_name,
         topic=topic,
         traffic_class=0,
@@ -189,12 +212,16 @@ def all_events() -> list[EventDefinition]:
 
     events.extend(_animation_control_events())
 
-    excluded = animation_config_models | {
-        ANIMATION_COMMAND_MODEL,
-        "::Totem::LedDisplay::LayerActive",
-        "::Totem::LedDisplay::LayerFadeSwap",
-        "::Totem::LedDisplay::LayerOpacity",
+    animation_control_models = {
+        '::Totem::LedDisplay::AnimationStopCommand',
+        '::Totem::LedDisplay::AnimationSetHueOffsetCommand',
+        '::Totem::LedDisplay::AnimationSetRotationOffsetCommand',
+        '::Totem::LedDisplay::AnimationSetBrightnessCommand',
+        '::Totem::LedDisplay::AnimationSetLayerActiveCommand',
+        '::Totem::LedDisplay::AnimationSetLayerOpacityCommand',
+        '::Totem::LedDisplay::AnimationFadeLayerSwapCommand',
     }
+    excluded = animation_config_models | animation_control_models | ANIMATION_COMMAND_MODELS
     for model_name in sorted(MODELS):
         if model_name in excluded:
             continue

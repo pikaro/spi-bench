@@ -70,7 +70,7 @@ inline ReturnCode publishSpokeProbe() {
             config.spokeProbe.animation, config.spokeProbe.requestId,
             config.spokeProbe.lifetimeMs),
         "Failed to build master LED bringup spoke probe");
-    FAIL_IF_ERR_FWD(Totem::LedDisplay::publishAnimationCommand(cmd),
+    FAIL_IF_ERR_FWD(Totem::LedDisplay::publishAnimationPlayCommand(cmd),
                     "Failed to publish master LED bringup spoke probe");
     _log_i("Published master LED bringup spoke probe request=%u "
            "lifetime=%ums",
@@ -84,7 +84,7 @@ inline ReturnCode publishWheelIndicator() {
         Totem::LedDisplay::Animations::WheelIndicatorCommand::makeCommand(
             config.wheelIndicator.animation, config.wheelIndicator.requestId),
         "Failed to build master LED bringup wheel indicator");
-    FAIL_IF_ERR_FWD(Totem::LedDisplay::publishAnimationCommand(cmd),
+    FAIL_IF_ERR_FWD(Totem::LedDisplay::publishAnimationPlayCommand(cmd),
                     "Failed to publish master LED bringup wheel indicator");
     _log_i("Published master LED bringup wheel indicator request=%u",
            config.wheelIndicator.requestId);

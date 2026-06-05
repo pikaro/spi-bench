@@ -8,13 +8,12 @@
 namespace Totem::LedDisplay::Animations {
 
 struct SpokeSweepCommand : SpokeSweepSpec {
-    static std::expected<AnimationCommand, ReturnCode>
+    static std::expected<AnimationPlayCommand, ReturnCode>
     makeCommand(SpokeSweepConfig commandConfig = {},
                 uint16_t requestId = defaultRequestId,
                 uint16_t lifetimeMs = defaultLifetimeMs,
                 Layer layer = defaultLayer) {
-        auto cmd = AnimationCommand{.type = AnimationCommandType::Play,
-                                    .kind = kind,
+        auto cmd = AnimationPlayCommand{.kind = kind,
                                     .requestId = requestId,
                                     .layer = layer,
                                     .lifetimeMs = lifetimeMs};

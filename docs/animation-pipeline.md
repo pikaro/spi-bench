@@ -17,8 +17,8 @@ separately in [sprite-animation-plan.md](sprite-animation-plan.md).
 
 The embedded pipeline is feature-complete for current animation development:
 
-- animation commands are generic `Play`, `Update`, `Stop`, hue-offset, and
-  rotation-offset requests
+- animation commands are split into playback, update, and specific control
+  messages instead of sharing one catch-all command shape
 - `Display` owns lifecycle, strobe accounting, present buffering, and output
   presentation only
 - `AnimationEngine` owns command draining, animation slots, input snapshots,
@@ -51,8 +51,9 @@ replacement:
 ## Responsibilities
 
 `Display` is the hardware presentation owner. It initializes the output backend,
-subscribes to generic animation command PubSub, delegates input subscriptions to
-the engine, handles the present-strobe ISR, records present timing, and calls
+subscribes to animation play, update, and specific control PubSub topics,
+delegates input subscriptions to the engine, handles the present-strobe ISR,
+records present timing, and calls
 `FastLedOutput::show()` with complete frames. It must not know about concrete
 animations such as waves, FFT visuals, or the wheel indicator.
 
@@ -105,7 +106,7 @@ two-second quiet window publishes one short center wave as a primitive drop
 marker.
 
 `src/master/led_bringup.hpp` owns the master-triggered LED bring-up probes. It
-publishes generic animation commands after boot so GPU mapping and long-running
+publishes animation playback commands after boot so GPU mapping and long-running
 indicator startup use the same command path as runtime orchestration.
 Automatic master runtime orchestration is held until the spoke probe's publish
 delay plus lifetime has elapsed. The bring-up sweep must run against an
@@ -150,9 +151,17 @@ Each GPU frame follows this path:
 
 Command and PubSub paths use the same engine:
 
-- command console helpers publish `AnimationCommand` over PubSub
-- master orchestration publishes the same command payloads
-- GPUs subscribe to the animation command topic and enqueue the command
+- playback requests publish `AnimationPlayCommand` on `Topic::AnimationPlay`;
+  they carry animation kind, request ID, layer, lifetime, and the concrete
+  animation payload
+- update requests publish `AnimationUpdateCommand` on `Topic::AnimationUpdate`;
+  they carry animation kind, request ID, and the concrete animation payload, but
+  no layer or lifetime
+- control requests publish their own payload structs on their own topics, such
+  as `AnimationStopCommand` on `Topic::AnimationStop`,
+  `AnimationSetHueOffsetCommand` on `Topic::AnimationSetHueOffset`, and
+  `AnimationFadeLayerSwapCommand` on `Topic::AnimationFadeLayerSwap`
+- GPUs subscribe to the animation command topics and enqueue the typed command
 - `Play` creates a slot, `Update` mutates matching active slots, and `Stop`
   disables matching slots
 

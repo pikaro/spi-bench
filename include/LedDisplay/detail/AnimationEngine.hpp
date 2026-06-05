@@ -5,7 +5,6 @@
 #include "LedDisplay/Interfaces/AnimationCommand.hpp"
 #include "LedDisplay/Interfaces/AnimationCommandCodec.hpp"
 #include "LedDisplay/Interfaces/Config.hpp"
-#include "LedDisplay/Interfaces/LayerControl.hpp"
 #include "LedDisplay/Interfaces/RenderContext.hpp"
 #include "LedDisplay/Primitives/AudioControls.hpp"
 #include "LedDisplay/Primitives/Canvas.hpp"
@@ -24,6 +23,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <expected>
 #include <optional>
 #include <span>
@@ -49,6 +49,63 @@ class AnimationEngine {
         uint16_t durationMs = 0;
     };
 
+    enum class QueuedAnimationCommandType : uint8_t {
+        None = 0,
+        Play,
+        Update,
+        Stop,
+        SetHueOffset,
+        SetRotationOffset,
+        SetBrightness,
+        SetLayerActive,
+        SetLayerOpacity,
+        FadeLayerSwap,
+    };
+
+    struct QueuedAnimationCommand {
+        static constexpr size_t payloadBytes = sizeof(AnimationPlayCommand);
+
+        QueuedAnimationCommandType type = QueuedAnimationCommandType::None;
+        std::array<std::byte, payloadBytes> payload{};
+
+        template <typename Command>
+        static QueuedAnimationCommand make(QueuedAnimationCommandType type,
+                                           const Command &command) {
+            static_assert(sizeof(Command) <= payloadBytes,
+                          "Queued animation command payload is too small");
+            QueuedAnimationCommand queued{.type = type};
+            std::memcpy(queued.payload.data(), &command, sizeof(Command));
+            return queued;
+        }
+
+        template <typename Command> [[nodiscard]] Command as() const {
+            static_assert(sizeof(Command) <= payloadBytes,
+                          "Queued animation command payload is too small");
+            Command command{};
+            std::memcpy(&command, payload.data(), sizeof(Command));
+            return command;
+        }
+    };
+
+    static_assert(sizeof(AnimationUpdateCommand) <=
+                      QueuedAnimationCommand::payloadBytes);
+    static_assert(sizeof(AnimationStopCommand) <=
+                  QueuedAnimationCommand::payloadBytes);
+    static_assert(sizeof(AnimationSetHueOffsetCommand) <=
+                  QueuedAnimationCommand::payloadBytes);
+    static_assert(sizeof(AnimationSetRotationOffsetCommand) <=
+                  QueuedAnimationCommand::payloadBytes);
+    static_assert(sizeof(AnimationSetBrightnessCommand) <=
+                  QueuedAnimationCommand::payloadBytes);
+    static_assert(sizeof(AnimationSetLayerActiveCommand) <=
+                  QueuedAnimationCommand::payloadBytes);
+    static_assert(sizeof(AnimationSetLayerOpacityCommand) <=
+                  QueuedAnimationCommand::payloadBytes);
+    static_assert(sizeof(AnimationFadeLayerSwapCommand) <=
+                  QueuedAnimationCommand::payloadBytes);
+    static_assert(std::is_trivially_copyable_v<QueuedAnimationCommand>,
+                  "QueuedAnimationCommand must remain queue-copyable");
+
   public:
     ReturnCode begin() {
         prewarmMetrics();
@@ -64,7 +121,45 @@ class AnimationEngine {
         return ret;
     }
 
-    ReturnCode submit(const AnimationCommand &cmd) {
+    ReturnCode submit(const AnimationPlayCommand &cmd) {
+        return _submit(QueuedAnimationCommandType::Play, cmd);
+    }
+
+    ReturnCode submit(const AnimationUpdateCommand &cmd) {
+        return _submit(QueuedAnimationCommandType::Update, cmd);
+    }
+
+    ReturnCode submit(const AnimationStopCommand &cmd) {
+        return _submit(QueuedAnimationCommandType::Stop, cmd);
+    }
+
+    ReturnCode submit(const AnimationSetHueOffsetCommand &cmd) {
+        return _submit(QueuedAnimationCommandType::SetHueOffset, cmd);
+    }
+
+    ReturnCode submit(const AnimationSetRotationOffsetCommand &cmd) {
+        return _submit(QueuedAnimationCommandType::SetRotationOffset, cmd);
+    }
+
+    ReturnCode submit(const AnimationSetBrightnessCommand &cmd) {
+        return _submit(QueuedAnimationCommandType::SetBrightness, cmd);
+    }
+
+    ReturnCode submit(const AnimationSetLayerActiveCommand &cmd) {
+        return _submit(QueuedAnimationCommandType::SetLayerActive, cmd);
+    }
+
+    ReturnCode submit(const AnimationSetLayerOpacityCommand &cmd) {
+        return _submit(QueuedAnimationCommandType::SetLayerOpacity, cmd);
+    }
+
+    ReturnCode submit(const AnimationFadeLayerSwapCommand &cmd) {
+        return _submit(QueuedAnimationCommandType::FadeLayerSwap, cmd);
+    }
+
+  private:
+    template <typename Command>
+    ReturnCode _submit(QueuedAnimationCommandType type, const Command &cmd) {
         if (_commandQueue == nullptr) {
             metrics().addQueueFailure();
             FAIL(ERR(CoreError, InvalidState),
@@ -75,7 +170,8 @@ class AnimationEngine {
             FAIL(ERR(CoreError, InvalidArgument),
                  "Invalid LED animation command");
         }
-        auto ret = Totem::Queue::Platform::send(_commandQueue, &cmd, 0);
+        const auto queued = QueuedAnimationCommand::make(type, cmd);
+        auto ret = Totem::Queue::Platform::send(_commandQueue, &queued, 0);
         if (!ret.ok()) {
             metrics().addQueueFailure();
             _log_w("Dropped LED animation command because the command queue "
@@ -87,6 +183,7 @@ class AnimationEngine {
         return OK();
     }
 
+  public:
     ReturnCode subscribePubSubInputs() {
         if (_pubSubInputSubscribed) {
             return OK();
@@ -271,7 +368,7 @@ class AnimationEngine {
     }
 
     ReturnCode _drainCommands(uint32_t nowMs) {
-        AnimationCommand cmd{};
+        QueuedAnimationCommand cmd{};
         while (true) {
             auto result =
                 Totem::Queue::Platform::receive(_commandQueue, &cmd, 0);
@@ -286,43 +383,60 @@ class AnimationEngine {
         }
     }
 
-    ReturnCode _handleCommand(const AnimationCommand &cmd, uint32_t nowMs) {
-        if (!cmd.validate()) {
-            metrics().addBadCommand();
-            FAIL(ERR(CoreError, InvalidArgument),
-                 "Invalid LED animation command");
-        }
-        switch (cmd.type) {
-        case AnimationCommandType::None:
+    ReturnCode _handleCommand(const QueuedAnimationCommand &queued,
+                              uint32_t nowMs) {
+        switch (queued.type) {
+        case QueuedAnimationCommandType::None:
             FAIL(ERR(CoreError, InvalidArgument),
                  "LED animation command has no command type");
-        case AnimationCommandType::Play:
+        case QueuedAnimationCommandType::Play: {
+            const auto cmd = queued.as<AnimationPlayCommand>();
+            if (!cmd.validate()) {
+                metrics().addBadCommand();
+                FAIL(ERR(CoreError, InvalidArgument),
+                     "Invalid LED animation play command");
+            }
             return _play(cmd, nowMs);
-        case AnimationCommandType::Update:
+        }
+        case QueuedAnimationCommandType::Update: {
+            const auto cmd = queued.as<AnimationUpdateCommand>();
+            if (!cmd.validate()) {
+                metrics().addBadCommand();
+                FAIL(ERR(CoreError, InvalidArgument),
+                     "Invalid LED animation update command");
+            }
             return _update(cmd);
-        case AnimationCommandType::Stop:
+        }
+        case QueuedAnimationCommandType::Stop: {
+            const auto cmd = queued.as<AnimationStopCommand>();
             _stop(cmd.requestId);
             metrics().addStop();
             return OK();
-        case AnimationCommandType::SetHueOffset:
-            return _setHueOffset(cmd);
-        case AnimationCommandType::SetRotationOffset:
-            return _setRotationOffset(cmd);
-        case AnimationCommandType::SetBrightness:
-            return _setBrightness(cmd);
-        case AnimationCommandType::SetLayerActive:
-            return _setLayerActive(cmd);
-        case AnimationCommandType::SetLayerOpacity:
-            return _setLayerOpacity(cmd);
-        case AnimationCommandType::FadeLayerSwap:
-            return _startLayerFadeSwap(cmd, nowMs);
+        }
+        case QueuedAnimationCommandType::SetHueOffset:
+            return _setHueOffset(queued.as<AnimationSetHueOffsetCommand>());
+        case QueuedAnimationCommandType::SetRotationOffset:
+            return _setRotationOffset(
+                queued.as<AnimationSetRotationOffsetCommand>());
+        case QueuedAnimationCommandType::SetBrightness:
+            return _setBrightness(queued.as<AnimationSetBrightnessCommand>());
+        case QueuedAnimationCommandType::SetLayerActive:
+            return _setLayerActive(
+                queued.as<AnimationSetLayerActiveCommand>());
+        case QueuedAnimationCommandType::SetLayerOpacity:
+            return _setLayerOpacity(
+                queued.as<AnimationSetLayerOpacityCommand>());
+        case QueuedAnimationCommandType::FadeLayerSwap:
+            return _startLayerFadeSwap(
+                queued.as<AnimationFadeLayerSwapCommand>(), nowMs);
         default:
+            metrics().addBadCommand();
             FAIL(ERR(CoreError, InvalidArgument),
-                 "Unknown LED animation command type");
+                 "Unknown queued LED animation command type");
         }
     }
 
-    ReturnCode _update(const AnimationCommand &cmd) {
+    ReturnCode _update(const AnimationUpdateCommand &cmd) {
         FAIL_IF(cmd.payloadSize == 0, ERR(CoreError, InvalidArgument),
                 "Animation update command has no payload");
         FAIL_IF(cmd.kind == AnimationKind::None,
@@ -354,7 +468,7 @@ class AnimationEngine {
         return OK();
     }
 
-    ReturnCode _play(const AnimationCommand &cmd, uint32_t nowMs) {
+    ReturnCode _play(const AnimationPlayCommand &cmd, uint32_t nowMs) {
         FAIL_IF(cmd.payloadSize == 0, ERR(CoreError, InvalidArgument),
                 "Animation play command has no payload");
         FAIL_IF(static_cast<size_t>(cmd.layer) >= LayerStack::layerCount,
@@ -441,20 +555,15 @@ class AnimationEngine {
         return stopped;
     }
 
-    ReturnCode _setHueOffset(const AnimationCommand &cmd) {
-        FAIL_IF_UNEXPECTED_FWD(offset,
-                               decodeCommandPayload<Angle<uint8_t>>(cmd),
-                               "Failed to decode LED hue offset");
-        _hueOffset.store(offset.value, std::memory_order_relaxed);
+    ReturnCode _setHueOffset(const AnimationSetHueOffsetCommand &cmd) {
+        _hueOffset.store(cmd.offset, std::memory_order_relaxed);
         _log_i("Set LED hue offset raw=%u",
-               static_cast<unsigned>(offset.value));
+               static_cast<unsigned>(cmd.offset));
         return OK();
     }
 
-    ReturnCode _setRotationOffset(const AnimationCommand &cmd) {
-        FAIL_IF_UNEXPECTED_FWD(offset,
-                               decodeCommandPayload<Angle<uint8_t>>(cmd),
-                               "Failed to decode LED rotation offset");
+    ReturnCode _setRotationOffset(const AnimationSetRotationOffsetCommand &cmd) {
+        const auto offset = Angle<uint8_t>::fromRaw(cmd.offset);
         _rotationOffset.store(offset.value, std::memory_order_relaxed);
         _rebuildLogicalToLocalMap(offset);
         _log_i("Set LED rotation offset raw=%u spokeOffset=%u",
@@ -463,69 +572,60 @@ class AnimationEngine {
         return OK();
     }
 
-    ReturnCode _setBrightness(const AnimationCommand &cmd) {
-        FAIL_IF_UNEXPECTED_FWD(brightness,
-                               decodeCommandPayload<DisplayBrightness>(cmd),
-                               "Failed to decode LED brightness");
-        _brightness.store(brightness.value, std::memory_order_release);
+    ReturnCode _setBrightness(const AnimationSetBrightnessCommand &cmd) {
+        _brightness.store(cmd.value, std::memory_order_release);
         _brightnessDirty.store(true, std::memory_order_release);
         _log_i("Set LED display brightness=%u",
-               static_cast<unsigned>(brightness.value));
+               static_cast<unsigned>(cmd.value));
         return OK();
     }
 
-    ReturnCode _setLayerActive(const AnimationCommand &cmd) {
-        FAIL_IF_UNEXPECTED_FWD(active, decodeCommandPayload<LayerActive>(cmd),
-                               "Failed to decode LED layer active state");
-        FAIL_IF(static_cast<size_t>(active.layer) >= LayerStack::layerCount,
+    ReturnCode _setLayerActive(const AnimationSetLayerActiveCommand &cmd) {
+        FAIL_IF(static_cast<size_t>(cmd.layer) >= LayerStack::layerCount,
                 ERR(CoreError, InvalidArgument),
                 "Layer active command has invalid layer");
-        _cancelLayerFadeSwapIfTouches(active.layer);
-        _layers.setEnabled(active.layer, active.active);
+        _cancelLayerFadeSwapIfTouches(cmd.layer);
+        _layers.setEnabled(cmd.layer, cmd.active);
         _log_i("Set LED layer active layer=%u active=%u",
-               static_cast<unsigned>(active.layer), active.active);
+               static_cast<unsigned>(cmd.layer), cmd.active);
         return OK();
     }
 
-    ReturnCode _setLayerOpacity(const AnimationCommand &cmd) {
-        FAIL_IF_UNEXPECTED_FWD(opacity, decodeCommandPayload<LayerOpacity>(cmd),
-                               "Failed to decode LED layer opacity");
-        FAIL_IF(static_cast<size_t>(opacity.layer) >= LayerStack::layerCount,
+    ReturnCode _setLayerOpacity(const AnimationSetLayerOpacityCommand &cmd) {
+        FAIL_IF(static_cast<size_t>(cmd.layer) >= LayerStack::layerCount,
                 ERR(CoreError, InvalidArgument),
                 "Layer opacity command has invalid layer");
-        _cancelLayerFadeSwapIfTouches(opacity.layer);
-        _layers.setOpacity(opacity.layer, opacity.opacity);
+        _cancelLayerFadeSwapIfTouches(cmd.layer);
+        _layers.setOpacity(cmd.layer, cmd.opacity);
         _log_i("Set LED layer opacity layer=%u opacity=%u",
-               static_cast<unsigned>(opacity.layer),
-               static_cast<unsigned>(opacity.opacity));
+               static_cast<unsigned>(cmd.layer),
+               static_cast<unsigned>(cmd.opacity));
         return OK();
     }
 
-    ReturnCode _startLayerFadeSwap(const AnimationCommand &cmd,
+    ReturnCode _startLayerFadeSwap(const AnimationFadeLayerSwapCommand &cmd,
                                    uint32_t nowMs) {
-        FAIL_IF_UNEXPECTED_FWD(swap, decodeCommandPayload<LayerFadeSwap>(cmd),
-                               "Failed to decode LED layer fade swap");
-        FAIL_IF(static_cast<size_t>(swap.first) >= LayerStack::layerCount ||
-                    static_cast<size_t>(swap.second) >= LayerStack::layerCount,
+        FAIL_IF(static_cast<size_t>(cmd.first) >= LayerStack::layerCount ||
+                    static_cast<size_t>(cmd.second) >= LayerStack::layerCount,
                 ERR(CoreError, InvalidArgument),
                 "Layer fade swap command has invalid layer");
-        FAIL_IF(swap.first == swap.second, ERR(CoreError, InvalidArgument),
+        FAIL_IF(cmd.first == cmd.second, ERR(CoreError, InvalidArgument),
                 "Layer fade swap requires two distinct layers");
-        FAIL_IF(swap.durationMs == 0, ERR(CoreError, InvalidArgument),
+        FAIL_IF(cmd.durationMs == 0, ERR(CoreError, InvalidArgument),
                 "Layer fade swap duration must be non-zero");
         FAIL_IF(_layerFadeSwap.active, ERR(CoreError, InvalidState),
                 "Layer fade swap is already in progress");
 
-        const auto firstOpacity = _layers.opacity(swap.first);
-        const auto secondOpacity = _layers.opacity(swap.second);
+        const auto firstOpacity = _layers.opacity(cmd.first);
+        const auto secondOpacity = _layers.opacity(cmd.second);
         Layer from = Layer::Effect;
         Layer to = Layer::Effect;
         if (firstOpacity == layerFullOpacity && secondOpacity == 0) {
-            from = swap.first;
-            to = swap.second;
+            from = cmd.first;
+            to = cmd.second;
         } else if (firstOpacity == 0 && secondOpacity == layerFullOpacity) {
-            from = swap.second;
-            to = swap.first;
+            from = cmd.second;
+            to = cmd.first;
         } else {
             FAIL(ERR(CoreError, InvalidState),
                  "Layer fade swap requires one layer at opacity 255 and the "
@@ -543,11 +643,11 @@ class AnimationEngine {
             .from = from,
             .to = to,
             .startMs = nowMs,
-            .durationMs = swap.durationMs,
+            .durationMs = cmd.durationMs,
         };
         _log_i("Started LED layer fade swap from=%u to=%u duration=%ums",
                static_cast<unsigned>(from), static_cast<unsigned>(to),
-               static_cast<unsigned>(swap.durationMs));
+               static_cast<unsigned>(cmd.durationMs));
         return OK();
     }
 
@@ -737,7 +837,7 @@ class AnimationEngine {
     bool _pubSubInputSubscribed = false;
     mutable ::platform::Spinlock _inputLock = ::platform::create_spinlock();
 
-    STANDARD_QUEUE(_commandQueue, AnimationCommand, Config::commandQueueSize)
+    STANDARD_QUEUE(_commandQueue, QueuedAnimationCommand, Config::commandQueueSize)
 };
 
 } // namespace Totem::LedDisplay::detail

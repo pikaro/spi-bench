@@ -7,7 +7,6 @@
 #include "LedDisplay/Interfaces/Color.hpp"            // IWYU pragma: export
 #include "LedDisplay/Interfaces/Config.hpp"           // IWYU pragma: export
 #include "LedDisplay/Interfaces/Layer.hpp"            // IWYU pragma: export
-#include "LedDisplay/Interfaces/LayerControl.hpp"     // IWYU pragma: export
 #include "LedDisplay/detail/Display.hpp"
 
 namespace Totem::LedDisplay {

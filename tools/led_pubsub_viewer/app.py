@@ -17,13 +17,16 @@ from .adapter import (
     renderer_json_for_event,
 )
 from .catalog import (
-    ANIMATION_COMMAND_MODEL,
+    ANIMATION_COMMAND_MODELS,
     EventDefinition,
     all_events,
     command_defaults,
     payload_defaults,
 )
 from .connection import PubSubConnection
+
+FIELD_DROPDOWN_LAYER = 1000
+EVENT_MENU_LAYER = 2000
 
 
 @dataclass
@@ -65,6 +68,9 @@ class ViewerApp:
         pygame.display.set_caption("Totem LED PubSub Viewer")
         self.clock = pygame.time.Clock()
         self.manager = pygame_gui.UIManager(self.window_size)
+        self.manager.preload_fonts(
+            [{"name": "noto_sans", "point_size": 14, "style": "bold", "antialiased": 1}]
+        )
         self.window_visible = True
         self.window_focused = True
         self._window_hidden_events = {
@@ -91,6 +97,10 @@ class ViewerApp:
         self.controls: list[FormControl] = []
         self.command_controls: list[FormControl] = []
         self.form_container: Any | None = None
+        self.event_menu_panel: Any | None = None
+        self.event_menu_container: Any | None = None
+        self.event_menu_elements: list[Any] = []
+        self.event_menu_buttons: dict[Any, EventDefinition] = {}
         self.layout: Layout | None = None
 
         self.preview_surface: Any | None = None
@@ -154,7 +164,7 @@ class ViewerApp:
                 }:
                     self.window_focused = True
                     if event.type == self.pygame.MOUSEBUTTONDOWN:
-                        self._raise_clicked_dropdown(event.pos)
+                        self._handle_mouse_down(event.pos)
                 self._handle_ui_event(event)
                 self.manager.process_events(event)
 
@@ -166,6 +176,7 @@ class ViewerApp:
             can_draw = self.window_visible and (self.window_focused or bool(events))
             if can_draw and (self.needs_redraw or self.playing):
                 self.manager.update(dt)
+                self._raise_open_dropdowns()
                 self.screen.fill((24, 27, 31))
                 self._draw_preview()
                 self.manager.draw_ui(self.screen)
@@ -239,6 +250,7 @@ class ViewerApp:
         command_values = self._safe_command_values() if preserve_values else None
         payload_values = self._safe_payload_values() if preserve_values else None
 
+        self._close_event_menu()
         self._kill_static_ui()
         if self.form_container is not None:
             self.form_container.kill()
@@ -247,7 +259,7 @@ class ViewerApp:
         self.layout = self._compute_layout()
         self._rebuild_form(command_values=command_values, payload_values=payload_values)
         self._build_static_ui(ip_text=ip_text, topic_text=topic_text)
-        self._raise_event_dropdown()
+        self._raise_event_selector()
         self._update_frame_controls()
         self._refresh_preview_text()
         self.needs_redraw = True
@@ -314,15 +326,15 @@ class ViewerApp:
             )
         )
 
-        event_w = max(240, min(480, int(width * 0.42)))
-        self.event_dropdown = self._track(
-            elements.UIDropDownMenu(
-                options_list=[event.label for event in self.events],
-                starting_option=self.selected_event.label,
+        event_w = max(240, min(500, int(width * 0.42)))
+        self.event_button = self._track(
+            elements.UIButton(
                 relative_rect=pygame.Rect(margin, 54, event_w, 30),
+                text=self.selected_event.label,
                 manager=self.manager,
             )
         )
+        self._left_align_button(self.event_button)
         x = margin + event_w + 10
         self._track(
             elements.UILabel(
@@ -419,25 +431,175 @@ class ViewerApp:
             )
         )
 
-    def _raise_event_dropdown(self) -> None:
-        self._raise_dropdown(self.event_dropdown)
+    def _raise_event_selector(self) -> None:
+        if hasattr(self, "event_button") and hasattr(self.event_button, "change_layer"):
+            self.event_button.change_layer(EVENT_MENU_LAYER)
+        self._raise_event_menu()
 
     def _raise_dropdown(self, dropdown: Any) -> None:
         if hasattr(dropdown, "change_layer"):
-            dropdown.change_layer(1000)
+            dropdown.change_layer(FIELD_DROPDOWN_LAYER)
+        self._left_align_dropdown(dropdown)
 
-    def _raise_clicked_dropdown(self, pos: tuple[int, int]) -> None:
-        dropdowns = [self.event_dropdown]
-        dropdowns.extend(
+    def _form_dropdowns(self) -> list[Any]:
+        return [
             control.widget
             for control in (*self.command_controls, *self.controls)
             if control.field.kind in {"enum", "bool"}
-        )
-        for dropdown in dropdowns:
+        ]
+
+    def _close_form_dropdowns(self) -> None:
+        for dropdown in self._form_dropdowns():
+            menu_states = getattr(dropdown, "menu_states", {})
+            expanded_state = (
+                menu_states.get("expanded") if isinstance(menu_states, dict) else None
+            )
+            if getattr(dropdown, "current_state", None) is expanded_state:
+                if hasattr(dropdown, "unfocus"):
+                    dropdown.unfocus()
+                if hasattr(dropdown, "update"):
+                    dropdown.update(0.0)
+
+    def _raise_clicked_dropdown(self, pos: tuple[int, int]) -> None:
+        for dropdown in self._form_dropdowns():
             rect = getattr(dropdown, "rect", None)
             if rect is not None and rect.collidepoint(pos):
                 self._raise_dropdown(dropdown)
                 return
+
+    def _handle_mouse_down(self, pos: tuple[int, int]) -> None:
+        if self.event_menu_container is not None:
+            button_rect = getattr(self.event_button, "rect", None)
+            menu_rect = getattr(self.event_menu_container, "rect", None)
+            inside_button = button_rect is not None and button_rect.collidepoint(pos)
+            inside_menu = menu_rect is not None and menu_rect.collidepoint(pos)
+            if not inside_button and not inside_menu:
+                self._close_event_menu()
+        self._raise_clicked_dropdown(pos)
+
+    def _raise_open_dropdowns(self) -> None:
+        self._raise_event_menu()
+        for dropdown in self._form_dropdowns():
+            self._raise_open_dropdown(dropdown)
+
+    def _raise_open_dropdown(self, dropdown: Any) -> None:
+        state = getattr(dropdown, "current_state", None)
+        selection_list = getattr(state, "options_selection_list", None)
+        if selection_list is None:
+            self._left_align_dropdown(dropdown)
+            return
+
+        self._raise_dropdown(dropdown)
+        self._change_layer(selection_list, FIELD_DROPDOWN_LAYER + 3)
+        self._change_layer(
+            getattr(selection_list, "list_and_scroll_bar_container", None),
+            FIELD_DROPDOWN_LAYER + 4,
+        )
+        self._change_layer(
+            getattr(selection_list, "item_list_container", None),
+            FIELD_DROPDOWN_LAYER + 5,
+        )
+        self._raise_scroll_bar(
+            getattr(selection_list, "scroll_bar", None),
+            FIELD_DROPDOWN_LAYER + 5,
+        )
+        for item in getattr(selection_list, "item_list", []):
+            button = item.get("button_element")
+            self._change_layer(button, FIELD_DROPDOWN_LAYER + 6)
+            self._left_align_button(button)
+
+    @staticmethod
+    def _change_layer(element: Any, layer: int) -> None:
+        if element is not None and hasattr(element, "change_layer"):
+            element.change_layer(layer)
+
+    def _raise_scroll_bar(self, scroll_bar: Any, layer: int) -> None:
+        self._change_layer(scroll_bar, layer)
+        for attr in ("top_button", "bottom_button", "sliding_button"):
+            self._change_layer(getattr(scroll_bar, attr, None), layer + 1)
+
+    def _style_event_menu_panel(self, panel: Any) -> None:
+        if panel is None or not hasattr(panel, "rebuild"):
+            return
+        panel.background_colour = self.pygame.Color(30, 34, 39)
+        panel.border_colour = self.pygame.Color(70, 76, 84)
+        panel.border_width = {"left": 1, "right": 1, "top": 1, "bottom": 1}
+        panel.shadow_width = 2
+        panel.shape = "rectangle"
+        panel.shape_corner_radius = [2, 2, 2, 2]
+        panel.rebuild()
+
+    def _style_event_menu_header(self, label: Any) -> None:
+        if label is None or not hasattr(label, "rebuild"):
+            return
+        font_dict = self.manager.get_theme().get_font_dictionary()
+        label.font = font_dict.find_font(14, "noto_sans", bold=True)
+        label.bg_colour = self.pygame.Color(30, 34, 39, 0)
+        label.text_colour = self.pygame.Color(224, 228, 232)
+        label.text_horiz_alignment = "left"
+        label.text_horiz_alignment_padding = 4
+        label.text_vert_alignment = "center"
+        label.text_vert_alignment_padding = 0
+        label.rebuild()
+
+    def _style_event_menu_button(self, button: Any, *, selected: bool = False) -> None:
+        if button is None or not hasattr(button, "rebuild"):
+            return
+        if (
+            getattr(button, "_totem_menu_styled", False)
+            and getattr(button, "_totem_menu_selected", None) == selected
+        ):
+            return
+
+        palette = {
+            "normal_bg": (30, 34, 39),
+            "hovered_bg": (49, 55, 63),
+            "selected_bg": (43, 74, 96),
+            "active_bg": (43, 74, 96),
+            "normal_border": (30, 34, 39),
+            "hovered_border": (49, 55, 63),
+            "selected_border": (43, 74, 96),
+            "active_border": (43, 74, 96),
+            "normal_text": (208, 213, 218),
+            "hovered_text": (236, 240, 244),
+            "selected_text": (245, 247, 249),
+            "active_text": (245, 247, 249),
+        }
+        for key, value in palette.items():
+            button.colours[key] = self.pygame.Color(*value)
+        button.border_width = {"left": 0, "right": 0, "top": 0, "bottom": 0}
+        button.shadow_width = 0
+        button.border_overlap = 0
+        button.shape = "rectangle"
+        button.shape_corner_radius = [0, 0, 0, 0]
+        button.text_horiz_alignment = "left"
+        button.text_horiz_alignment_padding = 18
+        button.text_vert_alignment = "center"
+        button.text_vert_alignment_padding = 0
+        button._totem_left_aligned = True
+        button._totem_menu_styled = True
+        button._totem_menu_selected = selected
+        button.rebuild()
+
+    @staticmethod
+    def _left_align_button(button: Any) -> None:
+        if button is None or getattr(button, "_totem_left_aligned", False):
+            return
+        if not hasattr(button, "rebuild"):
+            return
+        button.text_horiz_alignment = "left"
+        button.text_horiz_alignment_padding = 8
+        button._totem_left_aligned = True
+        button.rebuild()
+
+    def _left_align_dropdown(self, dropdown: Any) -> None:
+        state = getattr(dropdown, "current_state", None)
+        self._left_align_button(getattr(state, "selected_option_button", None))
+        selection_list = getattr(state, "options_selection_list", None)
+        if selection_list is None:
+            return
+        for item in getattr(selection_list, "item_list", []):
+            self._left_align_button(item.get("button_element"))
 
     def _resize(self, size: tuple[int, int]) -> None:
         self.window_size = (max(640, size[0]), max(420, size[1]))
@@ -448,7 +610,11 @@ class ViewerApp:
     def _handle_ui_event(self, event: Any) -> None:
         gui = self.pygame_gui
         if event.type == gui.UI_BUTTON_PRESSED:
-            if event.ui_element == self.connect_button:
+            if event.ui_element == self.event_button:
+                self._toggle_event_menu()
+            elif event.ui_element in self.event_menu_buttons:
+                self._select_event(self.event_menu_buttons[event.ui_element])
+            elif event.ui_element == self.connect_button:
                 self.connection.connect(self.ip_entry.get_text().strip())
             elif event.ui_element == self.disconnect_button:
                 self.connection.disconnect()
@@ -463,21 +629,12 @@ class ViewerApp:
             elif event.ui_element == self.play_button:
                 self._render_or_toggle_playback()
         elif event.type == gui.UI_DROP_DOWN_MENU_CHANGED:
-            if event.ui_element == self.event_dropdown:
-                self._select_event(self._event_by_label(self._dropdown_text(event.text)))
-            else:
-                self._refresh_preview_text()
+            self._refresh_preview_text()
         elif event.type == gui.UI_TEXT_ENTRY_CHANGED:
             if event.ui_element == self.frame_entry and not self._updating_frame_entry:
                 self._jump_to_frame_text()
             elif event.ui_element != self.ip_entry:
                 self._refresh_preview_text()
-
-    def _event_by_label(self, label: str) -> EventDefinition:
-        for event in self.events:
-            if event.label == label:
-                return event
-        raise KeyError(label)
 
     @staticmethod
     def _dropdown_text(value: object) -> str:
@@ -485,8 +642,130 @@ class ViewerApp:
             return str(value[0])
         return str(value)
 
+    @staticmethod
+    def _event_category(event: EventDefinition) -> str:
+        return event.label.split(" / ", 1)[0]
+
+    @staticmethod
+    def _event_display_text(event: EventDefinition) -> str:
+        parts = event.label.split(" / ", 1)
+        return parts[1] if len(parts) == 2 else event.label
+
+    def _event_groups(self) -> dict[str, list[EventDefinition]]:
+        groups: dict[str, list[EventDefinition]] = {}
+        for event in self.events:
+            groups.setdefault(self._event_category(event), []).append(event)
+        return groups
+
+    def _toggle_event_menu(self) -> None:
+        if self.event_menu_container is None:
+            self._open_event_menu()
+        else:
+            self._close_event_menu()
+
+    def _open_event_menu(self) -> None:
+        self._close_event_menu()
+        self._close_form_dropdowns()
+        pygame = self.pygame
+        elements = self.pygame_gui.elements
+        layout = self.layout
+        assert layout is not None
+
+        button_rect = self.event_button.relative_rect
+        menu_x = button_rect.x
+        menu_y = button_rect.bottom + 4
+        menu_w = max(260, button_rect.width)
+        menu_h = max(140, min(420, self.window_size[1] - menu_y - layout.margin))
+        content_w = max(220, menu_w - 22)
+        menu_rect = pygame.Rect(menu_x, menu_y, menu_w, menu_h)
+
+        self.event_menu_panel = elements.UIPanel(
+            relative_rect=menu_rect,
+            starting_height=EVENT_MENU_LAYER,
+            manager=self.manager,
+        )
+        self._style_event_menu_panel(self.event_menu_panel)
+        self.event_menu_container = elements.UIScrollingContainer(
+            relative_rect=menu_rect,
+            manager=self.manager,
+        )
+        self.event_menu_elements = []
+        self.event_menu_buttons = {}
+
+        y = 6
+        for category, events in self._event_groups().items():
+            header = elements.UILabel(
+                relative_rect=pygame.Rect(10, y, content_w - 18, 22),
+                text=category,
+                manager=self.manager,
+                container=self.event_menu_container,
+            )
+            self._style_event_menu_header(header)
+            self.event_menu_elements.append(header)
+            self._change_layer(header, EVENT_MENU_LAYER + 2)
+            y += 24
+            for event in events:
+                button = elements.UIButton(
+                    relative_rect=pygame.Rect(8, y, content_w - 16, 24),
+                    text=self._event_display_text(event),
+                    manager=self.manager,
+                    container=self.event_menu_container,
+                )
+                self._style_event_menu_button(button, selected=event == self.selected_event)
+                if event == self.selected_event and hasattr(button, "select"):
+                    button.select()
+                self.event_menu_elements.append(button)
+                self.event_menu_buttons[button] = event
+                y += 24
+            y += 8
+
+        self.event_menu_container.set_scrollable_area_dimensions(
+            (content_w, max(y + 8, menu_h)),
+        )
+        self._raise_event_menu()
+        self.needs_redraw = True
+
+    def _close_event_menu(self) -> None:
+        if self.event_menu_container is not None:
+            self.event_menu_container.kill()
+        if self.event_menu_panel is not None:
+            self.event_menu_panel.kill()
+        self.event_menu_panel = None
+        self.event_menu_container = None
+        self.event_menu_elements = []
+        self.event_menu_buttons = {}
+
+    def _raise_event_menu(self) -> None:
+        if self.event_menu_container is not None:
+            self._change_layer(self.event_menu_panel, EVENT_MENU_LAYER)
+            self.event_menu_container.change_layer(EVENT_MENU_LAYER + 1)
+            self._change_layer(
+                getattr(self.event_menu_container, "scrollable_container", None),
+                EVENT_MENU_LAYER + 2,
+            )
+            self._raise_scroll_bar(
+                getattr(self.event_menu_container, "vert_scroll_bar", None),
+                EVENT_MENU_LAYER + 6,
+            )
+            self._raise_scroll_bar(
+                getattr(self.event_menu_container, "horiz_scroll_bar", None),
+                EVENT_MENU_LAYER + 6,
+            )
+            for element in self.event_menu_elements:
+                self._change_layer(element, EVENT_MENU_LAYER + 4)
+            for button in self.event_menu_buttons:
+                self._change_layer(button, EVENT_MENU_LAYER + 5)
+                self._style_event_menu_button(
+                    button,
+                    selected=self.event_menu_buttons[button] == self.selected_event,
+                )
+
     def _select_event(self, event: EventDefinition) -> None:
         self.selected_event = event
+        self._close_event_menu()
+        if hasattr(self, "event_button"):
+            self.event_button.set_text(event.label)
+            self._left_align_button(self.event_button)
         self.topic_entry.set_text(str(event.topic))
         self._close_trace()
         self.preview_surface = None
@@ -494,7 +773,7 @@ class ViewerApp:
         self.playing = False
         self.play_accum = 0.0
         self._rebuild_form()
-        self._raise_event_dropdown()
+        self._raise_event_selector()
         self._update_frame_controls()
         self._refresh_preview_text()
         self.needs_redraw = True
@@ -526,7 +805,7 @@ class ViewerApp:
         if command_fields:
             y = self._add_section_label("Command", y)
             y = self._add_fields(
-                ANIMATION_COMMAND_MODEL,
+                self.selected_event.payload_model,
                 command_defaults_values,
                 y,
                 command=True,
@@ -534,7 +813,7 @@ class ViewerApp:
             )
 
         payload_model = self.selected_event.config_model or self.selected_event.payload_model
-        if payload_model != ANIMATION_COMMAND_MODEL or self.selected_event.config_model is not None:
+        if payload_model not in ANIMATION_COMMAND_MODELS or self.selected_event.config_model is not None:
             payload_defaults_values = payload_defaults(self.selected_event)
             if payload_values:
                 payload_defaults_values.update(payload_values)
@@ -547,10 +826,10 @@ class ViewerApp:
         )
 
     def _visible_command_fields(self, event: EventDefinition) -> tuple[FieldDesc, ...]:
-        if event.payload_model != ANIMATION_COMMAND_MODEL:
+        if event.payload_model not in ANIMATION_COMMAND_MODELS:
             return ()
         hidden = {"type", "kind", "payloadSize", "payload"}
-        model = MODELS[ANIMATION_COMMAND_MODEL]
+        model = MODELS[event.payload_model]
         if event.payload_template:
             return tuple(field for field in model.fields if field.name not in hidden)
         return model.fields

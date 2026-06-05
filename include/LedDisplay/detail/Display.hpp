@@ -46,13 +46,7 @@ class Display : public HasLifecycle<Display, Config>,
     static constexpr uint8_t maxFastLedDataLines = 2;
     static constexpr uint32_t presentMissLogIntervalMs = 1000;
     static constexpr uint32_t frameBudgetLogIntervalMs = 1000;
-
-    ReturnCode submitAnimationCommand(const AnimationCommand &cmd) {
-        FAIL_IF_INACTIVE_ERR("Cannot submit LED animation command before %s "
-                             "begins",
-                             name);
-        return _engine.submit(cmd);
-    }
+    static constexpr size_t animationSubscriptionCount = 9;
 
     ReturnCode subscribePubSub() {
         if (_pubSubSubscribed) {
@@ -61,23 +55,19 @@ class Display : public HasLifecycle<Display, Config>,
         FAIL_IF_NOT(PubSubService::configured(), ERR(CoreError, InvalidState),
                     "PubSub backend is not configured");
 
-        auto &pubSub = PubSubService::get();
-        auto animationSub = pubSub.subscribe(
-            "led-anim", {.subscriber = this, .callback = _onAnimationEnvelope},
-            PubSubService::Topic::Animation);
-        if (!animationSub) {
-            return animationSub.error();
+        auto commandSub = _subscribeAnimationCommandTopics();
+        if (!commandSub.ok()) {
+            (void)_unsubscribeAnimationCommandTopics();
+            return commandSub;
         }
-        _animationSub = *animationSub;
 
         auto inputSub = _engine.subscribePubSubInputs();
         if (!inputSub.ok()) {
-            (void)pubSub.unsubscribe(_animationSub);
-            _animationSub = 0;
+            (void)_unsubscribeAnimationCommandTopics();
             return inputSub;
         }
         _pubSubSubscribed = true;
-        _log_i("LedDisplay subscribed to animation command topic");
+        _log_i("LedDisplay subscribed to animation command topics");
         return OK();
     }
 
@@ -131,27 +121,97 @@ class Display : public HasLifecycle<Display, Config>,
         auto ret = OK();
         if (!_pubSubSubscribed || !PubSubService::configured()) {
             _pubSubSubscribed = false;
-            _animationSub = 0;
+            _animationSubs.fill(0);
+            _animationSubCount = 0;
             ret.combine(_engine.unsubscribePubSubInputs());
             return ret;
         }
-        auto &pubSub = PubSubService::get();
         ret.combine(_engine.unsubscribePubSubInputs());
-        if (_animationSub != 0) {
-            ret.combine(pubSub.unsubscribe(_animationSub));
-        }
-        _animationSub = 0;
+        ret.combine(_unsubscribeAnimationCommandTopics());
         _pubSubSubscribed = false;
         return ret;
     }
 
+    ReturnCode _subscribeAnimationCommandTopics() {
+        FAIL_IF_ERR_FWD(
+            _subscribeAnimationCommand<AnimationPlayCommand>(
+                "led-play", PubSubService::Topic::AnimationPlay),
+            "Failed to subscribe LED animation play commands");
+        FAIL_IF_ERR_FWD(
+            _subscribeAnimationCommand<AnimationUpdateCommand>(
+                "led-upd", PubSubService::Topic::AnimationUpdate),
+            "Failed to subscribe LED animation update commands");
+        FAIL_IF_ERR_FWD(
+            _subscribeAnimationCommand<AnimationStopCommand>(
+                "led-stop", PubSubService::Topic::AnimationStop),
+            "Failed to subscribe LED animation stop commands");
+        FAIL_IF_ERR_FWD(
+            _subscribeAnimationCommand<AnimationSetHueOffsetCommand>(
+                "led-hue", PubSubService::Topic::AnimationSetHueOffset),
+            "Failed to subscribe LED hue offset commands");
+        FAIL_IF_ERR_FWD(
+            _subscribeAnimationCommand<AnimationSetRotationOffsetCommand>(
+                "led-rot", PubSubService::Topic::AnimationSetRotationOffset),
+            "Failed to subscribe LED rotation offset commands");
+        FAIL_IF_ERR_FWD(
+            _subscribeAnimationCommand<AnimationSetBrightnessCommand>(
+                "led-bri", PubSubService::Topic::AnimationSetBrightness),
+            "Failed to subscribe LED brightness commands");
+        FAIL_IF_ERR_FWD(
+            _subscribeAnimationCommand<AnimationSetLayerActiveCommand>(
+                "led-act", PubSubService::Topic::AnimationSetLayerActive),
+            "Failed to subscribe LED layer active commands");
+        FAIL_IF_ERR_FWD(
+            _subscribeAnimationCommand<AnimationSetLayerOpacityCommand>(
+                "led-opa", PubSubService::Topic::AnimationSetLayerOpacity),
+            "Failed to subscribe LED layer opacity commands");
+        FAIL_IF_ERR_FWD(
+            _subscribeAnimationCommand<AnimationFadeLayerSwapCommand>(
+                "led-swp", PubSubService::Topic::AnimationFadeLayerSwap),
+            "Failed to subscribe LED layer fade swap commands");
+        return OK();
+    }
+
+    template <typename Command>
+    ReturnCode _subscribeAnimationCommand(const char *name,
+                                          PubSubService::Topic topic) {
+        FAIL_IF(_animationSubCount >= _animationSubs.size(),
+                ERR(CoreError, OutOfMemory),
+                "LED animation command subscriber storage is full");
+        auto sub = PubSubService::get().subscribe(
+            name,
+            {.subscriber = this, .callback = _onAnimationEnvelope<Command>},
+            topic);
+        if (!sub) {
+            return sub.error();
+        }
+        _animationSubs[_animationSubCount++] = *sub;
+        return OK();
+    }
+
+    ReturnCode _unsubscribeAnimationCommandTopics() {
+        auto ret = OK();
+        if (PubSubService::configured()) {
+            auto &pubSub = PubSubService::get();
+            for (auto key : _animationSubs) {
+                if (key != 0) {
+                    ret.combine(pubSub.unsubscribe(key));
+                }
+            }
+        }
+        _animationSubs.fill(0);
+        _animationSubCount = 0;
+        return ret;
+    }
+
+    template <typename Command>
     static ReturnCode
     _onAnimationEnvelope(void *owner,
                          const Totem::PubSubBackend::Envelope &envelope) {
         auto *self = static_cast<Display *>(owner);
         FAIL_IF_NULL(self, ERR(CoreError, InvalidArgument),
                      "LedDisplay animation subscriber owner is null");
-        auto cmd = envelope.getPayloadAs<AnimationCommand>();
+        auto cmd = envelope.getPayloadAs<Command>();
         if (!cmd) {
             metrics().addBadCommand();
             FAIL_ERR_FWD(cmd.error(), "Failed to decode animation command");
@@ -291,7 +351,9 @@ class Display : public HasLifecycle<Display, Config>,
     PresentBuffers _presentBuffers{};
     bool _pubSubSubscribed = false;
     bool _presentStrobeEnabled = false;
-    Totem::PubSubBackend::SubscriberKey _animationSub = 0;
+    std::array<Totem::PubSubBackend::SubscriberKey, animationSubscriptionCount>
+        _animationSubs{};
+    size_t _animationSubCount = 0;
     ::platform::Gpio _presentStrobeGpio;
     Totem::TaskController::RunnerKey _renderTask = 0;
     std::atomic<uint32_t> _pendingPresentStrobes{0};

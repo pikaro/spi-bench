@@ -8,7 +8,7 @@
     "hue": 96,
     "saturation": 255,
     "value": 220,
-    "radius": 128,
+    "radius": 176,
     "radialWidth": 36,
     "angularWidth": 28,
     "comets": 2,
@@ -17,6 +17,6 @@
     "sparkle": 220,
     "hueJitter": 24,
     "radialDrift": 48,
-    "radialDirection": 1
+    "radialDirection": 2
   }
 }

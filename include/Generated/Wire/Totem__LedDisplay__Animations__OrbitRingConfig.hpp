@@ -17,7 +17,11 @@ template <> struct FieldList<::Totem::LedDisplay::Animations::OrbitRingConfig> {
         Field<&Type::angularWidth>{"angularWidth"},
         Field<&Type::comets>{"comets"},
         Field<&Type::laps>{"laps"},
-        Field<&Type::trail>{"trail"}
+        Field<&Type::trail>{"trail"},
+        Field<&Type::sparkle>{"sparkle"},
+        Field<&Type::hueJitter>{"hueJitter"},
+        Field<&Type::radialDrift>{"radialDrift"},
+        Field<&Type::radialDirection>{"radialDirection"}
     );
 };
 

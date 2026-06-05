@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import html
+import json
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,7 @@ from .adapter import (
     parse_topic,
     payload_bytes_for_event,
     render_event_trace,
+    renderer_binary,
     renderer_json_for_event,
 )
 from .catalog import (
@@ -79,7 +81,10 @@ class ViewerApp:
         self.events = all_events()
         if not self.events:
             raise RuntimeError("no generated wire events are available")
-        self.selected_event = self.events[0]
+        self.selected_event = next(
+            (event for event in self.events if event.renderable),
+            self.events[0],
+        )
         self.connection = PubSubConnection()
 
         self.static_elements: list[Any] = []
@@ -94,6 +99,9 @@ class ViewerApp:
         self.playing = False
         self.play_accum = 0.0
         self._updating_frame_entry = False
+        self.render_dirty = True
+        self.rendered_signature = ""
+        self._play_button_state = ""
 
         self.needs_redraw = True
         self._last_connection_poll_s = -10.0
@@ -145,6 +153,8 @@ class ViewerApp:
                     self.pygame.KEYDOWN,
                 }:
                     self.window_focused = True
+                    if event.type == self.pygame.MOUSEBUTTONDOWN:
+                        self._raise_clicked_dropdown(event.pos)
                 self._handle_ui_event(event)
                 self.manager.process_events(event)
 
@@ -237,7 +247,7 @@ class ViewerApp:
         self.layout = self._compute_layout()
         self._rebuild_form(command_values=command_values, payload_values=payload_values)
         self._build_static_ui(ip_text=ip_text, topic_text=topic_text)
-        self._raise_header_controls()
+        self._raise_event_dropdown()
         self._update_frame_controls()
         self._refresh_preview_text()
         self.needs_redraw = True
@@ -330,14 +340,6 @@ class ViewerApp:
             )
         )
         x += 114
-        self.render_button = self._track(
-            elements.UIButton(
-                relative_rect=pygame.Rect(x, 54, 82, 30),
-                text="Render",
-                manager=self.manager,
-            )
-        )
-        x += 90
         self.publish_button = self._track(
             elements.UIButton(
                 relative_rect=pygame.Rect(x, 54, 86, 30),
@@ -345,7 +347,15 @@ class ViewerApp:
                 manager=self.manager,
             )
         )
-        x += 96
+        x += 94
+        self.rebuild_button = self._track(
+            elements.UIButton(
+                relative_rect=pygame.Rect(x, 54, 88, 30),
+                text="Rebuild",
+                manager=self.manager,
+            )
+        )
+        x += 98
         self.result_label = self._track(
             elements.UILabel(
                 relative_rect=pygame.Rect(x, 54, max(90, width - x - margin), 30),
@@ -370,28 +380,28 @@ class ViewerApp:
         )
         self.play_button = self._track(
             elements.UIButton(
-                relative_rect=pygame.Rect(layout.preview_rect.x + 50, layout.transport_y, 70, 28),
+                relative_rect=pygame.Rect(layout.preview_rect.x + 50, layout.transport_y, 112, 28),
                 text="Play",
                 manager=self.manager,
             )
         )
         self.next_button = self._track(
             elements.UIButton(
-                relative_rect=pygame.Rect(layout.preview_rect.x + 128, layout.transport_y, 42, 28),
+                relative_rect=pygame.Rect(layout.preview_rect.x + 170, layout.transport_y, 42, 28),
                 text=">",
                 manager=self.manager,
             )
         )
         self._track(
             elements.UILabel(
-                relative_rect=pygame.Rect(layout.preview_rect.x + 180, layout.transport_y, 46, 28),
+                relative_rect=pygame.Rect(layout.preview_rect.x + 222, layout.transport_y, 46, 28),
                 text="Frame",
                 manager=self.manager,
             )
         )
         self.frame_entry = self._track(
             elements.UITextEntryLine(
-                relative_rect=pygame.Rect(layout.preview_rect.x + 232, layout.transport_y, 62, 28),
+                relative_rect=pygame.Rect(layout.preview_rect.x + 274, layout.transport_y, 62, 28),
                 manager=self.manager,
                 initial_text=str(self.current_frame),
             )
@@ -399,9 +409,9 @@ class ViewerApp:
         self.frame_label = self._track(
             elements.UILabel(
                 relative_rect=pygame.Rect(
-                    layout.preview_rect.x + 304,
+                    layout.preview_rect.x + 346,
                     layout.transport_y,
-                    max(100, layout.preview_rect.width - 304),
+                    max(100, layout.preview_rect.width - 346),
                     28,
                 ),
                 text="0 / 0",
@@ -409,10 +419,25 @@ class ViewerApp:
             )
         )
 
-    def _raise_header_controls(self) -> None:
-        for element in self.static_elements:
-            if hasattr(element, "change_layer"):
-                element.change_layer(100)
+    def _raise_event_dropdown(self) -> None:
+        self._raise_dropdown(self.event_dropdown)
+
+    def _raise_dropdown(self, dropdown: Any) -> None:
+        if hasattr(dropdown, "change_layer"):
+            dropdown.change_layer(1000)
+
+    def _raise_clicked_dropdown(self, pos: tuple[int, int]) -> None:
+        dropdowns = [self.event_dropdown]
+        dropdowns.extend(
+            control.widget
+            for control in (*self.command_controls, *self.controls)
+            if control.field.kind in {"enum", "bool"}
+        )
+        for dropdown in dropdowns:
+            rect = getattr(dropdown, "rect", None)
+            if rect is not None and rect.collidepoint(pos):
+                self._raise_dropdown(dropdown)
+                return
 
     def _resize(self, size: tuple[int, int]) -> None:
         self.window_size = (max(640, size[0]), max(420, size[1]))
@@ -427,16 +452,16 @@ class ViewerApp:
                 self.connection.connect(self.ip_entry.get_text().strip())
             elif event.ui_element == self.disconnect_button:
                 self.connection.disconnect()
-            elif event.ui_element == self.render_button:
-                self._render_selected()
             elif event.ui_element == self.publish_button:
                 self._publish_selected()
+            elif event.ui_element == self.rebuild_button:
+                self._rebuild_renderer()
             elif event.ui_element == self.prev_button:
                 self._step_frame(-1)
             elif event.ui_element == self.next_button:
                 self._step_frame(1)
             elif event.ui_element == self.play_button:
-                self._toggle_playback()
+                self._render_or_toggle_playback()
         elif event.type == gui.UI_DROP_DOWN_MENU_CHANGED:
             if event.ui_element == self.event_dropdown:
                 self._select_event(self._event_by_label(self._dropdown_text(event.text)))
@@ -469,7 +494,7 @@ class ViewerApp:
         self.playing = False
         self.play_accum = 0.0
         self._rebuild_form()
-        self._raise_header_controls()
+        self._raise_event_dropdown()
         self._update_frame_controls()
         self._refresh_preview_text()
         self.needs_redraw = True
@@ -698,6 +723,10 @@ class ViewerApp:
 
     def _refresh_preview_text(self) -> None:
         try:
+            signature = self._render_signature()
+            if signature != self.rendered_signature:
+                self.render_dirty = True
+                self.playing = False
             payload = payload_bytes_for_event(
                 self.selected_event,
                 command_values=self._command_values(),
@@ -720,6 +749,7 @@ class ViewerApp:
             self.result_label.set_text("")
         except Exception as exc:
             self._show_error("Input error", exc)
+        self._update_frame_controls()
         self.needs_redraw = True
 
     def _render_selected(self) -> None:
@@ -739,10 +769,23 @@ class ViewerApp:
             self.playing = False
             self.play_accum = 0.0
             self._set_frame(0)
+            self.rendered_signature = self._render_signature()
+            self.render_dirty = False
             self.result_label.set_text(f"Rendered {self._frame_count()} frames")
         except Exception as exc:
             self.preview_surface = None
             self._show_error("Render error", exc)
+        self.needs_redraw = True
+
+    def _rebuild_renderer(self) -> None:
+        try:
+            renderer_binary(Path(__file__).resolve().parents[2], force_rebuild=True)
+            self.result_label.set_text("Renderer rebuilt")
+            self.render_dirty = True
+            self.playing = False
+            self._update_frame_controls()
+        except Exception as exc:
+            self._show_error("Rebuild error", exc)
         self.needs_redraw = True
 
     def _frame_image(self, frame: int) -> Any:
@@ -794,6 +837,18 @@ class ViewerApp:
             self.result_label.set_text("Invalid frame")
             self.needs_redraw = True
 
+    def _render_or_toggle_playback(self) -> None:
+        if self.render_dirty or self.trace is None:
+            self._render_selected()
+            if self.trace is None or self.render_dirty:
+                return
+            self.playing = True
+            self.play_accum = 0.0
+            self._update_frame_controls()
+            self.needs_redraw = True
+            return
+        self._toggle_playback()
+
     def _toggle_playback(self) -> None:
         if self.trace is None:
             return
@@ -823,13 +878,52 @@ class ViewerApp:
     def _update_frame_controls(self) -> None:
         count = self._frame_count()
         if hasattr(self, "play_button"):
-            self.play_button.set_text("Pause" if self.playing else "Play")
+            if not self.selected_event.renderable:
+                self.play_button.set_text("No Preview")
+                self.play_button.disable()
+                self._set_play_button_state("disabled")
+            else:
+                if not self.play_button.is_enabled:
+                    self.play_button.enable()
+                if self.render_dirty or self.trace is None:
+                    self.play_button.set_text("Render + Play")
+                    self._set_play_button_state("dirty")
+                else:
+                    self.play_button.set_text("Pause" if self.playing else "Play")
+                    self._set_play_button_state("ready")
         if hasattr(self, "frame_label"):
             self.frame_label.set_text(f"{self.current_frame} / {max(0, count - 1)}")
         if hasattr(self, "frame_entry"):
             self._updating_frame_entry = True
             self.frame_entry.set_text(str(self.current_frame))
             self._updating_frame_entry = False
+
+    def _set_play_button_state(self, state: str) -> None:
+        if self._play_button_state == state:
+            return
+        self._play_button_state = state
+        palette = {
+            "dirty": ((145, 46, 42), (175, 61, 55), (104, 31, 31)),
+            "ready": ((38, 118, 73), (48, 145, 88), (31, 88, 56)),
+            "disabled": ((55, 58, 62), (55, 58, 62), (55, 58, 62)),
+        }[state]
+        normal, hovered, selected = (self.pygame.Color(*item) for item in palette)
+        self.play_button.colours["normal_bg"] = normal
+        self.play_button.colours["hovered_bg"] = hovered
+        self.play_button.colours["selected_bg"] = selected
+        self.play_button.colours["active_bg"] = selected
+        self.play_button.rebuild()
+
+    def _render_signature(self) -> str:
+        return json.dumps(
+            {
+                "event": self.selected_event.label,
+                "command": self._command_values(),
+                "payload": self._payload_values(),
+            },
+            sort_keys=True,
+            default=str,
+        )
 
     def _publish_selected(self) -> None:
         try:

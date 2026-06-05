@@ -256,11 +256,17 @@ this simple effect family.
 
 `OrbitRing` is an effect-layer radial-band orbit. It gates pixels by a
 strip-local `radius` and `radialWidth`, then draws one or more angular comet
-lobes with optional trailing wake.
+lobes with optional trailing wake. When `trail` is nonzero, the angular comet
+uses a directional envelope rather than a symmetric head plus a separate wake,
+which avoids split sweep heads on the 16-spoke surface. Trail pixels can use
+deterministic per-LED sparkle for brightness and hue jitter, and the radial
+center can drift outward or inward over the animation lifetime.
 
 `Lighthouse` is an effect-layer rotating beam. It is related to the bring-up
 spoke sweep but tuned as a show effect: broad angular head, optional spoke
-trail, and optional inner/outer ring bounds.
+trail, and optional inner/outer ring bounds. The effective beam width is
+clamped to at least three spokes on the current 16-spoke surface so narrow
+settings do not split into separate sweep heads.
 
 `Cymatic` is an effect-layer wave-interference field using a small fixed set of
 virtual sources. It uses approximate Cartesian distance from the annular field
@@ -277,7 +283,9 @@ leans rather than matching the existing straight sine trace.
 
 `PolarLattice` is a transient crossed-field pattern. It mixes radial and
 angular standing waves, then applies contrast so the result can read as rings,
-spokes, or a lattice depending on `mix`.
+spokes, or a lattice depending on `mix`. The angular standing wave stays phase
+stable while `speed` moves the radial phase through it, avoiding a rotating
+interference read.
 
 `Bolt` is an effect-layer deterministic jagged path. It selects a seed spoke,
 then applies bounded hash-derived segment offsets and a long bend along the

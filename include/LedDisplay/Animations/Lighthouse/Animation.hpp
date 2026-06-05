@@ -31,8 +31,8 @@ struct Lighthouse {
             detail::nonzero(ctx.clock.durationMs, defaultLifetimeMs);
         const auto center =
             detail::progress8(ctx.clock.elapsedMs, duration, config.cycles);
-        const auto beamWidth = angleWidth(config.beamWidth);
-        const auto trailWidth = angleWidth(config.trailSpokes);
+        const auto beamWidth = beamAngleWidth(config.beamWidth);
+        const auto trailWidth = trailAngleWidth(config.trailSpokes);
         const auto hue = static_cast<uint8_t>(config.hue + ctx.hueOffset);
         const auto outer = config.outerRing == 0
                                ? static_cast<uint8_t>(Config::ringCount - 1U)
@@ -67,36 +67,51 @@ struct Lighthouse {
     }
 
   private:
-    [[nodiscard]] static constexpr uint8_t angleWidth(uint8_t spokes) {
+    [[nodiscard]] static constexpr uint8_t beamAngleWidth(uint8_t spokes) {
         const auto resolvedSpokes = std::max<uint8_t>(spokes, minimumBeamWidth);
+        return spokeCountToAngleWidth(resolvedSpokes);
+    }
+
+    [[nodiscard]] static constexpr uint8_t trailAngleWidth(uint8_t spokes) {
+        if (spokes == 0) {
+            return 0;
+        }
+        return spokeCountToAngleWidth(spokes);
+    }
+
+    [[nodiscard]] static constexpr uint8_t
+    spokeCountToAngleWidth(uint8_t spokes) {
         return static_cast<uint8_t>(std::max<uint16_t>(
-            1U, (static_cast<uint16_t>(resolvedSpokes) * detail::simpleQ8Unit) /
+            1U, (static_cast<uint16_t>(spokes) * detail::simpleQ8Unit) /
                     Config::spokeCount));
+    }
+
+    [[nodiscard]] static constexpr uint8_t spokeWidth() {
+        return static_cast<uint8_t>(
+            std::max<uint16_t>(1U, detail::simpleQ8Unit / Config::spokeCount));
     }
 
     [[nodiscard]] static constexpr uint8_t beamScale(uint8_t theta,
                                                      uint8_t center,
                                                      uint8_t beamWidth,
                                                      uint8_t trailWidth) {
-        const auto head = detail::pulseByDistance8(
-            Primitives::FieldMath::angularDistance(theta, center), beamWidth);
-        if (trailWidth == 0) {
-            return head;
-        }
         const auto behind = detail::directionalBehind(center, theta);
-        const auto trailEnd =
+        const auto ahead = detail::directionalBehind(theta, center);
+        const auto leadWidth = std::min<uint8_t>(beamWidth, spokeWidth());
+        const auto leadScale = detail::pulseByDistance8(ahead, leadWidth);
+        const auto tailWidth = trailWidth == 0 ? spokeWidth() : trailWidth;
+        const auto envelopeWidth =
             std::min<uint16_t>(detail::simpleFullScale,
-                               static_cast<uint16_t>(beamWidth) + trailWidth);
-        if (behind <= beamWidth || behind >= trailEnd) {
-            return head;
+                               static_cast<uint16_t>(beamWidth) + tailWidth);
+        if (behind >= envelopeWidth) {
+            return leadScale;
         }
-        const auto distanceIntoTrail = static_cast<uint8_t>(behind - beamWidth);
-        const auto trailScale = static_cast<uint8_t>(
-            (static_cast<uint16_t>(trailWidth - distanceIntoTrail) *
-             detail::simpleFullScale) /
-            trailWidth);
+        const auto envelopeScale = static_cast<uint8_t>(
+            detail::simpleFullScale -
+            ((static_cast<uint16_t>(behind) * detail::simpleFullScale) /
+             envelopeWidth));
         return std::max<uint8_t>(
-            head, Primitives::FieldMath::smoothstep8(trailScale));
+            leadScale, Primitives::FieldMath::smoothstep8(envelopeScale));
     }
 };
 

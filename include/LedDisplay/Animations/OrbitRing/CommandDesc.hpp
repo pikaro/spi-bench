@@ -35,6 +35,18 @@ inline ReturnCode handleOrbitRingCommand(CommandDesc::ParsedArgs args,
                            "Invalid animation lap count argument");
     FAIL_IF_UNEXPECTED_FWD(trail, detail::optionalU32(args, 8, config.trail),
                            "Invalid animation trail argument");
+    FAIL_IF_UNEXPECTED_FWD(sparkle,
+                           detail::optionalU32(args, 9, config.sparkle),
+                           "Invalid animation sparkle argument");
+    FAIL_IF_UNEXPECTED_FWD(hueJitter,
+                           detail::optionalU32(args, 10, config.hueJitter),
+                           "Invalid animation hue jitter argument");
+    FAIL_IF_UNEXPECTED_FWD(radialDrift,
+                           detail::optionalU32(args, 11, config.radialDrift),
+                           "Invalid animation radial drift argument");
+    FAIL_IF_UNEXPECTED_FWD(
+        radialDirection, detail::optionalU32(args, 12, config.radialDirection),
+        "Invalid animation radial direction argument");
 
     config.hue = detail::clampU8(hue);
     config.value = detail::clampU8(value);
@@ -48,6 +60,11 @@ inline ReturnCode handleOrbitRingCommand(CommandDesc::ParsedArgs args,
     config.laps =
         std::max<uint8_t>(detail::clampU8(laps), OrbitRingCommand::minimumLaps);
     config.trail = detail::clampU8(trail);
+    config.sparkle = detail::clampU8(sparkle);
+    config.hueJitter = detail::clampU8(hueJitter);
+    config.radialDrift = detail::clampU8(radialDrift);
+    config.radialDirection = std::min<uint8_t>(detail::clampU8(radialDirection),
+                                               OrbitRingCommand::radialInward);
 
     return detail::publishCommand(
         OrbitRingCommand::makeCommand(config, 0, detail::clampU16(duration)));
@@ -73,7 +90,15 @@ inline constexpr CommandDesc orbitRingSubcommand = {
              Totem::CommandBackend::detail::arg<uint32_t>(
                  "laps", CommandDesc::ArgRequirement::Optional),
              Totem::CommandBackend::detail::arg<uint32_t>(
-                 "trail", CommandDesc::ArgRequirement::Optional)},
+                 "trail", CommandDesc::ArgRequirement::Optional),
+             Totem::CommandBackend::detail::arg<uint32_t>(
+                 "sparkle", CommandDesc::ArgRequirement::Optional),
+             Totem::CommandBackend::detail::arg<uint32_t>(
+                 "hueJitter", CommandDesc::ArgRequirement::Optional),
+             Totem::CommandBackend::detail::arg<uint32_t>(
+                 "radialDrift", CommandDesc::ArgRequirement::Optional),
+             Totem::CommandBackend::detail::arg<uint32_t>(
+                 "radialDirection", CommandDesc::ArgRequirement::Optional)},
     .handler = handleOrbitRingCommand,
     .subcommands = {},
 };

@@ -318,7 +318,7 @@ Default lifetime: `2400 ms`
 Suggested command:
 
 ```text
-/anim orbit [durationMs] [hue] [value] [radius] [radialWidth] [angularWidth] [comets] [laps] [trail]
+/anim orbit [durationMs] [hue] [value] [radius] [radialWidth] [angularWidth] [comets] [laps] [trail] [sparkle] [hueJitter] [radialDrift] [radialDirection]
 ```
 
 Suggested config:
@@ -333,7 +333,11 @@ struct WIRE_MSG OrbitRingConfig {
     uint8_t angularWidth = 28;
     uint8_t comets = 2;
     uint8_t laps = 1;
-    uint8_t trail = 24;
+    uint8_t trail = 56;
+    uint8_t sparkle = 220;
+    uint8_t hueJitter = 24;
+    uint8_t radialDrift = 48;
+    uint8_t radialDirection = 1;
 };
 ```
 
@@ -341,10 +345,18 @@ Render model:
 
 - Treat `radius` as strip-local Q0.8 radial center.
 - Compute radial pulse with `ringPulseQ8`.
-- Compute angular pulse from distance to each comet center.
+- If `trail = 0`, compute a symmetric angular pulse around each comet center.
+- If `trail` is nonzero, compute a directional comet envelope with a soft
+  leading edge and a fading wake behind the motion direction. Avoid combining a
+  symmetric head with a separate directional trail; that splits into multiple
+  sweep heads on the 16-spoke surface.
+- Apply deterministic per-LED sparkle to trail pixels only. `sparkle` controls
+  the brightness randomization strength and `hueJitter` controls the raw hue
+  deviation width.
+- `radialDrift` moves the radial center during the animation;
+  `radialDirection = 0` keeps the selected lane fixed, `1` travels outward, and
+  `2` travels inward.
 - The final scale is `radialScale * angularScale`.
-- `trail` extends the angular lobe behind motion direction with a linear or
-  smoothstep falloff.
 
 Acceptance:
 
@@ -374,7 +386,7 @@ struct WIRE_MSG LighthouseConfig {
     uint8_t hue = 144;
     uint8_t saturation = 255;
     uint8_t value = 220;
-    uint8_t beamWidth = 2;
+    uint8_t beamWidth = 3;
     uint8_t trailSpokes = 4;
     uint8_t cycles = 1;
     uint8_t innerRing = 0;
@@ -385,11 +397,14 @@ struct WIRE_MSG LighthouseConfig {
 Render model:
 
 - Derive the current beam center from elapsed time and `cycles`.
-- Draw a broad angular pulse around the current spoke.
+- Draw a directional angular envelope around the current spoke. Clamp the
+  effective beam width to at least three spokes because one- and two-spoke heads
+  alias into split sweeps on the current 16-spoke surface.
 - Apply radial gating from `innerRing` to `outerRing`; `outerRing = 0` means
   the full strip.
-- Apply a spoke trail behind the current beam using angular distance in the
-  direction of motion.
+- Apply a fading spoke trail behind the current beam using angular distance in
+  the direction of motion. `trailSpokes = 0` disables the intentional trail,
+  leaving only edge anti-aliasing.
 
 Acceptance:
 
@@ -562,10 +577,12 @@ struct WIRE_MSG PolarLatticeConfig {
 
 Render model:
 
-- Combine a radial wave and an angular wave.
+- Combine an animated radial wave and a fixed angular standing wave.
 - `mix = 0` means mostly rings, `255` means mostly spokes, middle values
   create a lattice.
-- Use `FieldMath::standingWave()` where possible.
+- Keep the angular phase stable by default. Let `speed` move the radial phase
+  through the fixed angular lattice instead of rotating both fields against each
+  other.
 - Apply `contrast` after mixing so the pattern is crisp on low brightness.
 
 Acceptance:

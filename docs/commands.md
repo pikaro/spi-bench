@@ -161,13 +161,18 @@ Useful LED animation commands:
     Shutter arguments are `durationMs`, `hue`, `value`, `segments`, `openPct`,
     `edgeWidth`, `rotationCycles`, `mode`. Use `mode=0` for a fixed aperture
     edge and nonzero `mode` for opening/closing modulation.
-    `!master /anim orbit 2400 96 220 128 36 28 2 1 24`
+    `!master /anim orbit 2400 96 220 128 36 28 2 1 56 220 24 48 1`
     Orbit arguments are `durationMs`, `hue`, `value`, `radius`, `radialWidth`,
-    `angularWidth`, `comets`, `laps`, `trail`.
-    `!master /anim lighthouse 3000 144 220 2 4 1 0 0`
+    `angularWidth`, `comets`, `laps`, `trail`, `sparkle`, `hueJitter`,
+    `radialDrift`, `radialDirection`. With a nonzero `trail`, the comet
+    footprint is directional; `sparkle` randomizes trail brightness,
+    `hueJitter` sets the per-pixel hue-deviation width, and `radialDirection`
+    is `0` fixed, `1` outward, or `2` inward.
+    `!master /anim lighthouse 3000 144 220 3 4 1 0 0`
     Lighthouse arguments are `durationMs`, `hue`, `value`, `beamWidth`,
-    `trailSpokes`, `cycles`, `innerRing`, `outerRing`. `outerRing=0` means the
-    full strip.
+    `trailSpokes`, `cycles`, `innerRing`, `outerRing`. `beamWidth` is clamped
+    to at least `3` spokes on the 16-spoke surface to avoid split/aliased
+    sweep heads. `outerRing=0` means the full strip.
     `!master /anim cymatic 3200 176 180 0 36 96 180 16`
     Cymatic arguments are `durationMs`, `hue`, `value`, `sourceMode`,
     `wavelength`, `speed`, `contrast`, `hueStep`.
@@ -180,7 +185,8 @@ Useful LED animation commands:
     `speed`, `outerOrigin`, `spokePhase`.
     `!master /anim lattice 2400 64 170 4 3 96 128 160`
     Lattice arguments are `durationMs`, `hue`, `value`, `radialMode`,
-    `angularMode`, `speed`, `mix`, `contrast`.
+    `angularMode`, `speed`, `mix`, `contrast`. `speed` moves the radial phase;
+    the angular lattice stays phase-stable.
     `!master /anim bolt 900 24 255 1 1 1 0 1`
     Bolt arguments are `durationMs`, `hue`, `value`, `width`, `jitter`,
     `forks`, `seed`, `outerOrigin`.

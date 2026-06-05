@@ -8,7 +8,7 @@
     "hue": 144,
     "saturation": 255,
     "value": 220,
-    "beamWidth": 2,
+    "beamWidth": 3,
     "trailSpokes": 4,
     "cycles": 1,
     "innerRing": 0,

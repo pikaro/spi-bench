@@ -397,6 +397,23 @@ applyOrbitRingConfig(Totem::LedDisplay::Animations::OrbitRingConfig &config,
             if (!readJsonInteger(value, config.trail, error, fieldName)) {
                 return false;
             }
+        } else if (fieldName == "sparkle") {
+            if (!readJsonInteger(value, config.sparkle, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "hueJitter") {
+            if (!readJsonInteger(value, config.hueJitter, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "radialDrift") {
+            if (!readJsonInteger(value, config.radialDrift, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "radialDirection") {
+            if (!readJsonInteger(value, config.radialDirection, error,
+                                 fieldName)) {
+                return false;
+            }
         } else {
             error = "Unknown config field for OrbitRing: " + fieldName;
             return false;

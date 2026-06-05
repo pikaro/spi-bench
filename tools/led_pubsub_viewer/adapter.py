@@ -12,6 +12,8 @@ from .catalog import ANIMATION_COMMAND_MODEL, EventDefinition, command_defaults,
 
 
 ANIMATION_COMMAND_PAYLOAD_BYTES = 32
+DEFAULT_RENDER_FPS = 125
+DEFAULT_PREVIEW_FRAMES = 125
 
 
 class RenderError(RuntimeError):
@@ -81,12 +83,24 @@ def payload_bytes_for_event(
     return encode_model(event.payload_model, values)
 
 
+def frames_for_lifetime_ms(
+    lifetime_ms: int,
+    *,
+    fps: int = DEFAULT_RENDER_FPS,
+    default_frames: int = DEFAULT_PREVIEW_FRAMES,
+) -> str:
+    if lifetime_ms <= 0:
+        return f"0:{max(0, default_frames - 1)}"
+    last_frame = max(1, (lifetime_ms * fps + 999) // 1000)
+    return f"0:{last_frame}"
+
+
 def renderer_json_for_event(
     event: EventDefinition,
     *,
     command_values: dict[str, object] | None = None,
     payload_values: dict[str, object] | None = None,
-    frames: str = "0:180",
+    frames: str | None = None,
     mode: str = "pipeline",
 ) -> dict[str, object]:
     if not event.renderable or event.animation_name is None:
@@ -98,15 +112,43 @@ def renderer_json_for_event(
     config = payload_defaults(event)
     if payload_values:
         config.update(payload_values)
+    lifetime_ms = int(command.get("lifetimeMs") or 0)
 
     return {
         "animation": event.animation_name,
-        "duration_ms": int(command.get("lifetimeMs") or 0),
+        "duration_ms": lifetime_ms,
         "layer": str(command.get("layer") or "Effect"),
-        "frames": frames,
+        "frames": frames or frames_for_lifetime_ms(lifetime_ms),
         "mode": mode,
         "config": config,
     }
+
+
+def renderer_binary(root_path: Path, *, force_rebuild: bool = False) -> Path:
+    binary = root_path / ".build" / "led-render" / "led-render"
+    if binary.exists() and not force_rebuild:
+        return binary
+
+    command = [str(root_path / "bin" / "led-render-build")]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=root_path,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        stdout = exc.stdout if isinstance(exc.stdout, str) else ""
+        stderr = exc.stderr if isinstance(exc.stderr, str) else ""
+        raise RenderError(
+            f"renderer build failed with exit code {exc.returncode}: {' '.join(command)}",
+            stdout=stdout,
+            stderr=stderr,
+        ) from exc
+
+    built_path = Path(result.stdout.strip().splitlines()[-1]) if result.stdout.strip() else binary
+    return built_path if built_path.exists() else binary
 
 
 def render_event_trace(
@@ -114,7 +156,7 @@ def render_event_trace(
     *,
     command_values: dict[str, object] | None = None,
     payload_values: dict[str, object] | None = None,
-    frames: str = "0:180",
+    frames: str | None = None,
     mode: str = "pipeline",
     root: str | Path | None = None,
 ) -> Trace:
@@ -130,8 +172,9 @@ def render_event_trace(
     )
     config_path.write_text(json.dumps(config, indent=2, sort_keys=True), encoding="utf-8")
     root_path = Path(root) if root is not None else Path(__file__).resolve().parents[2]
+    renderer = renderer_binary(root_path)
     command = [
-        str(root_path / "bin" / "led-render"),
+        str(renderer),
         "--config",
         str(config_path),
         "--output",

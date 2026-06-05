@@ -41,8 +41,7 @@ struct PolarLattice {
                 const auto angular =
                     Primitives::FieldMath::sine8Q8(static_cast<uint16_t>(
                         (static_cast<uint32_t>(point.theta) *
-                         config.angularMode * detail::simpleQ8Unit) -
-                        progress));
+                         config.angularMode * detail::simpleQ8Unit)));
                 const auto mixed =
                     Primitives::FieldMath::lerp8(radial, angular, config.mix);
                 const auto contrasted =

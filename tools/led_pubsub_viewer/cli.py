@@ -144,7 +144,7 @@ def build_parser() -> argparse.ArgumentParser:
     render_json = sub.add_parser("render-json")
     render_json.add_argument("event")
     render_json.add_argument("--set", action="append", default=[])
-    render_json.add_argument("--frames", default="0:180")
+    render_json.add_argument("--frames", default=None)
     render_json.add_argument("--mode", choices=["pipeline", "animation"], default="pipeline")
     render_json.set_defaults(func=cmd_render_json)
 

@@ -15,10 +15,11 @@ struct WIRE_MSG FftReactiveConfig {
     uint8_t baseValue = 20;
     uint8_t radialMode = 2;
     uint8_t angularMode = 3;
-    uint8_t symmetry = 4;
+    uint8_t symmetry = 1;
     uint8_t contrast = 180;
     uint8_t peakSensitivity = 96;
     uint8_t flowSpeed = 40;
+    uint8_t hueModulation = 192;
 };
 
 struct FftReactiveSpec {

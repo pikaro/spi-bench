@@ -14,7 +14,10 @@ template <> struct FieldList<::Totem::LedDisplay::Animations::CenterWaveConfig> 
         Field<&Type::value>{"value"},
         Field<&Type::rise>{"rise"},
         Field<&Type::peak>{"peak"},
-        Field<&Type::wake>{"wake"}
+        Field<&Type::wake>{"wake"},
+        Field<&Type::peakDelta>{"peakDelta"},
+        Field<&Type::speedDelta>{"speedDelta"},
+        Field<&Type::spokeModulo>{"spokeModulo"}
     );
 };
 

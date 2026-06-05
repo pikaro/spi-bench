@@ -3,6 +3,8 @@ set -euo pipefail
 
 ROOT=$(git rev-parse --show-toplevel)
 "${ROOT}/bin/led-view" \
-    --glare \
+    --bloom \
     --layout radial \
+    --scale 10 \
+    --max-fps 30 \
     "$@"

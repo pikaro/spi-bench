@@ -12,6 +12,9 @@ enum class AnimationCommandType : uint8_t {
     SetHueOffset,
     SetRotationOffset,
     SetBrightness,
+    SetLayerActive,
+    SetLayerOpacity,
+    FadeLayerSwap,
 };
 
 enum class AnimationKind : uint8_t {

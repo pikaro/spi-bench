@@ -100,6 +100,7 @@ def cmd_capture(args: argparse.Namespace) -> int:
             layout=args.layout,
             spacing=args.spacing,
             show_frame_label=not args.no_frame_label,
+            brightness=args.brightness,
         )
     print(args.output)
     return 0
@@ -118,6 +119,7 @@ def cmd_view(args: argparse.Namespace) -> int:
                 layout=args.layout,
                 spacing=args.spacing,
                 show_frame_label=not args.no_frame_label,
+                brightness=args.brightness,
             )
             print(args.capture)
             return 0
@@ -125,11 +127,13 @@ def cmd_view(args: argparse.Namespace) -> int:
             trace,
             plane=args.plane,
             fps=args.fps,
+            max_fps=args.max_fps,
             scale=args.scale,
             glare=args.glare,
             layout=args.layout,
             spacing=args.spacing,
             show_frame_label=not args.no_frame_label,
+            brightness=args.brightness,
         )
     return 0
 
@@ -192,7 +196,13 @@ def build_parser() -> argparse.ArgumentParser:
     capture_parser.add_argument("--scale", type=int, default=12)
     capture_parser.add_argument("--layout", choices=("heatmap", "radial"), default="heatmap")
     capture_parser.add_argument("--spacing", type=float, default=1.35)
-    capture_parser.add_argument("--glare", action="store_true")
+    capture_parser.add_argument(
+        "--bloom",
+        "--glare",
+        dest="glare",
+        action="store_true",
+    )
+    capture_parser.add_argument("--brightness", type=int, default=255)
     capture_parser.add_argument("--no-frame-label", action="store_true")
     capture_parser.set_defaults(func=cmd_capture)
 
@@ -200,10 +210,17 @@ def build_parser() -> argparse.ArgumentParser:
     view.add_argument("trace")
     view.add_argument("--plane", default="rgb_final")
     view.add_argument("--fps", type=float)
+    view.add_argument("--max-fps", type=float, default=60.0)
     view.add_argument("--scale", type=int, default=12)
     view.add_argument("--layout", choices=("heatmap", "radial"), default="heatmap")
     view.add_argument("--spacing", type=float, default=1.35)
-    view.add_argument("--glare", action="store_true")
+    view.add_argument(
+        "--bloom",
+        "--glare",
+        dest="glare",
+        action="store_true",
+    )
+    view.add_argument("--brightness", type=int, default=255)
     view.add_argument("--no-frame-label", action="store_true")
     view.add_argument("--capture")
     view.add_argument("--frame", type=int, default=0)

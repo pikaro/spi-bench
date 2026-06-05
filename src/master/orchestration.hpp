@@ -15,6 +15,7 @@
 #include "LedDisplay/Animations/WheelIndicator/Config.hpp"
 #include "LedDisplay/Interfaces/AnimationCommand.hpp"
 #include "LedDisplay/Interfaces/AnimationCommandFactory.hpp"
+#include "LedDisplay/Interfaces/LayerControl.hpp"
 #include "LedPwm/Interfaces/CommandEvent.hpp"
 #include "LedPwm/Interfaces/CommandEventFactory.hpp"
 #include "LedPwm/Interfaces/Types.hpp"
@@ -171,12 +172,25 @@ struct BeatMapping {
     bool logStateTransitions = true;
 };
 
+struct LayerMapping {
+    bool publishStartupState = true;
+    uint32_t retryIntervalMs = 5000;
+    bool backgroundActive = false;
+    bool fftActive = true;
+    bool fftAltActive = false;
+    bool effectActive = true;
+    bool transientEffectActive = true;
+    bool wheelActive = false;
+    bool debugActive = true;
+};
+
 struct Config {
     WheelMapping wheel{};
     FftFieldMapping fftField{};
     DropWaveMapping dropWave{};
     PeakWaveMapping peakWave{};
     BeatMapping beat{};
+    LayerMapping layers{};
     IoLedMapping ioLed{};
     BellMapping bell{};
 };
@@ -214,17 +228,20 @@ inline bool calibrateAudioCommandRegistered = false;
 inline Angle<uint16_t> wheelOffset{};
 inline bool wheelOffsetDirty = false;
 inline bool wheelIndicatorDirty = false;
+inline bool layerStartupStatePublished = false;
 inline bool ioStartupPublished = false;
 inline bool fftFieldPublished = false;
 inline bool fftFieldSuppressed = false;
 inline uint32_t lastWheelPublishMs = 0;
+inline uint32_t lastLayerStartupStatePublishMs = 0;
 inline uint32_t lastIoStartupPublishMs = 0;
 inline uint32_t lastFftFieldPublishMs = 0;
 inline uint32_t lastBellSinelonMs = 0;
 inline uint32_t lastAnyPeakMs = 0;
 inline uint32_t lastDropWaveMs = 0;
 inline uint32_t lastBeatSequence = 0;
-inline Totem::Audio::BeatEventKind lastBeatKind = Totem::Audio::BeatEventKind::Lost;
+inline Totem::Audio::BeatEventKind lastBeatKind =
+    Totem::Audio::BeatEventKind::Lost;
 inline std::array<uint32_t, Totem::Audio::peakGroupCount> lastPeakWaveMs{};
 inline std::array<uint32_t, Totem::Audio::peakGroupCount> lastIoPeakMs{};
 inline uint32_t randomState = 0xC0FFEE23UL;
@@ -301,6 +318,37 @@ inline Totem::LedPwm::Pulse makePulse(const BulbPulseProfile &profile,
 
 inline ReturnCode publishIoCommand(Totem::LedPwm::CommandEvent event) {
     return Totem::LedPwm::publishCommandEvent(event);
+}
+
+inline ReturnCode publishLayerActive(Totem::LedDisplay::Layer layer,
+                                     bool active) {
+    FAIL_IF_UNEXPECTED_FWD(
+        cmd, Totem::LedDisplay::makeLayerActiveCommand(layer, active),
+        "Failed to build orchestrated layer active command");
+    return Totem::LedDisplay::publishAnimationCommand(cmd);
+}
+
+inline ReturnCode publishLayerStartupState() {
+    auto ret = OK();
+    ret.combine(publishLayerActive(Totem::LedDisplay::Layer::Background,
+                                   config.layers.backgroundActive));
+    ret.combine(publishLayerActive(Totem::LedDisplay::Layer::Fft,
+                                   config.layers.fftActive));
+    ret.combine(publishLayerActive(Totem::LedDisplay::Layer::FftAlt,
+                                   config.layers.fftAltActive));
+    ret.combine(publishLayerActive(Totem::LedDisplay::Layer::Effect,
+                                   config.layers.effectActive));
+    ret.combine(publishLayerActive(Totem::LedDisplay::Layer::TransientEffect,
+                                   config.layers.transientEffectActive));
+    ret.combine(publishLayerActive(Totem::LedDisplay::Layer::Wheel,
+                                   config.layers.wheelActive));
+    ret.combine(publishLayerActive(Totem::LedDisplay::Layer::Debug,
+                                   config.layers.debugActive));
+    if (!ret.ok()) {
+        return ret;
+    }
+    _log_i("Published LED layer startup state");
+    return OK();
 }
 
 inline ReturnCode publishIoStartupState(bool firstPublish) {
@@ -458,10 +506,9 @@ onButtonEnvelope(void * /*unused*/,
 inline ReturnCode
 onAnimationEnvelope(void * /*unused*/,
                     const Totem::PubSubBackend::Envelope &envelope) {
-    FAIL_IF_UNEXPECTED_FWD(cmd,
-                           envelope.getPayloadAs<
-                               Totem::LedDisplay::AnimationCommand>(),
-                           "Failed to decode orchestrated animation command");
+    FAIL_IF_UNEXPECTED_FWD(
+        cmd, envelope.getPayloadAs<Totem::LedDisplay::AnimationCommand>(),
+        "Failed to decode orchestrated animation command");
 
     const auto stopsFftField =
         cmd.type == Totem::LedDisplay::AnimationCommandType::Stop &&
@@ -585,11 +632,10 @@ inline ReturnCode begin() {
         detail::animationSubscription = sub;
     }
     if (!detail::calibrateAudioCommandRegistered) {
-        FAIL_IF_UNEXPECTED_FWD(
-            commandKey,
-            CommandRegistrarService::get().registerCommand(
-                detail::calibrateAudioCmd),
-            "Failed to register /calibrate-audio command");
+        FAIL_IF_UNEXPECTED_FWD(commandKey,
+                               CommandRegistrarService::get().registerCommand(
+                                   detail::calibrateAudioCmd),
+                               "Failed to register /calibrate-audio command");
         (void)commandKey;
         detail::calibrateAudioCommandRegistered = true;
     }
@@ -841,6 +887,23 @@ inline ReturnCode work(uint32_t nowMs, bool allowNormalOperation = true) {
 
     if (!allowNormalOperation) {
         return OK();
+    }
+
+    const auto layerStartupElapsed =
+        nowMs - detail::lastLayerStartupStatePublishMs;
+    const auto layerStartupRetryDue =
+        !detail::layerStartupStatePublished &&
+        (detail::lastLayerStartupStatePublishMs == 0 ||
+         (config.layers.retryIntervalMs != 0 &&
+          layerStartupElapsed >= config.layers.retryIntervalMs));
+    if (config.layers.publishStartupState && layerStartupRetryDue) {
+        const auto publishResult = detail::publishLayerStartupState();
+        detail::lastLayerStartupStatePublishMs = nowMs;
+        if (!publishResult.ok()) {
+            _log_w("Failed to publish LED layer startup state; retrying later");
+            return OK();
+        }
+        detail::layerStartupStatePublished = true;
     }
 
     const auto ioStartupElapsed = nowMs - detail::lastIoStartupPublishMs;

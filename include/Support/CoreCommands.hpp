@@ -11,6 +11,7 @@
 #include "LedDisplay/Animations/SpokeSweep/CommandDesc.hpp"
 #include "LedDisplay/Animations/WheelIndicator/CommandDesc.hpp"
 #include "LedDisplay/Commands/DisplayCommandDesc.hpp"
+#include "LedDisplay/Commands/LayerCommandDesc.hpp"
 #include "Macros/Facade.hpp"
 #include "Services/Commands.hpp"
 #include "Types/Error.hpp"
@@ -120,6 +121,12 @@ inline ReturnCode handleDispRoot(CommandDesc::ParsedArgs /*unused*/,
     return OK();
 }
 
+inline ReturnCode handleLayerRoot(CommandDesc::ParsedArgs /*unused*/,
+                                  void * /*unused*/) {
+    _log_i("Use /layer active|opacity|swap");
+    return OK();
+}
+
 } // namespace Totem::Support::detail
 
 inline constinit std::array<CommandDesc, 9> animSubcommands{{
@@ -156,6 +163,20 @@ inline constinit CommandDesc dispCmd = {
     .subcommands = dispSubcommands,
 };
 
+inline constinit std::array<CommandDesc, 3> layerSubcommands{{
+    Totem::LedDisplay::Commands::layerActiveSubcommand,
+    Totem::LedDisplay::Commands::layerOpacitySubcommand,
+    Totem::LedDisplay::Commands::layerSwapSubcommand,
+}};
+
+inline constinit CommandDesc layerCmd = {
+    .name = "layer",
+    .description = "Publish LED layer controls over PubSub",
+    .args = {},
+    .handler = Totem::Support::detail::handleLayerRoot,
+    .subcommands = layerSubcommands,
+};
+
 inline constinit CommandDesc helpCmd = {
     .needsContext = true,
     .name = "help",
@@ -178,6 +199,9 @@ register_core_commands(const Totem::CommandBackend::detail::Store &store) {
     FAIL_IF_UNEXPECTED_FWD(dispKey, reg.registerCommand(dispCmd),
                            "Failed to register disp command");
     (void)dispKey;
+    FAIL_IF_UNEXPECTED_FWD(layerKey, reg.registerCommand(layerCmd),
+                           "Failed to register layer command");
+    (void)layerKey;
     // Command contexts are void*; /help casts this back to const and only
     // reads the store.
     auto *helpContext =

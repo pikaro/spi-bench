@@ -29,6 +29,15 @@ inline ReturnCode handleCenterWaveCommand(CommandDesc::ParsedArgs args,
                            "Invalid animation peak argument");
     FAIL_IF_UNEXPECTED_FWD(wake, detail::optionalU32(args, 5, config.wake),
                            "Invalid animation wake argument");
+    FAIL_IF_UNEXPECTED_FWD(peakDelta,
+                           detail::optionalU32(args, 6, config.peakDelta),
+                           "Invalid animation peak delta argument");
+    FAIL_IF_UNEXPECTED_FWD(speedDelta,
+                           detail::optionalU32(args, 7, config.speedDelta),
+                           "Invalid animation speed delta argument");
+    FAIL_IF_UNEXPECTED_FWD(spokeModulo,
+                           detail::optionalU32(args, 8, config.spokeModulo),
+                           "Invalid animation spoke modulo argument");
 
     config.hue = detail::clampU8(hue);
     config.value = detail::clampU8(value);
@@ -36,6 +45,10 @@ inline ReturnCode handleCenterWaveCommand(CommandDesc::ParsedArgs args,
     config.peak = std::max<uint8_t>(detail::clampU8(peak),
                                     CenterWaveCommand::minimumPeakRings);
     config.wake = detail::clampU8(wake);
+    config.peakDelta = detail::clampU8(peakDelta);
+    config.speedDelta = detail::clampU8(speedDelta);
+    config.spokeModulo = std::max<uint8_t>(
+        detail::clampU8(spokeModulo), CenterWaveCommand::minimumSpokeModulo);
 
     return detail::publishCommand(
         CenterWaveCommand::makeCommand(config, 0, detail::clampU16(duration)));
@@ -55,7 +68,13 @@ inline constexpr CommandDesc centerWaveSubcommand = {
              Totem::CommandBackend::detail::arg<uint32_t>(
                  "peak", CommandDesc::ArgRequirement::Optional),
              Totem::CommandBackend::detail::arg<uint32_t>(
-                 "wake", CommandDesc::ArgRequirement::Optional)},
+                 "wake", CommandDesc::ArgRequirement::Optional),
+             Totem::CommandBackend::detail::arg<uint32_t>(
+                 "peakDelta", CommandDesc::ArgRequirement::Optional),
+             Totem::CommandBackend::detail::arg<uint32_t>(
+                 "speedDelta", CommandDesc::ArgRequirement::Optional),
+             Totem::CommandBackend::detail::arg<uint32_t>(
+                 "spokeModulo", CommandDesc::ArgRequirement::Optional)},
     .handler = handleCenterWaveCommand,
     .subcommands = {},
 };

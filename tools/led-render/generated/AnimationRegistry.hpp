@@ -65,6 +65,18 @@ applyCenterWaveConfig(Totem::LedDisplay::Animations::CenterWaveConfig &config,
             if (!readJsonInteger(value, config.wake, error, fieldName)) {
                 return false;
             }
+        } else if (fieldName == "peakDelta") {
+            if (!readJsonInteger(value, config.peakDelta, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "speedDelta") {
+            if (!readJsonInteger(value, config.speedDelta, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "spokeModulo") {
+            if (!readJsonInteger(value, config.spokeModulo, error, fieldName)) {
+                return false;
+            }
         } else {
             error = "Unknown config field for CenterWave: " + fieldName;
             return false;
@@ -154,6 +166,11 @@ applyFftReactiveConfig(Totem::LedDisplay::Animations::FftReactiveConfig &config,
             }
         } else if (fieldName == "flowSpeed") {
             if (!readJsonInteger(value, config.flowSpeed, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "hueModulation") {
+            if (!readJsonInteger(value, config.hueModulation, error,
+                                 fieldName)) {
                 return false;
             }
         } else {

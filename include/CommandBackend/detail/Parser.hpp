@@ -124,6 +124,13 @@ parse_adapter<std::string_view>(std::string_view input, void *out) {
     return {parse_sv(input, value)};
 }
 
+template <>
+inline CommandDesc::ParseResult parse_adapter<bool>(std::string_view input,
+                                                    void *out) {
+    auto &value = *static_cast<bool *>(out);
+    return {parse_bool(input, value)};
+}
+
 template <typename Enum>
 inline CommandDesc::ParseResult parse_adapter(std::string_view input,
                                               void *out) {

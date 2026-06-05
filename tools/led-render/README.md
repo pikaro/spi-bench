@@ -26,23 +26,31 @@ bin/led-analyze region /tmp/center-wave.tled --spokes 0:4 --radials 10:20
 Export a still frame without `pygame`:
 
 ```sh
-bin/led-analyze capture /tmp/center-wave.tled --frame 40 --output /tmp/frame.ppm --glare
+bin/led-analyze capture /tmp/center-wave.tled --frame 40 --output /tmp/frame.ppm --bloom
 ```
 
 Interactive playback uses `pygame`:
 
 ```sh
-bin/led-view /tmp/center-wave.tled --glare
+bin/led-view /tmp/center-wave.tled --bloom
 ```
 
 The default viewer layout is the analysis-oriented spoke/ring heatmap. Use the
 radial layout for a more realistic umbrella preview with circular LEDs,
-inter-LED spacing, and optional glow:
+inter-LED spacing, and optional luminance-driven bloom:
 
 ```sh
-bin/led-view /tmp/center-wave.tled --layout radial --scale 10 --spacing 1.35 --glare
-bin/led-view /tmp/center-wave.tled --capture /tmp/frame.png --frame 80 --layout radial --glare
+bin/led-view /tmp/center-wave.tled --layout radial --scale 10 --spacing 1.35 --bloom
+bin/led-view /tmp/center-wave.tled --capture /tmp/frame.png --frame 80 --layout radial --bloom
 ```
+
+Preview brightness defaults to `255`, matching the trace's unscaled RGB data.
+Use `--brightness 96` when intentionally previewing the firmware default
+FastLED global brightness. `--glare` remains accepted as an alias for
+`--bloom`.
+Interactive playback caps displayed frames with `--max-fps` and skips trace
+frames as needed to preserve playback timing. `bin/led-view-pretty` uses the
+radial bloom view at `--scale 10 --max-fps 30`.
 
 Frame labels are enabled by default in both playback and capture. Disable them
 with `--no-frame-label`.
@@ -83,7 +91,7 @@ object:
 {
   "animation": "CenterWave",
   "duration_ms": 1200,
-  "layer": "Effect",
+  "layer": "TransientEffect",
   "frames": "0:180",
   "mode": "pipeline",
   "config": {
@@ -91,8 +99,11 @@ object:
     "saturation": 255,
     "value": 180,
     "rise": 2,
-    "peak": 1,
-    "wake": 5
+    "peak": 2,
+    "wake": 5,
+    "peakDelta": 1,
+    "speedDelta": 1,
+    "spokeModulo": 4
   }
 }
 ```

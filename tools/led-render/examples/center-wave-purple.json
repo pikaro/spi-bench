@@ -1,7 +1,7 @@
 {
   "animation": "CenterWave",
   "duration_ms": 1200,
-  "layer": "Effect",
+  "layer": "TransientEffect",
   "frames": "0:180",
   "mode": "pipeline",
   "config": {
@@ -9,7 +9,10 @@
     "saturation": 255,
     "value": 180,
     "rise": 2,
-    "peak": 1,
-    "wake": 5
+    "peak": 2,
+    "wake": 5,
+    "peakDelta": 1,
+    "speedDelta": 1,
+    "spokeModulo": 4
   }
 }

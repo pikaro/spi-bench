@@ -5,6 +5,7 @@
 #include "LedDisplay/Interfaces/AnimationCommand.hpp"
 #include "LedDisplay/Interfaces/AnimationCommandCodec.hpp"
 #include "LedDisplay/Interfaces/Config.hpp"
+#include "LedDisplay/Interfaces/LayerControl.hpp"
 #include "LedDisplay/Interfaces/RenderContext.hpp"
 #include "LedDisplay/Primitives/AudioControls.hpp"
 #include "LedDisplay/Primitives/Canvas.hpp"
@@ -38,6 +39,14 @@ class AnimationEngine {
         uint16_t lifetimeMs = 0;
         Layer layer = Layer::Effect;
         Animations::Payload payload{};
+    };
+
+    struct LayerFadeSwapState {
+        bool active = false;
+        Layer from = Layer::Fft;
+        Layer to = Layer::FftAlt;
+        uint32_t startMs = 0;
+        uint16_t durationMs = 0;
     };
 
   public:
@@ -152,11 +161,12 @@ class AnimationEngine {
         FAIL_IF_ERR_FWD(_drainCommands(nowMs),
                         "Failed to drain LED animation commands");
 
+        _updateLayerFadeSwap(nowMs);
         _layers.beginFrame(_frames);
         const auto inputs = _snapshotInputs();
-        const auto audioControls = _audioControls.update(
-            inputs.fftFrame, inputs.hasFftFrame, inputs.peakEvent,
-            inputs.hasPeakEvent);
+        const auto audioControls =
+            _audioControls.update(inputs.fftFrame, inputs.hasFftFrame,
+                                  inputs.peakEvent, inputs.hasPeakEvent);
         const auto hueOffset = _hueOffset.load(std::memory_order_relaxed);
 
         for (auto &slot : _animations) {
@@ -191,8 +201,7 @@ class AnimationEngine {
     }
 
     static ReturnCode
-    onFftEnvelope(void *owner,
-                  const Totem::PubSubBackend::Envelope &envelope) {
+    onFftEnvelope(void *owner, const Totem::PubSubBackend::Envelope &envelope) {
         auto *self = static_cast<AnimationEngine *>(owner);
         FAIL_IF_NULL(self, ERR(CoreError, InvalidArgument),
                      "LED animation engine FFT subscriber owner is null");
@@ -301,6 +310,12 @@ class AnimationEngine {
             return _setRotationOffset(cmd);
         case AnimationCommandType::SetBrightness:
             return _setBrightness(cmd);
+        case AnimationCommandType::SetLayerActive:
+            return _setLayerActive(cmd);
+        case AnimationCommandType::SetLayerOpacity:
+            return _setLayerOpacity(cmd);
+        case AnimationCommandType::FadeLayerSwap:
+            return _startLayerFadeSwap(cmd, nowMs);
         default:
             FAIL(ERR(CoreError, InvalidArgument),
                  "Unknown LED animation command type");
@@ -310,7 +325,8 @@ class AnimationEngine {
     ReturnCode _update(const AnimationCommand &cmd) {
         FAIL_IF(cmd.payloadSize == 0, ERR(CoreError, InvalidArgument),
                 "Animation update command has no payload");
-        FAIL_IF(cmd.kind == AnimationKind::None, ERR(CoreError, InvalidArgument),
+        FAIL_IF(cmd.kind == AnimationKind::None,
+                ERR(CoreError, InvalidArgument),
                 "Animation update command has no animation kind");
 
         bool updated = false;
@@ -361,8 +377,7 @@ class AnimationEngine {
 
         auto &slot = _animations[slotIndex];
         slot.active = true;
-        slot.requestId =
-            cmd.requestId == 0 ? _nextRequestId() : cmd.requestId;
+        slot.requestId = cmd.requestId == 0 ? _nextRequestId() : cmd.requestId;
         slot.startMs = nowMs;
         slot.lifetimeMs = cmd.lifetimeMs;
         slot.layer = cmd.layer;
@@ -371,8 +386,8 @@ class AnimationEngine {
         _log_i("%s LED animation kind=%u request=%u lifetime=%ums "
                "layer=%u",
                replacing ? "Replaced" : "Started",
-               static_cast<unsigned>(cmd.kind), slot.requestId,
-               cmd.lifetimeMs, static_cast<unsigned>(cmd.layer));
+               static_cast<unsigned>(cmd.kind), slot.requestId, cmd.lifetimeMs,
+               static_cast<unsigned>(cmd.layer));
         metrics().addPlay();
         return OK();
     }
@@ -413,6 +428,19 @@ class AnimationEngine {
         }
     }
 
+    uint32_t _stopLayer(Layer layer) {
+        uint32_t stopped = 0;
+        for (auto &slot : _animations) {
+            if (!slot.active || slot.layer != layer) {
+                continue;
+            }
+            slot.active = false;
+            ++slot.generation;
+            ++stopped;
+        }
+        return stopped;
+    }
+
     ReturnCode _setHueOffset(const AnimationCommand &cmd) {
         FAIL_IF_UNEXPECTED_FWD(offset,
                                decodeCommandPayload<Angle<uint8_t>>(cmd),
@@ -446,9 +474,133 @@ class AnimationEngine {
         return OK();
     }
 
-    void _render(const ActiveAnimation &slot, uint32_t nowMs,
-                 uint8_t hueOffset, const AnimationInputSnapshot &inputs,
+    ReturnCode _setLayerActive(const AnimationCommand &cmd) {
+        FAIL_IF_UNEXPECTED_FWD(active, decodeCommandPayload<LayerActive>(cmd),
+                               "Failed to decode LED layer active state");
+        FAIL_IF(static_cast<size_t>(active.layer) >= LayerStack::layerCount,
+                ERR(CoreError, InvalidArgument),
+                "Layer active command has invalid layer");
+        _cancelLayerFadeSwapIfTouches(active.layer);
+        _layers.setEnabled(active.layer, active.active);
+        _log_i("Set LED layer active layer=%u active=%u",
+               static_cast<unsigned>(active.layer), active.active);
+        return OK();
+    }
+
+    ReturnCode _setLayerOpacity(const AnimationCommand &cmd) {
+        FAIL_IF_UNEXPECTED_FWD(opacity, decodeCommandPayload<LayerOpacity>(cmd),
+                               "Failed to decode LED layer opacity");
+        FAIL_IF(static_cast<size_t>(opacity.layer) >= LayerStack::layerCount,
+                ERR(CoreError, InvalidArgument),
+                "Layer opacity command has invalid layer");
+        _cancelLayerFadeSwapIfTouches(opacity.layer);
+        _layers.setOpacity(opacity.layer, opacity.opacity);
+        _log_i("Set LED layer opacity layer=%u opacity=%u",
+               static_cast<unsigned>(opacity.layer),
+               static_cast<unsigned>(opacity.opacity));
+        return OK();
+    }
+
+    ReturnCode _startLayerFadeSwap(const AnimationCommand &cmd,
+                                   uint32_t nowMs) {
+        FAIL_IF_UNEXPECTED_FWD(swap, decodeCommandPayload<LayerFadeSwap>(cmd),
+                               "Failed to decode LED layer fade swap");
+        FAIL_IF(static_cast<size_t>(swap.first) >= LayerStack::layerCount ||
+                    static_cast<size_t>(swap.second) >= LayerStack::layerCount,
+                ERR(CoreError, InvalidArgument),
+                "Layer fade swap command has invalid layer");
+        FAIL_IF(swap.first == swap.second, ERR(CoreError, InvalidArgument),
+                "Layer fade swap requires two distinct layers");
+        FAIL_IF(swap.durationMs == 0, ERR(CoreError, InvalidArgument),
+                "Layer fade swap duration must be non-zero");
+        FAIL_IF(_layerFadeSwap.active, ERR(CoreError, InvalidState),
+                "Layer fade swap is already in progress");
+
+        const auto firstOpacity = _layers.opacity(swap.first);
+        const auto secondOpacity = _layers.opacity(swap.second);
+        Layer from = Layer::Effect;
+        Layer to = Layer::Effect;
+        if (firstOpacity == layerFullOpacity && secondOpacity == 0) {
+            from = swap.first;
+            to = swap.second;
+        } else if (firstOpacity == 0 && secondOpacity == layerFullOpacity) {
+            from = swap.second;
+            to = swap.first;
+        } else {
+            FAIL(ERR(CoreError, InvalidState),
+                 "Layer fade swap requires one layer at opacity 255 and the "
+                 "other at opacity 0");
+        }
+        FAIL_IF(!_layers.enabled(from), ERR(CoreError, InvalidState),
+                "Layer fade swap source layer is disabled");
+
+        _layers.setEnabled(from, true);
+        _layers.setEnabled(to, true);
+        _layers.setOpacity(from, layerFullOpacity);
+        _layers.setOpacity(to, 0);
+        _layerFadeSwap = LayerFadeSwapState{
+            .active = true,
+            .from = from,
+            .to = to,
+            .startMs = nowMs,
+            .durationMs = swap.durationMs,
+        };
+        _log_i("Started LED layer fade swap from=%u to=%u duration=%ums",
+               static_cast<unsigned>(from), static_cast<unsigned>(to),
+               static_cast<unsigned>(swap.durationMs));
+        return OK();
+    }
+
+    void _cancelLayerFadeSwapIfTouches(Layer layer) {
+        if (!_layerFadeSwap.active ||
+            (_layerFadeSwap.from != layer && _layerFadeSwap.to != layer)) {
+            return;
+        }
+        _layerFadeSwap.active = false;
+        _log_i("Cancelled LED layer fade swap touching layer=%u",
+               static_cast<unsigned>(layer));
+    }
+
+    void _updateLayerFadeSwap(uint32_t nowMs) {
+        if (!_layerFadeSwap.active) {
+            return;
+        }
+
+        const auto elapsed = nowMs - _layerFadeSwap.startMs;
+        if (elapsed >= _layerFadeSwap.durationMs) {
+            _completeLayerFadeSwap();
+            return;
+        }
+
+        constexpr uint32_t full = layerFullOpacity;
+        const auto fadeIn =
+            ((elapsed * full) + (_layerFadeSwap.durationMs / 2U)) /
+            _layerFadeSwap.durationMs;
+        const auto toOpacity = static_cast<uint8_t>(fadeIn);
+        _layers.setOpacity(_layerFadeSwap.to, toOpacity);
+        _layers.setOpacity(_layerFadeSwap.from,
+                           static_cast<uint8_t>(full - fadeIn));
+    }
+
+    void _completeLayerFadeSwap() {
+        const auto swap = _layerFadeSwap;
+        _layerFadeSwap.active = false;
+        _layers.setOpacity(swap.to, layerFullOpacity);
+        _layers.setOpacity(swap.from, 0);
+        _layers.setEnabled(swap.to, true);
+        _layers.setEnabled(swap.from, false);
+        const auto stopped = _stopLayer(swap.from);
+        _log_i("Completed LED layer fade swap from=%u to=%u stopped=%u",
+               static_cast<unsigned>(swap.from), static_cast<unsigned>(swap.to),
+               static_cast<unsigned>(stopped));
+    }
+
+    void _render(const ActiveAnimation &slot, uint32_t nowMs, uint8_t hueOffset,
+                 const AnimationInputSnapshot &inputs,
                  Primitives::AudioControls audioControls) {
+        if (!_layers.enabled(slot.layer)) {
+            return;
+        }
         const uint32_t elapsed = nowMs - slot.startMs;
         _layers.clearScratch();
         if (Animations::requiresFullFrame(slot.payload)) {
@@ -490,9 +642,8 @@ class AnimationEngine {
             .audio = audioControls,
         };
         Animations::render(slot.payload, ctx);
-        Primitives::projectLogicalFrameToOwned(_fullFrameScratch,
-                                               _layers.scratch(),
-                                               _logicalToLocal);
+        Primitives::projectLogicalFrameToOwned(
+            _fullFrameScratch, _layers.scratch(), _logicalToLocal);
         _layers.blendScratch(slot.layer, Animations::style(slot.payload));
     }
 
@@ -524,15 +675,13 @@ class AnimationEngine {
         return count;
     }
 
-    [[nodiscard]] static uint8_t
-    _rotationSpokeOffset(Angle<uint8_t> offset) {
+    [[nodiscard]] static uint8_t _rotationSpokeOffset(Angle<uint8_t> offset) {
         constexpr uint32_t angleSteps = 256U;
         constexpr uint32_t roundToNearestBias = angleSteps / 2U;
         const auto scaled =
             (static_cast<uint32_t>(offset.value) * Config::spokeCount) +
             roundToNearestBias;
-        return static_cast<uint8_t>((scaled / angleSteps) %
-                                    Config::spokeCount);
+        return static_cast<uint8_t>((scaled / angleSteps) % Config::spokeCount);
     }
 
     void _rebuildLogicalToLocalMap(Angle<uint8_t> rotationOffset) {
@@ -552,9 +701,8 @@ class AnimationEngine {
                 } else {
                     local = LedTopology::OwnedPixels::localIndex(physical);
                 }
-                _logicalToLocal[Primitives::Canvas::logicalIndex(spoke,
-                                                                 radial)] =
-                    local;
+                _logicalToLocal[Primitives::Canvas::logicalIndex(
+                    spoke, radial)] = local;
             }
         }
     }
@@ -576,6 +724,7 @@ class AnimationEngine {
     std::array<ActiveAnimation, Config::maxActiveAnimations> _animations{};
     AnimationInputSnapshot _inputs{};
     Primitives::AudioControlSmoother _audioControls{};
+    LayerFadeSwapState _layerFadeSwap{};
     std::atomic<uint8_t> _hueOffset{0};
     std::atomic<uint8_t> _rotationOffset{0};
     std::atomic<uint8_t> _brightness{0};

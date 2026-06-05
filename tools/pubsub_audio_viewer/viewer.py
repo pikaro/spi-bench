@@ -61,6 +61,50 @@ class AudioViewState:
     last_error: str | None = None
 
 
+def _desktop_size(pygame) -> tuple[int, int] | None:
+    try:
+        sizes = pygame.display.get_desktop_sizes()
+    except (AttributeError, pygame.error):
+        sizes = []
+    if sizes:
+        width, height = sizes[0]
+        if width > 0 and height > 0:
+            return int(width), int(height)
+
+    try:
+        info = pygame.display.Info()
+    except pygame.error:
+        return None
+    width = int(getattr(info, "current_w", 0))
+    height = int(getattr(info, "current_h", 0))
+    if width > 0 and height > 0:
+        return width, height
+    return None
+
+
+def _initial_window_size(
+    requested_size: tuple[int, int],
+    desktop_size: tuple[int, int] | None,
+) -> tuple[int, int]:
+    requested_width = max(1, requested_size[0])
+    requested_height = max(1, requested_size[1])
+    if desktop_size is None:
+        return requested_width, requested_height
+
+    desktop_width, desktop_height = desktop_size
+    max_width = max(320, int(desktop_width * 0.90))
+    max_height = max(240, int(desktop_height * 0.86))
+    scale = min(
+        1.0,
+        max_width / requested_width,
+        max_height / requested_height,
+    )
+    return (
+        max(1, int(requested_width * scale)),
+        max(1, int(requested_height * scale)),
+    )
+
+
 def run_viewer(
     *,
     socket_path: Path,
@@ -73,6 +117,7 @@ def run_viewer(
     beat_hold_ms: int,
 ) -> None:
     os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
+    os.environ.setdefault("SDL_VIDEO_MAC_FULLSCREEN_SPACES", "1")
     try:
         import pygame
     except ModuleNotFoundError as exc:
@@ -86,7 +131,11 @@ def run_viewer(
 
     pygame.init()
     try:
-        screen = pygame.display.set_mode((width, height))
+        window_flags = pygame.RESIZABLE
+        screen = pygame.display.set_mode(
+            _initial_window_size((width, height), _desktop_size(pygame)),
+            window_flags,
+        )
         pygame.display.set_caption(f"Totem Audio PubSub - {socket_path}")
         clock = pygame.time.Clock()
         font = pygame.font.SysFont("Menlo", 15) or pygame.font.Font(None, 15)
@@ -108,6 +157,11 @@ def run_viewer(
                         )
                         state.calibration_requests += 1
                         state.calibration_request_time_s = now_s
+                elif event.type == pygame.VIDEORESIZE:
+                    screen = pygame.display.set_mode(
+                        (event.w, event.h),
+                        window_flags,
+                    )
 
             for event in client.poll():
                 _apply_event(

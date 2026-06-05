@@ -18,7 +18,8 @@ template <> struct FieldList<::Totem::LedDisplay::Animations::FftReactiveConfig>
         Field<&Type::symmetry>{"symmetry"},
         Field<&Type::contrast>{"contrast"},
         Field<&Type::peakSensitivity>{"peakSensitivity"},
-        Field<&Type::flowSpeed>{"flowSpeed"}
+        Field<&Type::flowSpeed>{"flowSpeed"},
+        Field<&Type::hueModulation>{"hueModulation"}
     );
 };
 

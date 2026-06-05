@@ -25,9 +25,10 @@
     "baseValue": 20,
     "radialMode": 2,
     "angularMode": 3,
-    "symmetry": 4,
+    "symmetry": 1,
     "contrast": 180,
     "peakSensitivity": 96,
-    "flowSpeed": 40
+    "flowSpeed": 40,
+    "hueModulation": 192
   }
 }

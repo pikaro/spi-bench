@@ -139,8 +139,13 @@ Useful LED animation commands:
     Optional animation arguments may be passed as `-` to keep their default
     value while setting later arguments.
     `!master /anim wave`
-    `!master /anim wave 1200 144 180 2 1 5`
-    Wave arguments are `durationMs`, `hue`, `value`, `rise`, `peak`, `wake`.
+    `!master /anim wave 1200 144 180 2 2 5 1 1 4`
+    Wave arguments are `durationMs`, `hue`, `value`, `rise`, `peak`, `wake`,
+    `peakDelta`, `speedDelta`, `spokeModulo`.
+    `peak` is the wave width. The delta arguments modulate the wave per spoke
+    with a triangular modulo profile and default to no modulation. Passing
+    `1 1 4` makes spokes `0..4` use offsets `0, 0.5, 1, 0.5, 0`, so with
+    `peak = 2` the peak widths are `2, 2.5, 3, 2.5, 2`.
     `!master /anim sinelon`
     `!master /anim sinelon 0 96 120 3 2400 0 0 245 160 64`
     Sinelon arguments are `durationMs`, `hue`, `value`, `width`, `periodMs`,
@@ -160,13 +165,17 @@ Useful LED animation commands:
     strongly preserving peaks. `lifetimeMs` is optional and defaults to the
     projected total time for the last peak to decay to the output value floor.
     `!master /anim fft`
-    `!master /anim fft 0 144 220 20 2 3 4 180 96 40`
+    `!master /anim fft 0 144 220 20 2 3 1 180 96 40 192`
+    `!master /anim fft 0 96 220 20 2 3 1 180 96 40 192 FftAlt`
     FFT arguments are `durationMs`, `hue`, `value`, `baseValue`,
     `radialMode`, `angularMode`, `symmetry`, `contrast`, `peakSensitivity`,
-    `flowSpeed`. It starts the polar FFT field on the FFT layer. The default
-    master orchestration also refreshes a persistent request after startup; a
-    stop-all command or a stop for that request disables those refreshes until
-    the master restarts.
+    `flowSpeed`, `hueModulation`, `layer`. It starts the polar FFT field on
+    the `Fft` layer by default; use `FftAlt` as the optional layer when staging
+    a second FFT animation for a crossfade. `hueModulation` scales the
+    audio-driven hue span; lower values keep the field near `hue`, while higher
+    values allow broader multicolor output. The default master orchestration
+    also refreshes a persistent request after startup; a stop-all command or a
+    stop for that request disables those refreshes until the master restarts.
     `!master /anim sweep`
     `!master /anim sweep 6000 0 220 0 1 255`
     Sweep arguments are `durationMs`, `baseHue`, `value`, `trailSpokes`,
@@ -193,6 +202,26 @@ Useful LED animation commands:
     feed the FFT field and IO bulb flicker; after at least two seconds with no
     peak in any band, the first following peak publishes one short center wave
     as a primitive drop marker.
+- Publish LED layer controls over PubSub:
+    `!master /layer active FftAlt on`
+    `!master /layer opacity FftAlt 0`
+    `!master /anim fft 0 96 220 20 2 3 1 180 96 40 192 FftAlt`
+    `!master /layer swap Fft FftAlt 10000`
+    `!master /layer opacity Fft 128`
+    `!master /layer opacity FftAlt 127`
+    `!master /layer active Fft off`
+    Layers are parsed by enum name, case-insensitively. Useful names are
+    `Background`, `Fft`, `FftAlt`, `Effect`, `TransientEffect`, `Wheel`, and
+    `Debug`. Disabling a layer clears it once, then skips its per-frame
+    clear/decay and compose work. Opacity is a layer compose alpha, 0-255.
+    `/layer swap <Layer> <Layer> <durationMs>` starts a GPU-local fade between
+    two layers and requires one layer at opacity 255 and the other at opacity
+    0. The currently full-opacity layer must be active. At the end of the fade,
+    the faded-out layer is disabled and animations still running on that layer
+    are stopped.
+    Master startup publishes per-layer active commands from
+    `src/master/orchestration.hpp`; by default it disables `Background`,
+    `FftAlt`, and `Wheel`.
 
 Useful filesystem validation command:
 

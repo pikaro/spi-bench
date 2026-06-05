@@ -12,8 +12,8 @@ inline ReturnCode handleHueOffsetCommand(CommandDesc::ParsedArgs args,
     auto parsed = args.get<uint32_t>(0);
     FAIL_IF_NOT(parsed.ok, ERR(CoreError, InvalidArgument),
                 "Invalid hue offset argument");
-    return Animations::detail::publishCommand(makeHueOffsetCommand(
-        Animations::detail::rawAngleU8(parsed.value)));
+    return Animations::detail::publishCommand(
+        makeHueOffsetCommand(Animations::detail::rawAngleU8(parsed.value)));
 }
 
 inline ReturnCode handleRotationOffsetCommand(CommandDesc::ParsedArgs args,
@@ -30,8 +30,8 @@ inline ReturnCode handleBrightnessCommand(CommandDesc::ParsedArgs args,
     auto parsed = args.get<uint32_t>(0);
     FAIL_IF_NOT(parsed.ok, ERR(CoreError, InvalidArgument),
                 "Invalid brightness argument");
-    return Animations::detail::publishCommand(makeBrightnessCommand(
-        Animations::detail::clampU8(parsed.value)));
+    return Animations::detail::publishCommand(
+        makeBrightnessCommand(Animations::detail::clampU8(parsed.value)));
 }
 
 inline constexpr CommandDesc hueOffsetSubcommand = {

@@ -184,7 +184,9 @@ Layers are fixed and composed in enum order:
 
 - `Background`
 - `Fft`
+- `FftAlt`
 - `Effect`
+- `TransientEffect`
 - `Wheel`
 - `Debug`
 
@@ -192,7 +194,9 @@ Current default policies:
 
 - `Background`: cleared each frame, `MaxValue`, full opacity
 - `Fft`: persistent decay, `MaxValue`, full opacity
+- `FftAlt`: persistent decay, `MaxValue`, full opacity, disabled by default
 - `Effect`: persistent decay, `MaxValue`, full opacity
+- `TransientEffect`: cleared each frame, `MaxValue`, full opacity
 - `Wheel`: cleared each frame, `Alpha`, partial opacity
 - `Debug`: persistent decay, `AddValue`, full opacity
 
@@ -200,10 +204,34 @@ These defaults are tuning values. The ownership boundary is the important part:
 backgrounds, FFT, one-shot effects, wheel overlays, and diagnostics never fight
 inside a single shared frame buffer.
 
+Layer active state and opacity are runtime controls. `/layer active <Layer>
+<on|off>` toggles a layer; disabling clears that layer once and then skips its
+per-frame clear/decay and compose work. `/layer opacity <Layer> <0-255>` sets
+the layer's compose opacity. The master publishes per-layer startup active
+commands from `src/master/orchestration.hpp`; the current startup policy keeps
+`Background`, `FftAlt`, and `Wheel` disabled until a show or manual command
+enables them.
+
+`/layer swap <Layer> <Layer> <durationMs>` starts a GPU-local opacity fade
+between two layers. It requires one of the two layers to be at opacity `255`
+and enabled, and the other to be at opacity `0`; the GPU infers the fade
+direction from those endpoint opacities. Both layers are enabled during the
+fade. When the duration completes, the faded-out layer is set to opacity `0`,
+disabled, cleared by the disable path, and any animations still running on that
+layer are stopped.
+
 ## Current Animations
 
-`CenterWave` is a one-shot effect on the `Effect` layer. Its config has
-separate rise, peak, and wake ring counts.
+`CenterWave` is a one-shot effect on the `TransientEffect` layer. Its config
+has separate rise, peak, and wake ring counts. It also supports per-spoke width
+and speed modulation through a triangular modulo profile. In this animation,
+`peak` is the bright wave width; `peakDelta` and `speedDelta` default to `0`,
+so plain waves are unmodulated. Passing `peakDelta = 1`, `speedDelta = 1`, and
+`spokeModulo = 4` makes spokes `0..4` resolve to offsets `0, 0.5, 1, 0.5, 0`,
+so with `peak = 2` the peak width becomes `2, 2.5, 3, 2.5, 2` across that
+cycle while `rise` remains unchanged. The layer clears every frame, so the
+visible wave width follows the animation profile instead of inheriting the
+persistent `Effect` layer's decay wake.
 
 `Sinelon` is an effect-layer bouncing sine-position head. It can start from the
 inner or outer edge, limit its travel depth, attenuate later edge-to-edge
@@ -228,13 +256,18 @@ without giving `Display` or the output backend any animation-specific API.
 It is also available manually through `/anim sweep`; use `trailSpokes=0` when
 checking physical spoke order.
 
-`FftReactive` is a polar FFT field on the `Fft` layer. It uses the annular
+`FftReactive` is a polar FFT field on the `Fft` layer by default and can also
+be launched on `FftAlt` for crossfades. Stage the hidden layer at opacity `0`,
+launch the alternate FFT there, then use `/layer swap Fft FftAlt <durationMs>`
+to fade locally on each GPU with one PubSub command. It uses the annular
 coordinate helpers plus the engine's audio controls: smoothed bass/mid/high
-values modulate radial and angular fields, while peak events add restrained
-attack accents. Hue and spatial phase intentionally do not follow raw FFT-band
-changes directly, because that creates high-rate shimmer. It renders a fallback
-field when no audio input has arrived yet. It does not need full-frame
-rendering.
+values modulate radial, angular, and high-frequency fields, while peak events
+add restrained attack accents. Hue is driven by both absolute band energy and
+smoothed spectral balance so similar loudness with different bass/mid/high
+content can produce different colors without sampling raw one-frame FFT bins.
+`hueModulation`
+scales the allowed hue span. It renders a fallback field when no audio input has
+arrived yet. It does not need full-frame rendering.
 
 `WheelIndicator` is a long-running wheel-layer animation with default request
 ID `1`. It renders a small spoke group from the latest wheel position and
@@ -355,7 +388,7 @@ Example config:
 {
   "animation": "CenterWave",
   "duration_ms": 1200,
-  "layer": "Effect",
+  "layer": "TransientEffect",
   "hue_offset": 0,
   "rotation_offset": 0,
   "config": {
@@ -363,8 +396,11 @@ Example config:
     "saturation": 255,
     "value": 180,
     "rise": 2,
-    "peak": 1,
-    "wake": 5
+    "peak": 2,
+    "wake": 5,
+    "peakDelta": 1,
+    "speedDelta": 1,
+    "spokeModulo": 4
   }
 }
 ```
@@ -475,7 +511,7 @@ Current implementation status:
   frame deltas, detect flicker-like discontinuities, play traces, and export
   still frames
 - pygame playback supports frame indicators, heatmap viewing, radial viewing,
-  LED spacing, circular LEDs, and glare
+  LED spacing, circular LEDs, preview brightness, and bloom
 - the remaining fidelity extension is optional FastLED host color conversion
   and temporal-dither support
 
@@ -490,7 +526,7 @@ bin/led-analyze summary /tmp/center.tled --stats
 bin/led-analyze pixel /tmp/center.tled --spoke 3 --radial 12
 bin/led-analyze region /tmp/center.tled --spokes 0:4 --radials 10:20
 bin/led-analyze flicker /tmp/center.tled --plane hsv_final
-bin/led-view /tmp/center.tled --glare
+bin/led-view /tmp/center.tled --bloom
 ```
 
 ## Metrics

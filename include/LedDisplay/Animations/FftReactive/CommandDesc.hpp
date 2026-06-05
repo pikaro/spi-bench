@@ -16,8 +16,7 @@ inline ReturnCode handleFftReactiveCommand(CommandDesc::ParsedArgs args,
         "Invalid animation duration argument");
     FAIL_IF_UNEXPECTED_FWD(hue, detail::optionalU32(args, 1, config.baseHue),
                            "Invalid animation hue argument");
-    FAIL_IF_UNEXPECTED_FWD(value,
-                           detail::optionalU32(args, 2, config.value),
+    FAIL_IF_UNEXPECTED_FWD(value, detail::optionalU32(args, 2, config.value),
                            "Invalid animation value argument");
     FAIL_IF_UNEXPECTED_FWD(baseValue,
                            detail::optionalU32(args, 3, config.baseValue),
@@ -34,13 +33,25 @@ inline ReturnCode handleFftReactiveCommand(CommandDesc::ParsedArgs args,
     FAIL_IF_UNEXPECTED_FWD(contrast,
                            detail::optionalU32(args, 7, config.contrast),
                            "Invalid animation contrast argument");
-    FAIL_IF_UNEXPECTED_FWD(
-        peakSensitivity,
-        detail::optionalU32(args, 8, config.peakSensitivity),
-        "Invalid animation peak sensitivity argument");
+    FAIL_IF_UNEXPECTED_FWD(peakSensitivity,
+                           detail::optionalU32(args, 8, config.peakSensitivity),
+                           "Invalid animation peak sensitivity argument");
     FAIL_IF_UNEXPECTED_FWD(flowSpeed,
                            detail::optionalU32(args, 9, config.flowSpeed),
                            "Invalid animation flow speed argument");
+    FAIL_IF_UNEXPECTED_FWD(hueModulation,
+                           detail::optionalU32(args, 10, config.hueModulation),
+                           "Invalid animation hue modulation argument");
+    auto layer = FftReactiveCommand::defaultLayer;
+    if (!detail::isOptionalDefaultMarker(args, 11)) {
+        auto parsedLayer = args.get<Layer>(11);
+        if (parsedLayer.ok) {
+            layer = parsedLayer.value;
+        } else if (parsedLayer.error != CommandDesc::ArgError::Missing) {
+            FAIL(ERR(CoreError, InvalidArgument),
+                 "Invalid animation layer argument");
+        }
+    }
 
     config.baseHue = detail::clampU8(hue);
     config.value = detail::clampU8(value);
@@ -51,9 +62,10 @@ inline ReturnCode handleFftReactiveCommand(CommandDesc::ParsedArgs args,
     config.contrast = detail::clampU8(contrast);
     config.peakSensitivity = detail::clampU8(peakSensitivity);
     config.flowSpeed = detail::clampU8(flowSpeed);
+    config.hueModulation = detail::clampU8(hueModulation);
 
-    return detail::publishCommand(
-        FftReactiveCommand::makeCommand(config, 0, detail::clampU16(duration)));
+    return detail::publishCommand(FftReactiveCommand::makeCommand(
+        config, 0, detail::clampU16(duration), layer));
 }
 
 inline constexpr CommandDesc fftReactiveSubcommand = {
@@ -78,7 +90,11 @@ inline constexpr CommandDesc fftReactiveSubcommand = {
              Totem::CommandBackend::detail::arg<uint32_t>(
                  "peakSensitivity", CommandDesc::ArgRequirement::Optional),
              Totem::CommandBackend::detail::arg<uint32_t>(
-                 "flowSpeed", CommandDesc::ArgRequirement::Optional)},
+                 "flowSpeed", CommandDesc::ArgRequirement::Optional),
+             Totem::CommandBackend::detail::arg<uint32_t>(
+                 "hueModulation", CommandDesc::ArgRequirement::Optional),
+             Totem::CommandBackend::detail::arg<Layer>(
+                 "layer", CommandDesc::ArgRequirement::Optional)},
     .handler = handleFftReactiveCommand,
     .subcommands = {},
 };

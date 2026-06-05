@@ -1,0 +1,17 @@
+{
+  "animation": "Shutter",
+  "duration_ms": 1600,
+  "layer": "TransientEffect",
+  "frames": "0:180",
+  "mode": "pipeline",
+  "config": {
+    "hue": 48,
+    "saturation": 255,
+    "value": 210,
+    "segments": 8,
+    "openPct": 128,
+    "edgeWidth": 48,
+    "rotationCycles": 1,
+    "mode": 1
+  }
+}

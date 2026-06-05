@@ -1,0 +1,34 @@
+{
+  "animation": "SpectralIris",
+  "duration_ms": 0,
+  "layer": "Fft",
+  "frames": "0:249",
+  "mode": "pipeline",
+  "audio": {
+    "bass": {"base": 28, "amp": 200, "period_ms": 1100},
+    "mid": {"base": 34, "amp": 150, "period_ms": 1500, "phase": 80},
+    "high": {"base": 10, "amp": 150, "period_ms": 320, "phase": 176}
+  },
+  "inputs": {
+    "peak": {
+      "group": "High",
+      "energy": 210,
+      "lowerBand": 4,
+      "upperBand": 7,
+      "frameSequence": 1
+    }
+  },
+  "config": {
+    "baseHue": 96,
+    "saturation": 255,
+    "value": 220,
+    "baseValue": 8,
+    "petals": 8,
+    "aperture": 128,
+    "rimWidth": 28,
+    "contrast": 180,
+    "peakSensitivity": 96,
+    "flowSpeed": 24,
+    "hueModulation": 128
+  }
+}

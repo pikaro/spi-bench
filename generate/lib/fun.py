@@ -41,6 +41,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--compdb", required=True)
     parser.add_argument("--envdata")
     parser.add_argument("--out", required=True)
+    parser.add_argument("--py-out")
     parser.add_argument("--scan-root", action="append", default=["include"])
     return parser.parse_args()
 
@@ -541,6 +542,8 @@ def clean_generated_headers(out_dir: pathlib.Path) -> None:
 ExtractCallback = Callable[[dict, CommonEntry], EntryT]
 RenderSupportCallback = Callable[[], str]
 RenderCallback = Callable[[EntryT], str]
+ObserveAstCallback = Callable[[list[dict], pathlib.Path], None]
+RenderExtraCallback = Callable[[list[EntryT], argparse.Namespace], None]
 
 
 @dataclass(frozen=True)
@@ -551,6 +554,8 @@ class Dependencies:
     render_support: RenderSupportCallback
     render: RenderCallback
     extract: ExtractCallback
+    observe_ast: ObserveAstCallback | None = None
+    render_extra: RenderExtraCallback | None = None
 
 
 def generate(deps: Dependencies) -> int:
@@ -574,7 +579,10 @@ def generate(deps: Dependencies) -> int:
         names = find_annotated_record_names(header, deps.token)
         if not names:
             continue
-        for ast in ast_for_header(header, parse_cmd):
+        asts = ast_for_header(header, parse_cmd)
+        if deps.observe_ast is not None:
+            deps.observe_ast(asts, header)
+        for ast in asts:
             collect_entries(ast, deps.annotation, [], deps.extract, entries)
 
     entries_sorted = sorted(entries.values(), key=lambda s: s.qualified_name)
@@ -586,5 +594,7 @@ def generate(deps: Dependencies) -> int:
             out_dir / sanitize_filename(entry.qualified_name),
             deps.render(entry),
         )
+    if deps.render_extra is not None:
+        deps.render_extra(entries_sorted, args)
 
     return 0

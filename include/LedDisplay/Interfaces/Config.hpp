@@ -8,7 +8,7 @@
 namespace Totem::LedDisplay {
 
 struct Config : LedDisplayConfig {
-    uint8_t globalBrightness = 96;
+    uint8_t globalBrightness = 255;
     bool temporalDithering = true;
     // Zero disables; interpreted after configured FastLED brightness.
     uint8_t outputValueFloor = 10;

@@ -1,0 +1,17 @@
+{
+  "animation": "Vortex",
+  "duration_ms": 2400,
+  "layer": "Effect",
+  "frames": "0:220",
+  "mode": "pipeline",
+  "config": {
+    "hue": 160,
+    "saturation": 255,
+    "value": 220,
+    "arms": 3,
+    "twist": 5,
+    "width": 128,
+    "cycles": 1,
+    "hueStep": 24
+  }
+}

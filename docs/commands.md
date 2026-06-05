@@ -146,6 +146,44 @@ Useful LED animation commands:
     with a triangular modulo profile and default to no modulation. Passing
     `1 1 4` makes spokes `0..4` use offsets `0, 0.5, 1, 0.5, 0`, so with
     `peak = 2` the peak widths are `2, 2.5, 3, 2.5, 2`.
+    `!master /anim starburst`
+    `!master /anim starburst 1200 32 220 1 2 6 4 3 0 1`
+    Starburst arguments are `durationMs`, `hue`, `value`, `rise`, `peak`,
+    `wake`, `points`, `pointGain`, `twist`, `cycles`. It uses the same
+    rise/peak/wake profile as the center wave, but `points` creates a
+    triangular angular point profile and `pointGain` adds width and travel
+    distance to the point spokes while low point-scale spokes fade out. `twist`
+    adds ring-dependent angular phase; keep it `0` for straight burst points.
+    `!master /anim vortex 2400 160 220 3 5 128 1 24`
+    Vortex arguments are `durationMs`, `hue`, `value`, `arms`, `twist`,
+    `width`, `cycles`, `hueStep`. Low `arms` values work best on 16 spokes.
+    `!master /anim shutter 1600 48 210 8 128 48 1 1`
+    Shutter arguments are `durationMs`, `hue`, `value`, `segments`, `openPct`,
+    `edgeWidth`, `rotationCycles`, `mode`. Use `mode=0` for a fixed aperture
+    edge and nonzero `mode` for opening/closing modulation.
+    `!master /anim orbit 2400 96 220 128 36 28 2 1 24`
+    Orbit arguments are `durationMs`, `hue`, `value`, `radius`, `radialWidth`,
+    `angularWidth`, `comets`, `laps`, `trail`.
+    `!master /anim lighthouse 3000 144 220 2 4 1 0 0`
+    Lighthouse arguments are `durationMs`, `hue`, `value`, `beamWidth`,
+    `trailSpokes`, `cycles`, `innerRing`, `outerRing`. `outerRing=0` means the
+    full strip.
+    `!master /anim cymatic 3200 176 180 0 36 96 180 16`
+    Cymatic arguments are `durationMs`, `hue`, `value`, `sourceMode`,
+    `wavelength`, `speed`, `contrast`, `hueStep`.
+    `!master /anim rings 2400 112 170 8 3 1 0 8`
+    Rings arguments are `durationMs`, `hue`, `value`, `spacing`, `width`,
+    `cycles`, `direction`, `hueStep`. Directions are `0` outward, `1` inward,
+    and `2` in-place breathing.
+    `!master /anim curtain 2600 200 190 4 32 128 0 16`
+    Curtain arguments are `durationMs`, `hue`, `value`, `width`, `tilt`,
+    `speed`, `outerOrigin`, `spokePhase`.
+    `!master /anim lattice 2400 64 170 4 3 96 128 160`
+    Lattice arguments are `durationMs`, `hue`, `value`, `radialMode`,
+    `angularMode`, `speed`, `mix`, `contrast`.
+    `!master /anim bolt 900 24 255 1 1 1 0 1`
+    Bolt arguments are `durationMs`, `hue`, `value`, `width`, `jitter`,
+    `forks`, `seed`, `outerOrigin`.
     `!master /anim sinelon`
     `!master /anim sinelon 0 96 120 3 2400 0 0 245 160 64`
     Sinelon arguments are `durationMs`, `hue`, `value`, `width`, `periodMs`,
@@ -164,18 +202,42 @@ Useful LED animation commands:
     loss for brighter sine peaks, with `0` meaning linear decay and `255`
     strongly preserving peaks. `lifetimeMs` is optional and defaults to the
     projected total time for the last peak to decay to the output value floor.
-    `!master /anim fft`
-    `!master /anim fft 0 144 220 20 2 3 1 180 96 40 192`
-    `!master /anim fft 0 96 220 20 2 3 1 180 96 40 192 FftAlt`
-    FFT arguments are `durationMs`, `hue`, `value`, `baseValue`,
+    `!master /anim weave`
+    `!master /anim weave 0 144 220 20 2 3 1 180 96 40 192`
+    `!master /anim weave 0 96 220 20 2 3 1 180 96 40 192 FftAlt`
+    Spectral weave arguments are `durationMs`, `hue`, `value`, `baseValue`,
     `radialMode`, `angularMode`, `symmetry`, `contrast`, `peakSensitivity`,
-    `flowSpeed`, `hueModulation`, `layer`. It starts the polar FFT field on
-    the `Fft` layer by default; use `FftAlt` as the optional layer when staging
-    a second FFT animation for a crossfade. `hueModulation` scales the
-    audio-driven hue span; lower values keep the field near `hue`, while higher
-    values allow broader multicolor output. The default master orchestration
-    also refreshes a persistent request after startup; a stop-all command or a
-    stop for that request disables those refreshes until the master restarts.
+    `flowSpeed`, `hueModulation`, `layer`. It starts the polar spectral weave
+    field on the `Fft` layer by default; use `FftAlt` as the optional layer
+    when staging a second FFT animation for a crossfade. `hueModulation`
+    scales the audio-driven hue span; lower values keep the field near `hue`,
+    while higher values allow broader multicolor output.
+    `!master /anim iris`
+    `!master /anim iris 0 96 220 8 8 128 28 180 96 24 128`
+    `!master /anim iris 0 96 220 8 8 128 28 180 96 24 128 FftAlt`
+    Spectral iris arguments are `durationMs`, `hue`, `value`, `baseValue`,
+    `petals`, `aperture`, `rimWidth`, `contrast`, `peakSensitivity`,
+    `flowSpeed`, `hueModulation`, `layer`. It renders an audio-reactive
+    aperture, petal mask, and rim glow on the FFT layer.
+    `!master /anim sparks`
+    `!master /anim sparks 0 32 230 32 1 32 96 160 128 165 160`
+    `!master /anim sparks 0 32 230 32 1 32 96 160 128 165 160 FftAlt`
+    Orbit sparks arguments are `durationMs`, `hue`, `value`, `sparkCount`,
+    `sparkSize`, `orbitSpeed`, `radialDrift`, `highSparkle`,
+    `peakSensitivity`, `seed`, `hueModulation`, `layer`. It renders sparse
+    FFT-driven embers and relies on FFT layer decay for trails.
+    `!master /anim cells`
+    `!master /anim cells 0 160 210 10 6 28 64 16 180 96 61 144`
+    `!master /anim cells 0 160 210 10 6 28 64 16 180 96 61 144 FftAlt`
+    Stained cells arguments are `durationMs`, `hue`, `value`, `baseValue`,
+    `seedCount`, `borderWidth`, `interiorValue`, `driftSpeed`, `contrast`,
+    `peakSensitivity`, `seed`, `hueModulation`, `layer`. It renders a small
+    seed-count membrane field with audio-brightened borders and interiors.
+    The default master orchestration starts a persistent FFT visual after
+    startup, rotates through weave, iris, sparks, and cells with local layer
+    crossfades, and periodically refreshes the active request. A stop-all
+    command or a stop for either managed FFT request disables those refreshes
+    until the master restarts.
     `!master /anim sweep`
     `!master /anim sweep 6000 0 220 0 1 255`
     Sweep arguments are `durationMs`, `baseHue`, `value`, `trailSpokes`,
@@ -199,13 +261,14 @@ Useful LED animation commands:
     Automatic master runtime orchestration is gated until the bring-up spoke
     sweep has finished. Manual commands remain direct diagnostics.
     Master no longer publishes center waves for every peak event. Peak events
-    feed the FFT field and IO bulb flicker; after at least two seconds with no
-    peak in any band, the first following peak publishes one short center wave
-    as a primitive drop marker.
+    feed the active FFT visual and IO bulb flicker; after at least two seconds
+    with no peak in any band, the first following peak publishes one short
+    center wave as a primitive drop marker.
 - Publish LED layer controls over PubSub:
     `!master /layer active FftAlt on`
     `!master /layer opacity FftAlt 0`
-    `!master /anim fft 0 96 220 20 2 3 1 180 96 40 192 FftAlt`
+    `!master /anim weave 0 96 220 20 2 3 1 180 96 40 192 FftAlt`
+    `!master /anim iris 0 96 220 8 8 128 28 180 96 24 128 FftAlt`
     `!master /layer swap Fft FftAlt 10000`
     `!master /layer opacity Fft 128`
     `!master /layer opacity FftAlt 127`

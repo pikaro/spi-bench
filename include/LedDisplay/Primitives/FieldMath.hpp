@@ -43,6 +43,16 @@ inline constexpr uint8_t fullScale = std::numeric_limits<uint8_t>::max();
     return static_cast<uint8_t>((static_cast<uint16_t>(a) + b + c) / 3U);
 }
 
+[[nodiscard]] inline constexpr uint8_t hash8(uint8_t a, uint8_t b,
+                                             uint8_t c = 0) {
+    auto hash = static_cast<uint8_t>(a * 37U);
+    hash = static_cast<uint8_t>(hash ^ static_cast<uint8_t>(b * 17U));
+    hash = static_cast<uint8_t>(hash + static_cast<uint8_t>(c * 29U));
+    hash = static_cast<uint8_t>(hash ^ static_cast<uint8_t>(hash >> 4U));
+    hash = static_cast<uint8_t>(hash * 13U);
+    return static_cast<uint8_t>(hash ^ static_cast<uint8_t>(hash >> 3U));
+}
+
 [[nodiscard]] inline constexpr uint8_t triangle8(uint8_t phase) {
     return (phase & 0x80U) == 0
                ? static_cast<uint8_t>(phase << 1U)

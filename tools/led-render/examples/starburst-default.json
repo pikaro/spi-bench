@@ -1,0 +1,19 @@
+{
+  "animation": "Starburst",
+  "duration_ms": 1200,
+  "layer": "TransientEffect",
+  "frames": "0:180",
+  "mode": "pipeline",
+  "config": {
+    "hue": 32,
+    "saturation": 255,
+    "value": 220,
+    "rise": 1,
+    "peak": 2,
+    "wake": 6,
+    "points": 4,
+    "pointGain": 3,
+    "twist": 0,
+    "cycles": 1
+  }
+}

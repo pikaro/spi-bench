@@ -1,0 +1,17 @@
+{
+  "animation": "Bolt",
+  "duration_ms": 900,
+  "layer": "Effect",
+  "frames": "0:140",
+  "mode": "pipeline",
+  "config": {
+    "hue": 24,
+    "saturation": 255,
+    "value": 255,
+    "width": 1,
+    "jitter": 1,
+    "forks": 1,
+    "seed": 0,
+    "outerOrigin": true
+  }
+}

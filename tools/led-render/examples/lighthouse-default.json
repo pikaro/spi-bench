@@ -1,0 +1,17 @@
+{
+  "animation": "Lighthouse",
+  "duration_ms": 3000,
+  "layer": "Effect",
+  "frames": "0:260",
+  "mode": "pipeline",
+  "config": {
+    "hue": 144,
+    "saturation": 255,
+    "value": 220,
+    "beamWidth": 2,
+    "trailSpokes": 4,
+    "cycles": 1,
+    "innerRing": 0,
+    "outerRing": 0
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "animation": "BreathingRings",
+  "duration_ms": 2400,
+  "layer": "TransientEffect",
+  "frames": "0:220",
+  "mode": "pipeline",
+  "config": {
+    "hue": 112,
+    "saturation": 255,
+    "value": 170,
+    "spacing": 8,
+    "width": 3,
+    "cycles": 1,
+    "direction": 0,
+    "hueStep": 8
+  }
+}

@@ -3,12 +3,25 @@
 #include "CommandBackend/Interfaces/CommandDesc.hpp"
 #include "CommandBackend/detail/Store.hpp"
 #include "LedDisplay/Animations/AnimationControlCommandDesc.hpp"
+#include "LedDisplay/Animations/Bolt/CommandDesc.hpp"
+#include "LedDisplay/Animations/BreathingRings/CommandDesc.hpp"
 #include "LedDisplay/Animations/CenterWave/CommandDesc.hpp"
+#include "LedDisplay/Animations/Cymatic/CommandDesc.hpp"
 #include "LedDisplay/Animations/DiagnosticFill/CommandDesc.hpp"
-#include "LedDisplay/Animations/FftReactive/CommandDesc.hpp"
+#include "LedDisplay/Animations/Lighthouse/CommandDesc.hpp"
+#include "LedDisplay/Animations/OrbitRing/CommandDesc.hpp"
+#include "LedDisplay/Animations/OrbitSparks/CommandDesc.hpp"
+#include "LedDisplay/Animations/PolarLattice/CommandDesc.hpp"
+#include "LedDisplay/Animations/RadialCurtain/CommandDesc.hpp"
+#include "LedDisplay/Animations/Shutter/CommandDesc.hpp"
 #include "LedDisplay/Animations/SineWave/CommandDesc.hpp"
 #include "LedDisplay/Animations/Sinelon/CommandDesc.hpp"
+#include "LedDisplay/Animations/SpectralIris/CommandDesc.hpp"
+#include "LedDisplay/Animations/SpectralWeave/CommandDesc.hpp"
 #include "LedDisplay/Animations/SpokeSweep/CommandDesc.hpp"
+#include "LedDisplay/Animations/StainedCells/CommandDesc.hpp"
+#include "LedDisplay/Animations/Starburst/CommandDesc.hpp"
+#include "LedDisplay/Animations/Vortex/CommandDesc.hpp"
 #include "LedDisplay/Animations/WheelIndicator/CommandDesc.hpp"
 #include "LedDisplay/Commands/DisplayCommandDesc.hpp"
 #include "LedDisplay/Commands/LayerCommandDesc.hpp"
@@ -111,7 +124,9 @@ inline ReturnCode handleHelp(CommandDesc::ParsedArgs /*unused*/, void *ctx) {
 inline ReturnCode handleAnimRoot(CommandDesc::ParsedArgs /*unused*/,
                                  void * /*unused*/) {
     _log_i("Use /anim "
-           "wave|sinelon|sine|fill|fft|sweep|wheel|wheel-update|stop");
+           "wave|starburst|vortex|shutter|orbit|lighthouse|cymatic|rings|"
+           "curtain|lattice|bolt|sinelon|sine|fill|weave|iris|sparks|cells|"
+           "sweep|wheel|wheel-update|stop");
     return OK();
 }
 
@@ -129,12 +144,25 @@ inline ReturnCode handleLayerRoot(CommandDesc::ParsedArgs /*unused*/,
 
 } // namespace Totem::Support::detail
 
-inline constinit std::array<CommandDesc, 9> animSubcommands{{
+inline constinit std::array<CommandDesc, 22> animSubcommands{{
     Totem::LedDisplay::Animations::centerWaveSubcommand,
+    Totem::LedDisplay::Animations::starburstSubcommand,
+    Totem::LedDisplay::Animations::vortexSubcommand,
+    Totem::LedDisplay::Animations::shutterSubcommand,
+    Totem::LedDisplay::Animations::orbitRingSubcommand,
+    Totem::LedDisplay::Animations::lighthouseSubcommand,
+    Totem::LedDisplay::Animations::cymaticSubcommand,
+    Totem::LedDisplay::Animations::breathingRingsSubcommand,
+    Totem::LedDisplay::Animations::radialCurtainSubcommand,
+    Totem::LedDisplay::Animations::polarLatticeSubcommand,
+    Totem::LedDisplay::Animations::boltSubcommand,
     Totem::LedDisplay::Animations::diagnosticFillSubcommand,
     Totem::LedDisplay::Animations::sinelonSubcommand,
     Totem::LedDisplay::Animations::sineWaveSubcommand,
-    Totem::LedDisplay::Animations::fftReactiveSubcommand,
+    Totem::LedDisplay::Animations::spectralWeaveSubcommand,
+    Totem::LedDisplay::Animations::spectralIrisSubcommand,
+    Totem::LedDisplay::Animations::orbitSparksSubcommand,
+    Totem::LedDisplay::Animations::stainedCellsSubcommand,
     Totem::LedDisplay::Animations::spokeSweepSubcommand,
     Totem::LedDisplay::Animations::wheelIndicatorSubcommand,
     Totem::LedDisplay::Animations::wheelIndicatorUpdateSubcommand,

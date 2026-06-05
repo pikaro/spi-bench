@@ -1,0 +1,17 @@
+{
+  "animation": "Cymatic",
+  "duration_ms": 3200,
+  "layer": "Effect",
+  "frames": "0:260",
+  "mode": "pipeline",
+  "config": {
+    "hue": 176,
+    "saturation": 240,
+    "value": 180,
+    "sourceMode": 0,
+    "wavelength": 36,
+    "speed": 96,
+    "contrast": 180,
+    "hueStep": 16
+  }
+}

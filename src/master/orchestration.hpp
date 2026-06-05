@@ -7,10 +7,12 @@
 #include "CommandBackend/Interfaces/CommandDesc.hpp"
 #include "Data/Peripherals.hpp"
 #include "LedDisplay/Animations/CenterWave/Command.hpp"
-#include "LedDisplay/Animations/FftReactive/Command.hpp"
-#include "LedDisplay/Animations/FftReactive/Config.hpp"
+#include "LedDisplay/Animations/OrbitSparks/Command.hpp"
+#include "LedDisplay/Animations/SpectralIris/Command.hpp"
+#include "LedDisplay/Animations/SpectralWeave/Command.hpp"
 #include "LedDisplay/Animations/SineWave/Command.hpp"
 #include "LedDisplay/Animations/SineWave/Config.hpp"
+#include "LedDisplay/Animations/StainedCells/Command.hpp"
 #include "LedDisplay/Animations/WheelIndicator/Command.hpp"
 #include "LedDisplay/Animations/WheelIndicator/Config.hpp"
 #include "LedDisplay/Interfaces/AnimationCommand.hpp"
@@ -64,11 +66,43 @@ struct PeakWaveMapping {
     uint32_t minIntervalMs = 50;
 };
 
-struct FftFieldMapping {
+enum class FftVisualKind : uint8_t {
+    SpectralWeave,
+    SpectralIris,
+    OrbitSparks,
+    StainedCells,
+};
+
+struct FftVisualPreset {
+    FftVisualKind kind = FftVisualKind::SpectralWeave;
+    const char *name = "weave";
+    uint32_t dwellMs = 45000;
+    uint16_t fadeMs = 10000;
+};
+
+struct FftVisualMapping {
     bool publishOnStartup = true;
-    uint16_t requestId = 3;
+    uint16_t fftRequestId = 3;
+    uint16_t fftAltRequestId = 4;
     uint32_t refreshIntervalMs = 5000;
-    Totem::LedDisplay::Animations::FftReactiveConfig animation{};
+    std::array<FftVisualPreset, 4> presets{{
+        {.kind = FftVisualKind::SpectralWeave,
+         .name = "weave",
+         .dwellMs = 45000,
+         .fadeMs = 10000},
+        {.kind = FftVisualKind::SpectralIris,
+         .name = "iris",
+         .dwellMs = 45000,
+         .fadeMs = 10000},
+        {.kind = FftVisualKind::OrbitSparks,
+         .name = "sparks",
+         .dwellMs = 45000,
+         .fadeMs = 10000},
+        {.kind = FftVisualKind::StainedCells,
+         .name = "cells",
+         .dwellMs = 45000,
+         .fadeMs = 10000},
+    }};
 };
 
 struct DropWaveMapping {
@@ -186,7 +220,7 @@ struct LayerMapping {
 
 struct Config {
     WheelMapping wheel{};
-    FftFieldMapping fftField{};
+    FftVisualMapping fftVisuals{};
     DropWaveMapping dropWave{};
     PeakWaveMapping peakWave{};
     BeatMapping beat{};
@@ -230,12 +264,21 @@ inline bool wheelOffsetDirty = false;
 inline bool wheelIndicatorDirty = false;
 inline bool layerStartupStatePublished = false;
 inline bool ioStartupPublished = false;
-inline bool fftFieldPublished = false;
-inline bool fftFieldSuppressed = false;
+inline bool fftVisualPublished = false;
+inline bool fftVisualSuppressed = false;
+inline bool fftFadeInProgress = false;
+inline Totem::LedDisplay::Layer activeFftLayer = Totem::LedDisplay::Layer::Fft;
+inline Totem::LedDisplay::Layer hiddenFftLayer =
+    Totem::LedDisplay::Layer::FftAlt;
+inline size_t activeFftPresetIndex = 0;
+inline size_t pendingFftPresetIndex = 0;
 inline uint32_t lastWheelPublishMs = 0;
 inline uint32_t lastLayerStartupStatePublishMs = 0;
 inline uint32_t lastIoStartupPublishMs = 0;
-inline uint32_t lastFftFieldPublishMs = 0;
+inline uint32_t lastFftVisualPublishMs = 0;
+inline uint32_t lastFftSwitchMs = 0;
+inline uint32_t fftFadeStartMs = 0;
+inline uint16_t fftFadeDurationMs = 0;
 inline uint32_t lastBellSinelonMs = 0;
 inline uint32_t lastAnyPeakMs = 0;
 inline uint32_t lastDropWaveMs = 0;
@@ -328,6 +371,24 @@ inline ReturnCode publishLayerActive(Totem::LedDisplay::Layer layer,
     return Totem::LedDisplay::publishAnimationCommand(cmd);
 }
 
+inline ReturnCode publishLayerOpacity(Totem::LedDisplay::Layer layer,
+                                      uint8_t opacity) {
+    FAIL_IF_UNEXPECTED_FWD(
+        cmd, Totem::LedDisplay::makeLayerOpacityCommand(layer, opacity),
+        "Failed to build orchestrated layer opacity command");
+    return Totem::LedDisplay::publishAnimationCommand(cmd);
+}
+
+inline ReturnCode publishLayerSwap(Totem::LedDisplay::Layer first,
+                                   Totem::LedDisplay::Layer second,
+                                   uint16_t durationMs) {
+    FAIL_IF_UNEXPECTED_FWD(
+        cmd,
+        Totem::LedDisplay::makeLayerFadeSwapCommand(first, second, durationMs),
+        "Failed to build orchestrated layer swap command");
+    return Totem::LedDisplay::publishAnimationCommand(cmd);
+}
+
 inline ReturnCode publishLayerStartupState() {
     auto ret = OK();
     ret.combine(publishLayerActive(Totem::LedDisplay::Layer::Background,
@@ -409,20 +470,195 @@ inline ReturnCode publishWheelEffects() {
     return OK();
 }
 
-inline ReturnCode publishFftField(bool firstPublish) {
-    FAIL_IF_UNEXPECTED_FWD(
-        cmd,
-        Totem::LedDisplay::Animations::FftReactiveCommand::makeCommand(
-            config.fftField.animation, config.fftField.requestId),
-        "Failed to build orchestrated FFT field animation");
+inline const FftVisualPreset &fftPreset(size_t index) {
+    return config.fftVisuals.presets[index % config.fftVisuals.presets.size()];
+}
+
+inline uint16_t requestIdForFftLayer(Totem::LedDisplay::Layer layer) {
+    return layer == Totem::LedDisplay::Layer::FftAlt
+               ? config.fftVisuals.fftAltRequestId
+               : config.fftVisuals.fftRequestId;
+}
+
+inline ReturnCode publishFftPreset(size_t presetIndex,
+                                   Totem::LedDisplay::Layer layer,
+                                   uint16_t requestId) {
+    const auto &preset = fftPreset(presetIndex);
+    Totem::LedDisplay::AnimationCommand cmd{};
+    switch (preset.kind) {
+    case FftVisualKind::SpectralWeave: {
+        FAIL_IF_UNEXPECTED_FWD(
+            built,
+            Totem::LedDisplay::Animations::SpectralWeaveCommand::makeCommand(
+                {}, requestId,
+                Totem::LedDisplay::Animations::SpectralWeaveCommand::
+                    defaultLifetimeMs,
+                layer),
+            "Failed to build orchestrated spectral weave animation");
+        cmd = built;
+        break;
+    }
+    case FftVisualKind::SpectralIris: {
+        FAIL_IF_UNEXPECTED_FWD(
+            built,
+            Totem::LedDisplay::Animations::SpectralIrisCommand::makeCommand(
+                {}, requestId,
+                Totem::LedDisplay::Animations::SpectralIrisCommand::
+                    defaultLifetimeMs,
+                layer),
+            "Failed to build orchestrated spectral iris animation");
+        cmd = built;
+        break;
+    }
+    case FftVisualKind::OrbitSparks: {
+        FAIL_IF_UNEXPECTED_FWD(
+            built,
+            Totem::LedDisplay::Animations::OrbitSparksCommand::makeCommand(
+                {}, requestId,
+                Totem::LedDisplay::Animations::OrbitSparksCommand::
+                    defaultLifetimeMs,
+                layer),
+            "Failed to build orchestrated orbit sparks animation");
+        cmd = built;
+        break;
+    }
+    case FftVisualKind::StainedCells: {
+        FAIL_IF_UNEXPECTED_FWD(
+            built,
+            Totem::LedDisplay::Animations::StainedCellsCommand::makeCommand(
+                {}, requestId,
+                Totem::LedDisplay::Animations::StainedCellsCommand::
+                    defaultLifetimeMs,
+                layer),
+            "Failed to build orchestrated stained cells animation");
+        cmd = built;
+        break;
+    }
+    default:
+        FAIL(ERR(CoreError, InvalidArgument),
+             "Unknown orchestrated FFT visual kind");
+    }
+
     FAIL_IF_ERR_FWD(Totem::LedDisplay::publishAnimationCommand(cmd),
-                    "Failed to publish orchestrated FFT field animation");
-    if (firstPublish) {
-        _log_i("Published FFT field animation request=%u",
-               config.fftField.requestId);
-    } else {
-        _log_d("Refreshed FFT field animation request=%u",
-               config.fftField.requestId);
+                    "Failed to publish orchestrated FFT visual animation");
+    _log_d("Published FFT visual preset=%s layer=%u request=%u",
+           preset.name, static_cast<unsigned>(layer), requestId);
+    return OK();
+}
+
+inline ReturnCode publishInitialFftVisual(uint32_t nowMs) {
+    activeFftLayer = Totem::LedDisplay::Layer::Fft;
+    hiddenFftLayer = Totem::LedDisplay::Layer::FftAlt;
+    activeFftPresetIndex = 0;
+    pendingFftPresetIndex = 0;
+    fftFadeInProgress = false;
+
+    auto ret = OK();
+    ret.combine(publishLayerActive(activeFftLayer, true));
+    ret.combine(publishLayerOpacity(activeFftLayer, 255));
+    ret.combine(publishLayerActive(hiddenFftLayer, false));
+    ret.combine(publishLayerOpacity(hiddenFftLayer, 0));
+    ret.combine(publishFftPreset(activeFftPresetIndex, activeFftLayer,
+                                 requestIdForFftLayer(activeFftLayer)));
+    if (!ret.ok()) {
+        return ret;
+    }
+
+    lastFftVisualPublishMs = nowMs;
+    lastFftSwitchMs = nowMs;
+    fftVisualPublished = true;
+    const auto &preset = fftPreset(activeFftPresetIndex);
+    _log_i("Started FFT visual preset=%s layer=%u request=%u",
+           preset.name, static_cast<unsigned>(activeFftLayer),
+           requestIdForFftLayer(activeFftLayer));
+    return OK();
+}
+
+inline void completeFftFadeIfDue(uint32_t nowMs) {
+    if (!fftFadeInProgress) {
+        return;
+    }
+    if (nowMs - fftFadeStartMs < fftFadeDurationMs) {
+        return;
+    }
+
+    const auto oldActiveLayer = activeFftLayer;
+    activeFftLayer = hiddenFftLayer;
+    hiddenFftLayer = oldActiveLayer;
+    activeFftPresetIndex = pendingFftPresetIndex;
+    lastFftSwitchMs = nowMs;
+    lastFftVisualPublishMs = nowMs;
+    fftFadeInProgress = false;
+    const auto &preset = fftPreset(activeFftPresetIndex);
+    _log_i("Completed FFT visual fade preset=%s activeLayer=%u hiddenLayer=%u",
+           preset.name, static_cast<unsigned>(activeFftLayer),
+           static_cast<unsigned>(hiddenFftLayer));
+}
+
+inline ReturnCode stageNextFftVisual(uint32_t nowMs) {
+    if (fftFadeInProgress) {
+        return OK();
+    }
+
+    const auto nextPreset =
+        (activeFftPresetIndex + 1U) % config.fftVisuals.presets.size();
+    const auto &preset = fftPreset(nextPreset);
+    const auto requestId = requestIdForFftLayer(hiddenFftLayer);
+
+    FAIL_IF_ERR_FWD(publishLayerActive(hiddenFftLayer, true),
+                    "Failed to activate hidden FFT layer");
+    FAIL_IF_ERR_FWD(publishLayerOpacity(hiddenFftLayer, 0),
+                    "Failed to zero hidden FFT layer opacity");
+    FAIL_IF_ERR_FWD(publishFftPreset(nextPreset, hiddenFftLayer, requestId),
+                    "Failed to publish staged FFT visual");
+    FAIL_IF_ERR_FWD(publishLayerSwap(activeFftLayer, hiddenFftLayer,
+                                     preset.fadeMs),
+                    "Failed to publish FFT visual layer swap");
+
+    pendingFftPresetIndex = nextPreset;
+    fftFadeInProgress = true;
+    fftFadeStartMs = nowMs;
+    fftFadeDurationMs = preset.fadeMs;
+    lastFftVisualPublishMs = nowMs;
+    _log_i("Staged FFT visual preset=%s fromLayer=%u toLayer=%u request=%u "
+           "fade=%ums",
+           preset.name, static_cast<unsigned>(activeFftLayer),
+           static_cast<unsigned>(hiddenFftLayer), requestId,
+           static_cast<unsigned>(preset.fadeMs));
+    return OK();
+}
+
+inline ReturnCode handleFftVisuals(uint32_t nowMs) {
+    if (!config.fftVisuals.publishOnStartup || fftVisualSuppressed) {
+        return OK();
+    }
+
+    completeFftFadeIfDue(nowMs);
+
+    if (!fftVisualPublished) {
+        return publishInitialFftVisual(nowMs);
+    }
+    if (fftFadeInProgress) {
+        return OK();
+    }
+
+    const auto &activePreset = fftPreset(activeFftPresetIndex);
+    if (activePreset.dwellMs != 0 &&
+        nowMs - lastFftSwitchMs >= activePreset.dwellMs) {
+        return stageNextFftVisual(nowMs);
+    }
+
+    const auto elapsed = nowMs - lastFftVisualPublishMs;
+    if (config.fftVisuals.refreshIntervalMs != 0 &&
+        lastFftVisualPublishMs != 0 &&
+        elapsed >= config.fftVisuals.refreshIntervalMs) {
+        FAIL_IF_ERR_FWD(publishFftPreset(activeFftPresetIndex, activeFftLayer,
+                                         requestIdForFftLayer(activeFftLayer)),
+                        "Failed to refresh active FFT visual");
+        lastFftVisualPublishMs = nowMs;
+        _log_d("Refreshed FFT visual preset=%s layer=%u request=%u",
+               activePreset.name, static_cast<unsigned>(activeFftLayer),
+               requestIdForFftLayer(activeFftLayer));
     }
     return OK();
 }
@@ -510,14 +746,18 @@ onAnimationEnvelope(void * /*unused*/,
         cmd, envelope.getPayloadAs<Totem::LedDisplay::AnimationCommand>(),
         "Failed to decode orchestrated animation command");
 
-    const auto stopsFftField =
+    const auto stopsFftVisual =
         cmd.type == Totem::LedDisplay::AnimationCommandType::Stop &&
-        (cmd.requestId == 0 || cmd.requestId == config.fftField.requestId);
-    if (stopsFftField && !fftFieldSuppressed) {
-        fftFieldSuppressed = true;
-        fftFieldPublished = false;
-        lastFftFieldPublishMs = 0;
-        _log_i("Suppressed FFT field refresh after animation stop request=%u",
+        (cmd.requestId == 0 ||
+         cmd.requestId == config.fftVisuals.fftRequestId ||
+         cmd.requestId == config.fftVisuals.fftAltRequestId);
+    if (stopsFftVisual && !fftVisualSuppressed) {
+        fftVisualSuppressed = true;
+        fftVisualPublished = false;
+        fftFadeInProgress = false;
+        lastFftVisualPublishMs = 0;
+        lastFftSwitchMs = 0;
+        _log_i("Suppressed FFT visual sequencing after animation stop request=%u",
                cmd.requestId);
     }
 
@@ -928,21 +1168,10 @@ inline ReturnCode work(uint32_t nowMs, bool allowNormalOperation = true) {
         detail::ioStartupPublished = true;
     }
 
-    const auto fftFieldElapsed = nowMs - detail::lastFftFieldPublishMs;
-    const auto fftFieldRefreshDue =
-        detail::fftFieldPublished && config.fftField.refreshIntervalMs != 0 &&
-        detail::lastFftFieldPublishMs != 0 &&
-        fftFieldElapsed >= config.fftField.refreshIntervalMs;
-    if (config.fftField.publishOnStartup && !detail::fftFieldSuppressed &&
-        (!detail::fftFieldPublished || fftFieldRefreshDue)) {
-        const auto firstPublish = !detail::fftFieldPublished;
-        const auto publishResult = detail::publishFftField(firstPublish);
-        detail::lastFftFieldPublishMs = nowMs;
-        if (!publishResult.ok()) {
-            _log_w("Failed to publish FFT field animation; retrying later");
-            return OK();
-        }
-        detail::fftFieldPublished = true;
+    const auto fftVisualResult = detail::handleFftVisuals(nowMs);
+    if (!fftVisualResult.ok()) {
+        _log_w("Failed to update FFT visual sequencing; retrying later");
+        return OK();
     }
 
     if (!detail::wheelOffsetDirty && !detail::wheelIndicatorDirty) {

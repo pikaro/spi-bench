@@ -1,0 +1,35 @@
+{
+  "animation": "StainedCells",
+  "duration_ms": 0,
+  "layer": "Fft",
+  "frames": "0:249",
+  "mode": "pipeline",
+  "audio": {
+    "bass": {"base": 32, "amp": 190, "period_ms": 1300},
+    "mid": {"base": 30, "amp": 125, "period_ms": 1900, "phase": 96},
+    "high": {"base": 12, "amp": 150, "period_ms": 360, "phase": 180}
+  },
+  "inputs": {
+    "peak": {
+      "group": "Bass",
+      "energy": 220,
+      "lowerBand": 0,
+      "upperBand": 1,
+      "frameSequence": 1
+    }
+  },
+  "config": {
+    "baseHue": 160,
+    "saturation": 245,
+    "value": 210,
+    "baseValue": 10,
+    "seedCount": 6,
+    "borderWidth": 28,
+    "interiorValue": 64,
+    "driftSpeed": 16,
+    "contrast": 180,
+    "peakSensitivity": 96,
+    "seed": 61,
+    "hueModulation": 144
+  }
+}

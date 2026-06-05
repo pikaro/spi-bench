@@ -2,12 +2,25 @@
 #pragma once
 
 #include "HostRuntime.hpp"
+#include "LedDisplay/Animations/Bolt/Animation.hpp"
+#include "LedDisplay/Animations/BreathingRings/Animation.hpp"
 #include "LedDisplay/Animations/CenterWave/Animation.hpp"
+#include "LedDisplay/Animations/Cymatic/Animation.hpp"
 #include "LedDisplay/Animations/DiagnosticFill/Animation.hpp"
-#include "LedDisplay/Animations/FftReactive/Animation.hpp"
+#include "LedDisplay/Animations/Lighthouse/Animation.hpp"
+#include "LedDisplay/Animations/OrbitRing/Animation.hpp"
+#include "LedDisplay/Animations/OrbitSparks/Animation.hpp"
+#include "LedDisplay/Animations/PolarLattice/Animation.hpp"
+#include "LedDisplay/Animations/RadialCurtain/Animation.hpp"
+#include "LedDisplay/Animations/Shutter/Animation.hpp"
 #include "LedDisplay/Animations/SineWave/Animation.hpp"
 #include "LedDisplay/Animations/Sinelon/Animation.hpp"
+#include "LedDisplay/Animations/SpectralIris/Animation.hpp"
+#include "LedDisplay/Animations/SpectralWeave/Animation.hpp"
 #include "LedDisplay/Animations/SpokeSweep/Animation.hpp"
+#include "LedDisplay/Animations/StainedCells/Animation.hpp"
+#include "LedDisplay/Animations/Starburst/Animation.hpp"
+#include "LedDisplay/Animations/Vortex/Animation.hpp"
 #include "LedDisplay/Animations/WheelIndicator/Animation.hpp"
 #include <array>
 #include <optional>
@@ -18,17 +31,135 @@
 
 namespace Totem::LedRender::Generated {
 
-using Payload = std::variant<Totem::LedDisplay::Animations::CenterWave,
+using Payload = std::variant<Totem::LedDisplay::Animations::Bolt,
+                             Totem::LedDisplay::Animations::BreathingRings,
+                             Totem::LedDisplay::Animations::CenterWave,
+                             Totem::LedDisplay::Animations::Cymatic,
                              Totem::LedDisplay::Animations::DiagnosticFill,
-                             Totem::LedDisplay::Animations::FftReactive,
+                             Totem::LedDisplay::Animations::Lighthouse,
+                             Totem::LedDisplay::Animations::OrbitRing,
+                             Totem::LedDisplay::Animations::OrbitSparks,
+                             Totem::LedDisplay::Animations::PolarLattice,
+                             Totem::LedDisplay::Animations::RadialCurtain,
+                             Totem::LedDisplay::Animations::Shutter,
                              Totem::LedDisplay::Animations::SineWave,
                              Totem::LedDisplay::Animations::Sinelon,
+                             Totem::LedDisplay::Animations::SpectralIris,
+                             Totem::LedDisplay::Animations::SpectralWeave,
                              Totem::LedDisplay::Animations::SpokeSweep,
+                             Totem::LedDisplay::Animations::StainedCells,
+                             Totem::LedDisplay::Animations::Starburst,
+                             Totem::LedDisplay::Animations::Vortex,
                              Totem::LedDisplay::Animations::WheelIndicator>;
 
-inline constexpr std::array<std::string_view, 7> animationNames{
-    "CenterWave", "DiagnosticFill", "FftReactive",   "SineWave",
-    "Sinelon",    "SpokeSweep",     "WheelIndicator"};
+inline constexpr std::array<std::string_view, 20> animationNames{
+    "Bolt",           "BreathingRings", "CenterWave",    "Cymatic",
+    "DiagnosticFill", "Lighthouse",     "OrbitRing",     "OrbitSparks",
+    "PolarLattice",   "RadialCurtain",  "Shutter",       "SineWave",
+    "Sinelon",        "SpectralIris",   "SpectralWeave", "SpokeSweep",
+    "StainedCells",   "Starburst",      "Vortex",        "WheelIndicator"};
+
+[[nodiscard]] inline bool
+applyBoltConfig(Totem::LedDisplay::Animations::BoltConfig &config,
+                const JsonValue *configValue, std::string &error) {
+    if (configValue == nullptr) {
+        return true;
+    }
+    if (configValue->kind != JsonValue::Kind::Object) {
+        error = "Config for Bolt must be an object";
+        return false;
+    }
+    for (const auto &[fieldName, value] : configValue->object) {
+        if (fieldName == "hue") {
+            if (!readJsonInteger(value, config.hue, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "saturation") {
+            if (!readJsonInteger(value, config.saturation, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "value") {
+            if (!readJsonInteger(value, config.value, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "width") {
+            if (!readJsonInteger(value, config.width, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "jitter") {
+            if (!readJsonInteger(value, config.jitter, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "forks") {
+            if (!readJsonInteger(value, config.forks, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "seed") {
+            if (!readJsonInteger(value, config.seed, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "outerOrigin") {
+            if (!readJsonBool(value, config.outerOrigin, error, fieldName)) {
+                return false;
+            }
+        } else {
+            error = "Unknown config field for Bolt: " + fieldName;
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] inline bool applyBreathingRingsConfig(
+    Totem::LedDisplay::Animations::BreathingRingsConfig &config,
+    const JsonValue *configValue, std::string &error) {
+    if (configValue == nullptr) {
+        return true;
+    }
+    if (configValue->kind != JsonValue::Kind::Object) {
+        error = "Config for BreathingRings must be an object";
+        return false;
+    }
+    for (const auto &[fieldName, value] : configValue->object) {
+        if (fieldName == "hue") {
+            if (!readJsonInteger(value, config.hue, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "saturation") {
+            if (!readJsonInteger(value, config.saturation, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "value") {
+            if (!readJsonInteger(value, config.value, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "spacing") {
+            if (!readJsonInteger(value, config.spacing, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "width") {
+            if (!readJsonInteger(value, config.width, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "cycles") {
+            if (!readJsonInteger(value, config.cycles, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "direction") {
+            if (!readJsonInteger(value, config.direction, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "hueStep") {
+            if (!readJsonInteger(value, config.hueStep, error, fieldName)) {
+                return false;
+            }
+        } else {
+            error = "Unknown config field for BreathingRings: " + fieldName;
+            return false;
+        }
+    }
+    return true;
+}
 
 [[nodiscard]] inline bool
 applyCenterWaveConfig(Totem::LedDisplay::Animations::CenterWaveConfig &config,
@@ -85,6 +216,57 @@ applyCenterWaveConfig(Totem::LedDisplay::Animations::CenterWaveConfig &config,
     return true;
 }
 
+[[nodiscard]] inline bool
+applyCymaticConfig(Totem::LedDisplay::Animations::CymaticConfig &config,
+                   const JsonValue *configValue, std::string &error) {
+    if (configValue == nullptr) {
+        return true;
+    }
+    if (configValue->kind != JsonValue::Kind::Object) {
+        error = "Config for Cymatic must be an object";
+        return false;
+    }
+    for (const auto &[fieldName, value] : configValue->object) {
+        if (fieldName == "hue") {
+            if (!readJsonInteger(value, config.hue, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "saturation") {
+            if (!readJsonInteger(value, config.saturation, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "value") {
+            if (!readJsonInteger(value, config.value, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "sourceMode") {
+            if (!readJsonInteger(value, config.sourceMode, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "wavelength") {
+            if (!readJsonInteger(value, config.wavelength, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "speed") {
+            if (!readJsonInteger(value, config.speed, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "contrast") {
+            if (!readJsonInteger(value, config.contrast, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "hueStep") {
+            if (!readJsonInteger(value, config.hueStep, error, fieldName)) {
+                return false;
+            }
+        } else {
+            error = "Unknown config field for Cymatic: " + fieldName;
+            return false;
+        }
+    }
+    return true;
+}
+
 [[nodiscard]] inline bool applyDiagnosticFillConfig(
     Totem::LedDisplay::Animations::DiagnosticFillConfig &config,
     const JsonValue *configValue, std::string &error) {
@@ -117,13 +299,120 @@ applyCenterWaveConfig(Totem::LedDisplay::Animations::CenterWaveConfig &config,
 }
 
 [[nodiscard]] inline bool
-applyFftReactiveConfig(Totem::LedDisplay::Animations::FftReactiveConfig &config,
+applyLighthouseConfig(Totem::LedDisplay::Animations::LighthouseConfig &config,
+                      const JsonValue *configValue, std::string &error) {
+    if (configValue == nullptr) {
+        return true;
+    }
+    if (configValue->kind != JsonValue::Kind::Object) {
+        error = "Config for Lighthouse must be an object";
+        return false;
+    }
+    for (const auto &[fieldName, value] : configValue->object) {
+        if (fieldName == "hue") {
+            if (!readJsonInteger(value, config.hue, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "saturation") {
+            if (!readJsonInteger(value, config.saturation, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "value") {
+            if (!readJsonInteger(value, config.value, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "beamWidth") {
+            if (!readJsonInteger(value, config.beamWidth, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "trailSpokes") {
+            if (!readJsonInteger(value, config.trailSpokes, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "cycles") {
+            if (!readJsonInteger(value, config.cycles, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "innerRing") {
+            if (!readJsonInteger(value, config.innerRing, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "outerRing") {
+            if (!readJsonInteger(value, config.outerRing, error, fieldName)) {
+                return false;
+            }
+        } else {
+            error = "Unknown config field for Lighthouse: " + fieldName;
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] inline bool
+applyOrbitRingConfig(Totem::LedDisplay::Animations::OrbitRingConfig &config,
+                     const JsonValue *configValue, std::string &error) {
+    if (configValue == nullptr) {
+        return true;
+    }
+    if (configValue->kind != JsonValue::Kind::Object) {
+        error = "Config for OrbitRing must be an object";
+        return false;
+    }
+    for (const auto &[fieldName, value] : configValue->object) {
+        if (fieldName == "hue") {
+            if (!readJsonInteger(value, config.hue, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "saturation") {
+            if (!readJsonInteger(value, config.saturation, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "value") {
+            if (!readJsonInteger(value, config.value, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "radius") {
+            if (!readJsonInteger(value, config.radius, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "radialWidth") {
+            if (!readJsonInteger(value, config.radialWidth, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "angularWidth") {
+            if (!readJsonInteger(value, config.angularWidth, error,
+                                 fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "comets") {
+            if (!readJsonInteger(value, config.comets, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "laps") {
+            if (!readJsonInteger(value, config.laps, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "trail") {
+            if (!readJsonInteger(value, config.trail, error, fieldName)) {
+                return false;
+            }
+        } else {
+            error = "Unknown config field for OrbitRing: " + fieldName;
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] inline bool
+applyOrbitSparksConfig(Totem::LedDisplay::Animations::OrbitSparksConfig &config,
                        const JsonValue *configValue, std::string &error) {
     if (configValue == nullptr) {
         return true;
     }
     if (configValue->kind != JsonValue::Kind::Object) {
-        error = "Config for FftReactive must be an object";
+        error = "Config for OrbitSparks must be an object";
         return false;
     }
     for (const auto &[fieldName, value] : configValue->object) {
@@ -139,8 +428,69 @@ applyFftReactiveConfig(Totem::LedDisplay::Animations::FftReactiveConfig &config,
             if (!readJsonInteger(value, config.value, error, fieldName)) {
                 return false;
             }
-        } else if (fieldName == "baseValue") {
-            if (!readJsonInteger(value, config.baseValue, error, fieldName)) {
+        } else if (fieldName == "sparkCount") {
+            if (!readJsonInteger(value, config.sparkCount, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "sparkSize") {
+            if (!readJsonInteger(value, config.sparkSize, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "orbitSpeed") {
+            if (!readJsonInteger(value, config.orbitSpeed, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "radialDrift") {
+            if (!readJsonInteger(value, config.radialDrift, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "highSparkle") {
+            if (!readJsonInteger(value, config.highSparkle, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "peakSensitivity") {
+            if (!readJsonInteger(value, config.peakSensitivity, error,
+                                 fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "seed") {
+            if (!readJsonInteger(value, config.seed, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "hueModulation") {
+            if (!readJsonInteger(value, config.hueModulation, error,
+                                 fieldName)) {
+                return false;
+            }
+        } else {
+            error = "Unknown config field for OrbitSparks: " + fieldName;
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] inline bool applyPolarLatticeConfig(
+    Totem::LedDisplay::Animations::PolarLatticeConfig &config,
+    const JsonValue *configValue, std::string &error) {
+    if (configValue == nullptr) {
+        return true;
+    }
+    if (configValue->kind != JsonValue::Kind::Object) {
+        error = "Config for PolarLattice must be an object";
+        return false;
+    }
+    for (const auto &[fieldName, value] : configValue->object) {
+        if (fieldName == "hue") {
+            if (!readJsonInteger(value, config.hue, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "saturation") {
+            if (!readJsonInteger(value, config.saturation, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "value") {
+            if (!readJsonInteger(value, config.value, error, fieldName)) {
                 return false;
             }
         } else if (fieldName == "radialMode") {
@@ -151,30 +501,123 @@ applyFftReactiveConfig(Totem::LedDisplay::Animations::FftReactiveConfig &config,
             if (!readJsonInteger(value, config.angularMode, error, fieldName)) {
                 return false;
             }
-        } else if (fieldName == "symmetry") {
-            if (!readJsonInteger(value, config.symmetry, error, fieldName)) {
+        } else if (fieldName == "speed") {
+            if (!readJsonInteger(value, config.speed, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "mix") {
+            if (!readJsonInteger(value, config.mix, error, fieldName)) {
                 return false;
             }
         } else if (fieldName == "contrast") {
             if (!readJsonInteger(value, config.contrast, error, fieldName)) {
                 return false;
             }
-        } else if (fieldName == "peakSensitivity") {
-            if (!readJsonInteger(value, config.peakSensitivity, error,
-                                 fieldName)) {
+        } else {
+            error = "Unknown config field for PolarLattice: " + fieldName;
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] inline bool applyRadialCurtainConfig(
+    Totem::LedDisplay::Animations::RadialCurtainConfig &config,
+    const JsonValue *configValue, std::string &error) {
+    if (configValue == nullptr) {
+        return true;
+    }
+    if (configValue->kind != JsonValue::Kind::Object) {
+        error = "Config for RadialCurtain must be an object";
+        return false;
+    }
+    for (const auto &[fieldName, value] : configValue->object) {
+        if (fieldName == "hue") {
+            if (!readJsonInteger(value, config.hue, error, fieldName)) {
                 return false;
             }
-        } else if (fieldName == "flowSpeed") {
-            if (!readJsonInteger(value, config.flowSpeed, error, fieldName)) {
+        } else if (fieldName == "saturation") {
+            if (!readJsonInteger(value, config.saturation, error, fieldName)) {
                 return false;
             }
-        } else if (fieldName == "hueModulation") {
-            if (!readJsonInteger(value, config.hueModulation, error,
-                                 fieldName)) {
+        } else if (fieldName == "value") {
+            if (!readJsonInteger(value, config.value, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "width") {
+            if (!readJsonInteger(value, config.width, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "tilt") {
+            if (!readJsonInteger(value, config.tilt, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "speed") {
+            if (!readJsonInteger(value, config.speed, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "outerOrigin") {
+            if (!readJsonBool(value, config.outerOrigin, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "spokePhase") {
+            if (!readJsonInteger(value, config.spokePhase, error, fieldName)) {
                 return false;
             }
         } else {
-            error = "Unknown config field for FftReactive: " + fieldName;
+            error = "Unknown config field for RadialCurtain: " + fieldName;
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] inline bool
+applyShutterConfig(Totem::LedDisplay::Animations::ShutterConfig &config,
+                   const JsonValue *configValue, std::string &error) {
+    if (configValue == nullptr) {
+        return true;
+    }
+    if (configValue->kind != JsonValue::Kind::Object) {
+        error = "Config for Shutter must be an object";
+        return false;
+    }
+    for (const auto &[fieldName, value] : configValue->object) {
+        if (fieldName == "hue") {
+            if (!readJsonInteger(value, config.hue, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "saturation") {
+            if (!readJsonInteger(value, config.saturation, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "value") {
+            if (!readJsonInteger(value, config.value, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "segments") {
+            if (!readJsonInteger(value, config.segments, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "openPct") {
+            if (!readJsonInteger(value, config.openPct, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "edgeWidth") {
+            if (!readJsonInteger(value, config.edgeWidth, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "rotationCycles") {
+            if (!readJsonInteger(value, config.rotationCycles, error,
+                                 fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "mode") {
+            if (!readJsonInteger(value, config.mode, error, fieldName)) {
+                return false;
+            }
+        } else {
+            error = "Unknown config field for Shutter: " + fieldName;
             return false;
         }
     }
@@ -311,6 +754,136 @@ applySinelonConfig(Totem::LedDisplay::Animations::SinelonConfig &config,
     return true;
 }
 
+[[nodiscard]] inline bool applySpectralIrisConfig(
+    Totem::LedDisplay::Animations::SpectralIrisConfig &config,
+    const JsonValue *configValue, std::string &error) {
+    if (configValue == nullptr) {
+        return true;
+    }
+    if (configValue->kind != JsonValue::Kind::Object) {
+        error = "Config for SpectralIris must be an object";
+        return false;
+    }
+    for (const auto &[fieldName, value] : configValue->object) {
+        if (fieldName == "baseHue") {
+            if (!readJsonInteger(value, config.baseHue, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "saturation") {
+            if (!readJsonInteger(value, config.saturation, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "value") {
+            if (!readJsonInteger(value, config.value, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "baseValue") {
+            if (!readJsonInteger(value, config.baseValue, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "petals") {
+            if (!readJsonInteger(value, config.petals, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "aperture") {
+            if (!readJsonInteger(value, config.aperture, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "rimWidth") {
+            if (!readJsonInteger(value, config.rimWidth, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "contrast") {
+            if (!readJsonInteger(value, config.contrast, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "peakSensitivity") {
+            if (!readJsonInteger(value, config.peakSensitivity, error,
+                                 fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "flowSpeed") {
+            if (!readJsonInteger(value, config.flowSpeed, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "hueModulation") {
+            if (!readJsonInteger(value, config.hueModulation, error,
+                                 fieldName)) {
+                return false;
+            }
+        } else {
+            error = "Unknown config field for SpectralIris: " + fieldName;
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] inline bool applySpectralWeaveConfig(
+    Totem::LedDisplay::Animations::SpectralWeaveConfig &config,
+    const JsonValue *configValue, std::string &error) {
+    if (configValue == nullptr) {
+        return true;
+    }
+    if (configValue->kind != JsonValue::Kind::Object) {
+        error = "Config for SpectralWeave must be an object";
+        return false;
+    }
+    for (const auto &[fieldName, value] : configValue->object) {
+        if (fieldName == "baseHue") {
+            if (!readJsonInteger(value, config.baseHue, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "saturation") {
+            if (!readJsonInteger(value, config.saturation, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "value") {
+            if (!readJsonInteger(value, config.value, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "baseValue") {
+            if (!readJsonInteger(value, config.baseValue, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "radialMode") {
+            if (!readJsonInteger(value, config.radialMode, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "angularMode") {
+            if (!readJsonInteger(value, config.angularMode, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "symmetry") {
+            if (!readJsonInteger(value, config.symmetry, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "contrast") {
+            if (!readJsonInteger(value, config.contrast, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "peakSensitivity") {
+            if (!readJsonInteger(value, config.peakSensitivity, error,
+                                 fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "flowSpeed") {
+            if (!readJsonInteger(value, config.flowSpeed, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "hueModulation") {
+            if (!readJsonInteger(value, config.hueModulation, error,
+                                 fieldName)) {
+                return false;
+            }
+        } else {
+            error = "Unknown config field for SpectralWeave: " + fieldName;
+            return false;
+        }
+    }
+    return true;
+}
+
 [[nodiscard]] inline bool
 applySpokeSweepConfig(Totem::LedDisplay::Animations::SpokeSweepConfig &config,
                       const JsonValue *configValue, std::string &error) {
@@ -352,6 +925,186 @@ applySpokeSweepConfig(Totem::LedDisplay::Animations::SpokeSweepConfig &config,
             }
         } else {
             error = "Unknown config field for SpokeSweep: " + fieldName;
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] inline bool applyStainedCellsConfig(
+    Totem::LedDisplay::Animations::StainedCellsConfig &config,
+    const JsonValue *configValue, std::string &error) {
+    if (configValue == nullptr) {
+        return true;
+    }
+    if (configValue->kind != JsonValue::Kind::Object) {
+        error = "Config for StainedCells must be an object";
+        return false;
+    }
+    for (const auto &[fieldName, value] : configValue->object) {
+        if (fieldName == "baseHue") {
+            if (!readJsonInteger(value, config.baseHue, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "saturation") {
+            if (!readJsonInteger(value, config.saturation, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "value") {
+            if (!readJsonInteger(value, config.value, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "baseValue") {
+            if (!readJsonInteger(value, config.baseValue, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "seedCount") {
+            if (!readJsonInteger(value, config.seedCount, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "borderWidth") {
+            if (!readJsonInteger(value, config.borderWidth, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "interiorValue") {
+            if (!readJsonInteger(value, config.interiorValue, error,
+                                 fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "driftSpeed") {
+            if (!readJsonInteger(value, config.driftSpeed, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "contrast") {
+            if (!readJsonInteger(value, config.contrast, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "peakSensitivity") {
+            if (!readJsonInteger(value, config.peakSensitivity, error,
+                                 fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "seed") {
+            if (!readJsonInteger(value, config.seed, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "hueModulation") {
+            if (!readJsonInteger(value, config.hueModulation, error,
+                                 fieldName)) {
+                return false;
+            }
+        } else {
+            error = "Unknown config field for StainedCells: " + fieldName;
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] inline bool
+applyStarburstConfig(Totem::LedDisplay::Animations::StarburstConfig &config,
+                     const JsonValue *configValue, std::string &error) {
+    if (configValue == nullptr) {
+        return true;
+    }
+    if (configValue->kind != JsonValue::Kind::Object) {
+        error = "Config for Starburst must be an object";
+        return false;
+    }
+    for (const auto &[fieldName, value] : configValue->object) {
+        if (fieldName == "hue") {
+            if (!readJsonInteger(value, config.hue, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "saturation") {
+            if (!readJsonInteger(value, config.saturation, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "value") {
+            if (!readJsonInteger(value, config.value, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "rise") {
+            if (!readJsonInteger(value, config.rise, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "peak") {
+            if (!readJsonInteger(value, config.peak, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "wake") {
+            if (!readJsonInteger(value, config.wake, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "points") {
+            if (!readJsonInteger(value, config.points, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "pointGain") {
+            if (!readJsonInteger(value, config.pointGain, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "twist") {
+            if (!readJsonInteger(value, config.twist, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "cycles") {
+            if (!readJsonInteger(value, config.cycles, error, fieldName)) {
+                return false;
+            }
+        } else {
+            error = "Unknown config field for Starburst: " + fieldName;
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] inline bool
+applyVortexConfig(Totem::LedDisplay::Animations::VortexConfig &config,
+                  const JsonValue *configValue, std::string &error) {
+    if (configValue == nullptr) {
+        return true;
+    }
+    if (configValue->kind != JsonValue::Kind::Object) {
+        error = "Config for Vortex must be an object";
+        return false;
+    }
+    for (const auto &[fieldName, value] : configValue->object) {
+        if (fieldName == "hue") {
+            if (!readJsonInteger(value, config.hue, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "saturation") {
+            if (!readJsonInteger(value, config.saturation, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "value") {
+            if (!readJsonInteger(value, config.value, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "arms") {
+            if (!readJsonInteger(value, config.arms, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "twist") {
+            if (!readJsonInteger(value, config.twist, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "width") {
+            if (!readJsonInteger(value, config.width, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "cycles") {
+            if (!readJsonInteger(value, config.cycles, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "hueStep") {
+            if (!readJsonInteger(value, config.hueStep, error, fieldName)) {
+                return false;
+            }
+        } else {
+            error = "Unknown config field for Vortex: " + fieldName;
             return false;
         }
     }
@@ -400,13 +1153,33 @@ applySpokeSweepConfig(Totem::LedDisplay::Animations::SpokeSweepConfig &config,
 [[nodiscard]] inline std::optional<Payload>
 makePayload(std::string_view animation, const JsonValue *configValue,
             std::string &error) {
-    if (animation == "CenterWave") {
+    if (animation == "Bolt") {
+        Totem::LedDisplay::Animations::BoltConfig config{};
+        if (!applyBoltConfig(config, configValue, error)) {
+            return std::nullopt;
+        }
+        return Payload{Totem::LedDisplay::Animations::Bolt{.config = config}};
+    } else if (animation == "BreathingRings") {
+        Totem::LedDisplay::Animations::BreathingRingsConfig config{};
+        if (!applyBreathingRingsConfig(config, configValue, error)) {
+            return std::nullopt;
+        }
+        return Payload{
+            Totem::LedDisplay::Animations::BreathingRings{.config = config}};
+    } else if (animation == "CenterWave") {
         Totem::LedDisplay::Animations::CenterWaveConfig config{};
         if (!applyCenterWaveConfig(config, configValue, error)) {
             return std::nullopt;
         }
         return Payload{
             Totem::LedDisplay::Animations::CenterWave{.config = config}};
+    } else if (animation == "Cymatic") {
+        Totem::LedDisplay::Animations::CymaticConfig config{};
+        if (!applyCymaticConfig(config, configValue, error)) {
+            return std::nullopt;
+        }
+        return Payload{
+            Totem::LedDisplay::Animations::Cymatic{.config = config}};
     } else if (animation == "DiagnosticFill") {
         Totem::LedDisplay::Animations::DiagnosticFillConfig config{};
         if (!applyDiagnosticFillConfig(config, configValue, error)) {
@@ -414,13 +1187,48 @@ makePayload(std::string_view animation, const JsonValue *configValue,
         }
         return Payload{
             Totem::LedDisplay::Animations::DiagnosticFill{.config = config}};
-    } else if (animation == "FftReactive") {
-        Totem::LedDisplay::Animations::FftReactiveConfig config{};
-        if (!applyFftReactiveConfig(config, configValue, error)) {
+    } else if (animation == "Lighthouse") {
+        Totem::LedDisplay::Animations::LighthouseConfig config{};
+        if (!applyLighthouseConfig(config, configValue, error)) {
             return std::nullopt;
         }
         return Payload{
-            Totem::LedDisplay::Animations::FftReactive{.config = config}};
+            Totem::LedDisplay::Animations::Lighthouse{.config = config}};
+    } else if (animation == "OrbitRing") {
+        Totem::LedDisplay::Animations::OrbitRingConfig config{};
+        if (!applyOrbitRingConfig(config, configValue, error)) {
+            return std::nullopt;
+        }
+        return Payload{
+            Totem::LedDisplay::Animations::OrbitRing{.config = config}};
+    } else if (animation == "OrbitSparks") {
+        Totem::LedDisplay::Animations::OrbitSparksConfig config{};
+        if (!applyOrbitSparksConfig(config, configValue, error)) {
+            return std::nullopt;
+        }
+        return Payload{
+            Totem::LedDisplay::Animations::OrbitSparks{.config = config}};
+    } else if (animation == "PolarLattice") {
+        Totem::LedDisplay::Animations::PolarLatticeConfig config{};
+        if (!applyPolarLatticeConfig(config, configValue, error)) {
+            return std::nullopt;
+        }
+        return Payload{
+            Totem::LedDisplay::Animations::PolarLattice{.config = config}};
+    } else if (animation == "RadialCurtain") {
+        Totem::LedDisplay::Animations::RadialCurtainConfig config{};
+        if (!applyRadialCurtainConfig(config, configValue, error)) {
+            return std::nullopt;
+        }
+        return Payload{
+            Totem::LedDisplay::Animations::RadialCurtain{.config = config}};
+    } else if (animation == "Shutter") {
+        Totem::LedDisplay::Animations::ShutterConfig config{};
+        if (!applyShutterConfig(config, configValue, error)) {
+            return std::nullopt;
+        }
+        return Payload{
+            Totem::LedDisplay::Animations::Shutter{.config = config}};
     } else if (animation == "SineWave") {
         Totem::LedDisplay::Animations::SineWaveConfig config{};
         if (!applySineWaveConfig(config, configValue, error)) {
@@ -435,6 +1243,20 @@ makePayload(std::string_view animation, const JsonValue *configValue,
         }
         return Payload{
             Totem::LedDisplay::Animations::Sinelon{.config = config}};
+    } else if (animation == "SpectralIris") {
+        Totem::LedDisplay::Animations::SpectralIrisConfig config{};
+        if (!applySpectralIrisConfig(config, configValue, error)) {
+            return std::nullopt;
+        }
+        return Payload{
+            Totem::LedDisplay::Animations::SpectralIris{.config = config}};
+    } else if (animation == "SpectralWeave") {
+        Totem::LedDisplay::Animations::SpectralWeaveConfig config{};
+        if (!applySpectralWeaveConfig(config, configValue, error)) {
+            return std::nullopt;
+        }
+        return Payload{
+            Totem::LedDisplay::Animations::SpectralWeave{.config = config}};
     } else if (animation == "SpokeSweep") {
         Totem::LedDisplay::Animations::SpokeSweepConfig config{};
         if (!applySpokeSweepConfig(config, configValue, error)) {
@@ -442,6 +1264,26 @@ makePayload(std::string_view animation, const JsonValue *configValue,
         }
         return Payload{
             Totem::LedDisplay::Animations::SpokeSweep{.config = config}};
+    } else if (animation == "StainedCells") {
+        Totem::LedDisplay::Animations::StainedCellsConfig config{};
+        if (!applyStainedCellsConfig(config, configValue, error)) {
+            return std::nullopt;
+        }
+        return Payload{
+            Totem::LedDisplay::Animations::StainedCells{.config = config}};
+    } else if (animation == "Starburst") {
+        Totem::LedDisplay::Animations::StarburstConfig config{};
+        if (!applyStarburstConfig(config, configValue, error)) {
+            return std::nullopt;
+        }
+        return Payload{
+            Totem::LedDisplay::Animations::Starburst{.config = config}};
+    } else if (animation == "Vortex") {
+        Totem::LedDisplay::Animations::VortexConfig config{};
+        if (!applyVortexConfig(config, configValue, error)) {
+            return std::nullopt;
+        }
+        return Payload{Totem::LedDisplay::Animations::Vortex{.config = config}};
     } else if (animation == "WheelIndicator") {
         Totem::LedDisplay::Animations::WheelIndicatorConfig config{};
         if (!applyWheelIndicatorConfig(config, configValue, error)) {
@@ -458,18 +1300,49 @@ makePayload(std::string_view animation, const JsonValue *configValue,
     return std::visit(
         [](const auto &animation) -> std::string_view {
             using Animation = std::remove_cvref_t<decltype(animation)>;
-            if constexpr (std::is_same_v<
-                              Animation,
-                              Totem::LedDisplay::Animations::CenterWave>) {
+            if constexpr (std::is_same_v<Animation,
+                                         Totem::LedDisplay::Animations::Bolt>) {
+                return "Bolt";
+            } else if constexpr (std::is_same_v<Animation,
+                                                Totem::LedDisplay::Animations::
+                                                    BreathingRings>) {
+                return "BreathingRings";
+            } else if constexpr (std::is_same_v<Animation,
+                                                Totem::LedDisplay::Animations::
+                                                    CenterWave>) {
                 return "CenterWave";
+            } else if constexpr (std::is_same_v<
+                                     Animation,
+                                     Totem::LedDisplay::Animations::Cymatic>) {
+                return "Cymatic";
             } else if constexpr (std::is_same_v<Animation,
                                                 Totem::LedDisplay::Animations::
                                                     DiagnosticFill>) {
                 return "DiagnosticFill";
             } else if constexpr (std::is_same_v<Animation,
                                                 Totem::LedDisplay::Animations::
-                                                    FftReactive>) {
-                return "FftReactive";
+                                                    Lighthouse>) {
+                return "Lighthouse";
+            } else if constexpr (std::is_same_v<Animation,
+                                                Totem::LedDisplay::Animations::
+                                                    OrbitRing>) {
+                return "OrbitRing";
+            } else if constexpr (std::is_same_v<Animation,
+                                                Totem::LedDisplay::Animations::
+                                                    OrbitSparks>) {
+                return "OrbitSparks";
+            } else if constexpr (std::is_same_v<Animation,
+                                                Totem::LedDisplay::Animations::
+                                                    PolarLattice>) {
+                return "PolarLattice";
+            } else if constexpr (std::is_same_v<Animation,
+                                                Totem::LedDisplay::Animations::
+                                                    RadialCurtain>) {
+                return "RadialCurtain";
+            } else if constexpr (std::is_same_v<
+                                     Animation,
+                                     Totem::LedDisplay::Animations::Shutter>) {
+                return "Shutter";
             } else if constexpr (std::is_same_v<
                                      Animation,
                                      Totem::LedDisplay::Animations::SineWave>) {
@@ -480,8 +1353,28 @@ makePayload(std::string_view animation, const JsonValue *configValue,
                 return "Sinelon";
             } else if constexpr (std::is_same_v<Animation,
                                                 Totem::LedDisplay::Animations::
+                                                    SpectralIris>) {
+                return "SpectralIris";
+            } else if constexpr (std::is_same_v<Animation,
+                                                Totem::LedDisplay::Animations::
+                                                    SpectralWeave>) {
+                return "SpectralWeave";
+            } else if constexpr (std::is_same_v<Animation,
+                                                Totem::LedDisplay::Animations::
                                                     SpokeSweep>) {
                 return "SpokeSweep";
+            } else if constexpr (std::is_same_v<Animation,
+                                                Totem::LedDisplay::Animations::
+                                                    StainedCells>) {
+                return "StainedCells";
+            } else if constexpr (std::is_same_v<Animation,
+                                                Totem::LedDisplay::Animations::
+                                                    Starburst>) {
+                return "Starburst";
+            } else if constexpr (std::is_same_v<
+                                     Animation,
+                                     Totem::LedDisplay::Animations::Vortex>) {
+                return "Vortex";
             } else if constexpr (std::is_same_v<Animation,
                                                 Totem::LedDisplay::Animations::
                                                     WheelIndicator>) {

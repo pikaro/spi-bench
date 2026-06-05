@@ -1,0 +1,17 @@
+{
+  "animation": "PolarLattice",
+  "duration_ms": 2400,
+  "layer": "TransientEffect",
+  "frames": "0:220",
+  "mode": "pipeline",
+  "config": {
+    "hue": 64,
+    "saturation": 255,
+    "value": 170,
+    "radialMode": 4,
+    "angularMode": 3,
+    "speed": 96,
+    "mix": 128,
+    "contrast": 160
+  }
+}

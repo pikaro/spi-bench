@@ -1,0 +1,32 @@
+{
+  "animation": "SpectralWeave",
+  "duration_ms": 0,
+  "layer": "Fft",
+  "frames": "0:124",
+  "mode": "pipeline",
+  "inputs": {
+    "fft": {
+      "subBass": 64,
+      "bass": 180,
+      "lowMid": 220,
+      "mid": 160,
+      "highMid": 96,
+      "presence": 128,
+      "brilliance": 80,
+      "air": 48
+    }
+  },
+  "config": {
+    "baseHue": 144,
+    "saturation": 255,
+    "value": 220,
+    "baseValue": 20,
+    "radialMode": 2,
+    "angularMode": 3,
+    "symmetry": 1,
+    "contrast": 180,
+    "peakSensitivity": 96,
+    "flowSpeed": 40,
+    "hueModulation": 192
+  }
+}

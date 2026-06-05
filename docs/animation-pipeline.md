@@ -94,13 +94,15 @@ ready.
 `src/master/orchestration.hpp` maps system events into generic LED requests. It
 does not own animation policy. For example, master can publish wheel indicator
 updates, but the wheel indicator animation decides whether and how those
-updates affect pixels. Master also starts and periodically refreshes the
-persistent FFT field after startup using a stable request ID. A stop-all command
-or a stop for that managed request suppresses further refreshes until the master
-restarts, so manual diagnostics can actually silence the field. Master uses
-peak events for lightweight orchestration: ordinary peak events are not
-center-wave requests, but the first peak after a two-second quiet window
-publishes one short center wave as a primitive drop marker.
+updates affect pixels. Master also starts the managed FFT visual sequence after
+startup, periodically refreshes the active persistent request, and crossfades
+between `Fft` and `FftAlt` layers using stable request IDs. A stop-all command
+or a stop for either managed FFT request suppresses further FFT visual
+sequencing until the master restarts, so manual diagnostics can actually
+silence the field. Master uses peak events for lightweight orchestration:
+ordinary peak events are not center-wave requests, but the first peak after a
+two-second quiet window publishes one short center wave as a primitive drop
+marker.
 
 `src/master/led_bringup.hpp` owns the master-triggered LED bring-up probes. It
 publishes generic animation commands after boot so GPU mapping and long-running
@@ -175,8 +177,8 @@ layer scratch before blending.
 The full-frame path exists for future effects such as feedback warping where
 previous or neighboring pixels across GPU boundaries are intrinsic to the
 effect. It should remain opt-in because it doubles render-side pixel work on
-the current two-GPU layout. The current FFT field, wheel indicator, waves, and
-diagnostics do not require full-frame rendering.
+the current two-GPU layout. The current FFT visuals, wheel indicator, waves,
+and diagnostics do not require full-frame rendering.
 
 ## Layers
 
@@ -233,6 +235,55 @@ cycle while `rise` remains unchanged. The layer clears every frame, so the
 visible wave width follows the animation profile instead of inheriting the
 persistent `Effect` layer's decay wake.
 
+`Starburst` is a one-shot pointed burst on the `TransientEffect` layer. It
+reuses the center-wave rise/peak/wake profile but derives a triangular angular
+point scale from `points`, `twist`, and the logical spoke/ring position. High
+point-scale spokes get extra peak width and extra travel distance through
+`pointGain`, while low point-scale spokes are faded out before drawing. The
+burst tips therefore lead, broaden, and stay brighter than the gaps.
+`points = 4` is the default because it is strong on the current 16-spoke
+surface without becoming an every-other-spoke flicker.
+
+`Vortex` is an effect-layer rotating spiral field. It combines logical angle,
+strip radius, elapsed phase, `arms`, and `twist` into a broad sine band. Keep
+`arms` low on the current 16-spoke surface; the default `3` is intentionally
+asymmetric enough to avoid a fixed quarter-turn repeat.
+
+`Shutter` is a transient folded-aperture effect. It folds logical angle into
+`segments`, draws the bright blade edge around `openPct`, and can animate
+openness with `mode`. The command name is `shutter`; `Iris` is not used for
+this simple effect family.
+
+`OrbitRing` is an effect-layer radial-band orbit. It gates pixels by a
+strip-local `radius` and `radialWidth`, then draws one or more angular comet
+lobes with optional trailing wake.
+
+`Lighthouse` is an effect-layer rotating beam. It is related to the bring-up
+spoke sweep but tuned as a show effect: broad angular head, optional spoke
+trail, and optional inner/outer ring bounds.
+
+`Cymatic` is an effect-layer wave-interference field using a small fixed set of
+virtual sources. It uses approximate Cartesian distance from the annular field
+coordinates and low-cost sine bands; `sourceMode` selects opposite, triangular,
+square, or rotating-pair source layouts.
+
+`BreathingRings` is a transient full-surface ring field. It repeats broad
+strip-local radial bands with configurable spacing and width, and can expand,
+contract, or breathe in place through `direction`.
+
+`RadialCurtain` is an effect-layer slanted front. It scans along the radial
+strip like a broad curtain and adds spoke/angle phase offsets so the front
+leans rather than matching the existing straight sine trace.
+
+`PolarLattice` is a transient crossed-field pattern. It mixes radial and
+angular standing waves, then applies contrast so the result can read as rings,
+spokes, or a lattice depending on `mix`.
+
+`Bolt` is an effect-layer deterministic jagged path. It selects a seed spoke,
+then applies bounded hash-derived segment offsets and a long bend along the
+radial direction, with optional forks and glow width. `seed` selects repeatable
+variants.
+
 `Sinelon` is an effect-layer bouncing sine-position head. It can start from the
 inner or outer edge, limit its travel depth, attenuate later edge-to-edge
 bounces, and apply a spoke-to-spoke gain wave. It renders only the current head
@@ -256,10 +307,11 @@ without giving `Display` or the output backend any animation-specific API.
 It is also available manually through `/anim sweep`; use `trailSpokes=0` when
 checking physical spoke order.
 
-`FftReactive` is a polar FFT field on the `Fft` layer by default and can also
-be launched on `FftAlt` for crossfades. Stage the hidden layer at opacity `0`,
-launch the alternate FFT there, then use `/layer swap Fft FftAlt <durationMs>`
-to fade locally on each GPU with one PubSub command. It uses the annular
+`SpectralWeave` is a polar spectral weave field on the `Fft` layer by default
+and can also be launched on `FftAlt` for crossfades. Stage the hidden layer at
+opacity `0`, launch the alternate FFT there, then use
+`/layer swap Fft FftAlt <durationMs>` to fade locally on each GPU with one
+PubSub command. It uses the annular
 coordinate helpers plus the engine's audio controls: smoothed bass/mid/high
 values modulate radial, angular, and high-frequency fields, while peak events
 add restrained attack accents. Hue is driven by both absolute band energy and
@@ -268,6 +320,25 @@ content can produce different colors without sampling raw one-frame FFT bins.
 `hueModulation`
 scales the allowed hue span. It renders a fallback field when no audio input has
 arrived yet. It does not need full-frame rendering.
+
+`SpectralIris` is an FFT-layer aperture and petal field. Bass opens the radial
+aperture, mid strengthens the folded petal mask, high brightens the rim, and
+spectral balance shifts hue. It renders the same logical pixels as
+`SpectralWeave`, uses bounded integer field math, clamps petal count to avoid
+16-spoke aliasing, and renders a reduced fallback field before audio input has
+arrived.
+
+`OrbitSparks` is a sparse FFT-layer ember field. It derives deterministic spark
+positions from a seed, spark index, and time phase instead of storing particle
+state. Bass pushes sparks radially, mid changes angular drift, and high plus
+attack values brighten the splats. Its default style is `MaxValue`, and the
+persistent FFT layer decay provides trails.
+
+`StainedCells` is a low-seed membrane field on the FFT layer. It computes a
+bounded Voronoi-like distance field with wrapped angular distance and squared
+integer distances, then uses bass for interior brightness and high/attack
+values for borders. Seed count is clamped low because this is the most expensive
+of the current FFT visuals.
 
 `WheelIndicator` is a long-running wheel-layer animation with default request
 ID `1`. It renders a small spoke group from the latest wheel position and
@@ -493,9 +564,12 @@ Checked-in sample configs live under `tools/led-render/examples/`:
 - `center-wave-green-purple-adjacent.json`
 - `wheel-indicator-static.json`
 - `spoke-sweep.json`
-- `fft-reactive-static.json`
-- `fft-polar-static.json`
-- `fft-polar-audio-sweep.json`
+- `spectral-weave-static.json`
+- `spectral-weave-polar-static.json`
+- `spectral-weave-audio-sweep.json`
+- `spectral-iris.json`
+- `orbit-sparks.json`
+- `stained-cells.json`
 
 Current implementation status:
 

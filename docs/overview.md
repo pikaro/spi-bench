@@ -89,6 +89,9 @@ organized as follows:
 - `include/FileSystem/`: static-memory filesystem wrapper selected through the
     component detail layer; the current backend is ESP-IDF LittleFS mounted at
     `/littlefs`
+- `include/SecretStorage/`: uncached byte-oriented key/value storage backed by
+    the configured ESP32 NVS partition; `CoreSetup` binds it through
+    `SecretService`, and typed reads require an exact stored size
 - `include/Wifi/`: ESP32 WiFi lifecycle wrapper with bounded project-owned
     config, status reporting, and master command integration
 - `include/Network/`: thin lwIP UDP/TCP socket wrappers and diagnostic commands
@@ -217,10 +220,12 @@ failures, queued/handled command counts, and opt-in task-step profiling.
     parent environment arguments when overriding the field; otherwise ESP-IDF
     component flags such as `ENABLE_SPI` are silently dropped for that
     environment.
-- Master WiFi credentials are not tracked. Create
+- Master WiFi network selection is not tracked. Create
     `src/master/wifi_credentials.hpp` from
-    `src/master/wifi_credentials.example.hpp` for local station/AP credentials;
-    the firmware falls back to disabled WiFi when that ignored file is absent.
+    `src/master/wifi_credentials.example.hpp` for local station/AP SSIDs and
+    mode; provision passwords into the `wifi-sta-pass` or `wifi-ap-pass` secret
+    keys. The firmware falls back to disabled WiFi when the ignored config file
+    is absent.
 - Top-level `CMakeLists.txt` requires `SRC_ROOT` and maps it to the selected
     source subtree
 - `src/CMakeLists.txt` maps PlatformIO environments to source roots through

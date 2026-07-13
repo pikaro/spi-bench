@@ -48,7 +48,7 @@ inline constexpr Totem::Wifi::Config wifiConfig{
             .credentials =
                 {
                     .ssid = MasterWifiCredentials::Station::ssid,
-                    .password = MasterWifiCredentials::Station::password,
+                    .passwordSecretName = "wifi-sta-pass",
                 },
             .reconnect = Totem::StaticConfig::Wifi::defaultStationReconnect,
             .maxReconnectAttempts =

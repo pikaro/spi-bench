@@ -10,9 +10,11 @@
 #include "Mutex/detail/Metrics.hpp"
 #include "Platform/Console.hpp"
 #include "Platform/PlatformSelect.hpp"
+#include "SecretStorage/Facade.hpp"
 #include "Services/Commands.hpp"
 #include "Services/FileSystem.hpp"
 #include "Services/Metrics.hpp"
+#include "Services/Secret.hpp"
 #include "Services/StatusLed.hpp"
 #include "StaticConfig/Logging.hpp"
 #include "StatusLed/Facade.hpp"
@@ -61,6 +63,9 @@ struct CoreSetup {
 
         LoggingService::set(aggregator);
         ABORT_IF_ERR_BEGIN(Totem::LoggingBackend::NativeLogBridge::begin());
+
+        ABORT_IF_ERR_BEGIN(secretStorage.begin());
+        SecretService::set(secretStorage);
 
         auto fileSystemBegin = fileSystem.begin();
         if (!fileSystemBegin.ok()) {
@@ -142,5 +147,6 @@ struct CoreSetup {
     Totem::CommandBackend::ConsoleTransport consoleSource;
     Totem::TaskControllerRegistry::SystemTaskSource systemTaskSource;
     Totem::Monitoring::Monitoring monitoring;
+    Totem::SecretStorage::Storage secretStorage;
     FileSystemService::DefaultFileSystem fileSystem;
 };

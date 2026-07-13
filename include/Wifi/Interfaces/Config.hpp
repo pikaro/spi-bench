@@ -12,6 +12,7 @@ namespace detail {
 
 inline constexpr std::size_t maxSsidLength = 32;
 inline constexpr std::size_t maxPasswordLength = 63;
+inline constexpr std::size_t maxPasswordSecretNameLength = 15;
 
 [[nodiscard]] constexpr std::size_t boundedLength(const char *value,
                                                   std::size_t maxLength) {
@@ -31,21 +32,21 @@ inline constexpr std::size_t maxPasswordLength = 63;
     return length >= 1 && length <= maxSsidLength;
 }
 
-[[nodiscard]] constexpr bool validPassword(const char *password) {
-    const auto length = boundedLength(password, maxPasswordLength);
-    return length == 0 || (length >= 8 && length <= maxPasswordLength);
+[[nodiscard]] constexpr bool validPasswordSecretName(const char *name) {
+    const auto length = boundedLength(name, maxPasswordSecretNameLength);
+    return length >= 1 && length <= maxPasswordSecretNameLength;
 }
 
 } // namespace detail
 
 struct StationCredentials {
     const char *ssid = nullptr;
-    const char *password = nullptr;
+    const char *passwordSecretName = nullptr;
 };
 
 struct AccessPointCredentials {
     const char *ssid = nullptr;
-    const char *password = nullptr;
+    const char *passwordSecretName = nullptr;
 };
 
 struct StationConfig {
@@ -56,7 +57,7 @@ struct StationConfig {
 
     [[nodiscard]] constexpr bool validate() const {
         return detail::validSsid(credentials.ssid) &&
-               detail::validPassword(credentials.password);
+               detail::validPasswordSecretName(credentials.passwordSecretName);
     }
 };
 
@@ -68,8 +69,9 @@ struct AccessPointConfig {
 
     [[nodiscard]] constexpr bool validate() const {
         return detail::validSsid(credentials.ssid) &&
-               detail::validPassword(credentials.password) && channel >= 1 &&
-               channel <= 13 && maxConnections > 0;
+               detail::validPasswordSecretName(
+                   credentials.passwordSecretName) &&
+               channel >= 1 && channel <= 13 && maxConnections > 0;
     }
 };
 

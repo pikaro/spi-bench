@@ -18,12 +18,10 @@ namespace MasterWifiCredentials {
 
 struct Station {
     inline static constexpr const char *ssid = "";
-    inline static constexpr const char *password = "";
 };
 
 struct AccessPoint {
     inline static constexpr const char *ssid = "";
-    inline static constexpr const char *password = "";
 };
 
 inline constexpr Totem::Wifi::Mode mode = Totem::Wifi::Mode::Disabled;
@@ -176,7 +174,7 @@ inline constexpr Totem::Wifi::Config wifiConfig{
             .credentials =
                 {
                     .ssid = MasterWifiCredentials::Station::ssid,
-                    .password = MasterWifiCredentials::Station::password,
+                    .passwordSecretName = "wifi-sta-pass",
                 },
             .reconnect = Totem::StaticConfig::Wifi::defaultStationReconnect,
             .maxReconnectAttempts =
@@ -187,7 +185,7 @@ inline constexpr Totem::Wifi::Config wifiConfig{
             .credentials =
                 {
                     .ssid = MasterWifiCredentials::AccessPoint::ssid,
-                    .password = MasterWifiCredentials::AccessPoint::password,
+                    .passwordSecretName = "wifi-ap-pass",
                 },
             .channel = Totem::StaticConfig::Wifi::defaultApChannel,
             .hidden = false,

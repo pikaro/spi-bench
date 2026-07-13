@@ -20,6 +20,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <string_view>
 #include <utility>
 
 namespace Totem::Wifi::detail::platform {
@@ -34,7 +35,7 @@ class PlatformESP32 {
     PlatformESP32() = default;
     ~PlatformESP32() { (void)end(); }
 
-    ReturnCode begin(const Config &config) {
+    ReturnCode begin(const Config &config, std::string_view password) {
         if (_initialized || _netif != nullptr) {
             return ERR(LifecycleError, Active);
         }
@@ -48,7 +49,7 @@ class PlatformESP32 {
             return OK();
         }
 
-        auto ret = beginEnabled();
+        auto ret = beginEnabled(password);
         if (!ret.ok()) {
             const auto cleanup = end();
             if (!cleanup.ok()) {
@@ -123,7 +124,7 @@ class PlatformESP32 {
         return ::platform::map_platform_error(err);
     }
 
-    ReturnCode beginEnabled() {
+    ReturnCode beginEnabled(std::string_view password) {
         FAIL_IF_ERR_FWD(mapAlreadyInitialized(esp_netif_init()),
                         "Failed to initialize esp-netif");
         FAIL_IF_ERR_FWD(mapAlreadyInitialized(esp_event_loop_create_default()),
@@ -169,18 +170,18 @@ class PlatformESP32 {
                 "Failed to select station WiFi bandwidth");
         }
 
-        FAIL_IF_ERR_FWD(configureDriver(), "Failed to configure WiFi driver");
+        FAIL_IF_ERR_FWD(configureDriver(password),
+                        "Failed to configure WiFi driver");
         FAIL_IF_PLATFORM_FWD(esp_wifi_start(), "Failed to start WiFi driver");
         setMaxTxPowerBestEffort();
         return OK();
     }
 
-    ReturnCode configureDriver() {
+    ReturnCode configureDriver(std::string_view password) {
         wifi_config_t driverConfig{};
         if (_config.mode == Mode::Station) {
             copyBytes(driverConfig.sta.ssid, _config.station->credentials.ssid);
-            copyBytes(driverConfig.sta.password,
-                      _config.station->credentials.password);
+            copyBytes(driverConfig.sta.password, password);
             driverConfig.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
             driverConfig.sta.pmf_cfg.capable = true;
             driverConfig.sta.pmf_cfg.required = false;
@@ -192,11 +193,9 @@ class PlatformESP32 {
 
         const auto ssidLength =
             stringLength(_config.accessPoint->credentials.ssid);
-        const auto passwordLength =
-            stringLength(_config.accessPoint->credentials.password);
+        const auto passwordLength = password.size();
         copyBytes(driverConfig.ap.ssid, _config.accessPoint->credentials.ssid);
-        copyBytes(driverConfig.ap.password,
-                  _config.accessPoint->credentials.password);
+        copyBytes(driverConfig.ap.password, password);
         driverConfig.ap.ssid_len = static_cast<uint8_t>(ssidLength);
         driverConfig.ap.channel = _config.accessPoint->channel;
         driverConfig.ap.ssid_hidden = _config.accessPoint->hidden ? 1U : 0U;
@@ -218,6 +217,12 @@ class PlatformESP32 {
         const auto length = stringLength(value);
         const auto bytesToCopy = length < Size ? length : Size;
         std::memcpy(out, value, bytesToCopy);
+    }
+
+    template <std::size_t Size>
+    static void copyBytes(uint8_t (&out)[Size], std::string_view value) {
+        const auto bytesToCopy = value.size() < Size ? value.size() : Size;
+        std::memcpy(out, value.data(), bytesToCopy);
     }
 
     static std::size_t stringLength(const char *value) {

@@ -4,8 +4,8 @@
 #include "AudioSource/Interfaces/SourceConfig.hpp"
 #include "Network/Interfaces/Endpoint.hpp"
 #include <cstddef>
-#include <cstring>
 #include <cstdint>
+#include <cstring>
 
 namespace Totem::AudioSink {
 
@@ -124,12 +124,13 @@ struct WebSocketSinkConfig {
     NetworkSinkConfig network{};
     const char *path = "/";
     bool secure = true;
-    const char *bearerToken = nullptr;
+    const char *bearerTokenSecretName = nullptr;
     const char *trustedRootPem = nullptr;
     std::size_t packetBytes = webSocketDefaultPacketBytes;
 
     [[nodiscard]] bool hasBearerToken() const {
-        return bearerToken != nullptr && bearerToken[0] != '\0';
+        return bearerTokenSecretName != nullptr &&
+               bearerTokenSecretName[0] != '\0';
     }
 
     [[nodiscard]] bool hasTrustedRootPem() const {
@@ -138,7 +139,7 @@ struct WebSocketSinkConfig {
 
     [[nodiscard]] bool validate() const {
         const auto tokenLength =
-            hasBearerToken() ? std::strlen(bearerToken) : 0;
+            hasBearerToken() ? std::strlen(bearerTokenSecretName) : 0;
         return network.validateEndpointOrHostName() && path != nullptr &&
                path[0] == '/' && packetBytes > 0 &&
                packetBytes <= webSocketMaxPacketBytes &&

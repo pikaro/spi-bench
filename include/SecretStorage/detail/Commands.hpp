@@ -8,6 +8,7 @@
 #include "Types/Error.hpp"
 #include <array>
 #include <cstddef>
+#include <cstring>
 #include <span>
 #include <string_view>
 
@@ -60,12 +61,29 @@ template <typename Owner> struct Commands {
         FAIL_IF(!key.ok || !value.ok, ERR(CommandError, BadArgument),
                 "Missing or invalid arguments for /secret set");
 
-        const auto bytes =
-            std::as_bytes(std::span{value.value.data(), value.value.size()});
-        FAIL_IF_ERR_FWD(storage->set(key.value, bytes),
-                        "Failed to store secret " SV_FMT, SV_ARG(key.value));
+        std::array<std::byte, CommandConfig::maxLineLen> bytes{};
+        std::size_t bytesUsed = 0;
+        for (std::size_t i = 1; i < args.tokens.size(); ++i) {
+            if (i > 1) {
+                FAIL_IF(bytesUsed == bytes.size(), ERR(CoreError, InvalidSize),
+                        "Secret value exceeds console line capacity");
+                bytes[bytesUsed++] = std::byte{' '};
+            }
+
+            const auto token = args.tokens[i];
+            FAIL_IF(token.size() > bytes.size() - bytesUsed,
+                    ERR(CoreError, InvalidSize),
+                    "Secret value exceeds console line capacity");
+            std::memcpy(bytes.data() + bytesUsed, token.data(), token.size());
+            bytesUsed += token.size();
+        }
+
+        FAIL_IF_ERR_FWD(
+            storage->set(key.value,
+                         std::span<const std::byte>{bytes}.first(bytesUsed)),
+            "Failed to store secret " SV_FMT, SV_ARG(key.value));
         _log_i("Stored secret " SV_FMT " (%zu bytes)", SV_ARG(key.value),
-               bytes.size());
+               bytesUsed);
         return OK();
     }
 
@@ -97,7 +115,7 @@ template <typename Owner> struct Commands {
         },
         {
             .name = "set",
-            .description = "Store a secret token",
+            .description = "Store remaining tokens as a secret",
             .args = {CommandBackend::arg<std::string_view>("key"),
                      CommandBackend::arg<std::string_view>("value")},
             .handler = handleSet,

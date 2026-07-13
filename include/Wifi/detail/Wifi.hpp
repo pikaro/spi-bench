@@ -2,14 +2,12 @@
 
 #include "Base/HasLifecycle.hpp"
 #include "LoggingBackend/Interfaces/Types.hpp"
-#include "Services/Secret.hpp"
+#include "Macros/Facade.hpp"
+#include "SecretStorage/Interfaces/Secret.hpp"
 #include "Types/Error.hpp"
 #include "Wifi/Interfaces/Config.hpp"
 #include "Wifi/Interfaces/Types.hpp"
 #include "Wifi/detail/PlatformSelect.hpp"
-#include <array>
-#include <cstddef>
-#include <span>
 #include <string_view>
 
 namespace Totem::Wifi::detail {
@@ -38,26 +36,16 @@ class Wifi : public HasLifecycle<Wifi, Config> {
             config().mode == Mode::Station
                 ? config().station->credentials.passwordSecretName
                 : config().accessPoint->credentials.passwordSecretName;
-        FAIL_IF_UNEXPECTED_FWD(passwordSize, SecretService::size(secretName),
-                               "WiFi password secret %s is not set",
-                               secretName);
-        FAIL_IF(passwordSize < 8 || passwordSize > detail::maxPasswordLength,
-                ERR(CoreError, InvalidSize),
-                "WiFi password secret %s must contain 8-%zu bytes", secretName,
-                detail::maxPasswordLength);
 
-        std::array<std::byte, detail::maxPasswordLength> password{};
-        FAIL_IF_UNEXPECTED_FWD(
-            bytesRead,
-            SecretService::get(
-                secretName, std::span<std::byte>{password}.first(passwordSize)),
-            "Failed to read WiFi password secret %s", secretName);
-        FAIL_IF(bytesRead != passwordSize, ERR(CoreError, InvalidSize),
-                "WiFi password secret %s changed size while being read",
+        auto passwordSecret =
+            SecretStorage::Secret<maxPasswordLength, minPasswordLength>(
                 secretName);
+        FAIL_IF_ERR_FWD(passwordSecret.read(),
+                        "Failed to read WiFi password secret %s", secretName);
 
         const auto passwordView = std::string_view{
-            reinterpret_cast<const char *>(password.data()), bytesRead};
+            reinterpret_cast<const char *>(passwordSecret.view().data()),
+            passwordSecret.size()};
         return _platform.begin(config(), passwordView);
     }
     ReturnCode _onEnd() { return _platform.end(); }

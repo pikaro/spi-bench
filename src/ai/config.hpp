@@ -7,7 +7,7 @@
 #include "StatusLed/Interfaces/Config.hpp"
 #include "Wifi/Interfaces/Config.hpp"
 #include "Wifi/Interfaces/Types.hpp"
-#include "wifi_credentials.hpp"
+#include "pcm16_downsampler.hpp"
 
 inline constexpr bool enableFftDebugDisplay = true;
 
@@ -41,13 +41,36 @@ inline constexpr Totem::AudioSource::I2SSourceConfig i2sAudioSourceConfig{
         },
 };
 
+inline constexpr AiAudio::Pcm16DownsamplerConfig nemoAsrDownsamplerConfig =
+    AiAudio::defaultNemoAsrDownsamplerConfig;
+
+inline constexpr Totem::AudioSink::I2SSinkConfig max98357LoopbackSinkConfig{
+    .device = Totem::AudioSink::I2SSinkDevicePreset::Custom,
+    .customLink =
+        {
+            .audio = AiAudio::nemoAsrPcmAudio,
+            .hostClockRole =
+                Totem::AudioSink::I2SHostClockRole::ProvidesClock,
+            .format = Totem::AudioSink::I2SFormat::Philips,
+            .channel = Totem::AudioSink::I2SChannelSelect::Left,
+            .port = 1,
+            .useApll = true,
+        },
+    .pins =
+        {
+            .bitClock = Pin::A5,
+            .wordSelect = Pin::A4,
+            .dataOut = Pin::A6,
+        },
+};
+
 inline constexpr Totem::Wifi::Config wifiConfig{
     .mode = Totem::Wifi::Mode::Station,
     .station =
         Totem::Wifi::StationConfig{
             .credentials =
                 {
-                    .ssid = MasterWifiCredentials::Station::ssid,
+                    .ssid = "dre-guest",
                     .passwordSecretName = "wifi-sta-pass",
                 },
             .reconnect = Totem::StaticConfig::Wifi::defaultStationReconnect,

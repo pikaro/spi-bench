@@ -20,5 +20,4 @@ __pycache__/
 data/
 telemetry/
 docs/wifi.md
-wifi_credentials.hpp
 *.tled

@@ -10,26 +10,6 @@
 #include "Wire/Spi/Interfaces/MasterConfig.hpp"
 #include "Wire/Spi/Interfaces/Types.hpp"
 
-#if __has_include("wifi_credentials.hpp")
-#include "wifi_credentials.hpp"
-inline constexpr bool masterWifiCredentialsConfigured = true;
-#else
-namespace MasterWifiCredentials {
-
-struct Station {
-    inline static constexpr const char *ssid = "";
-};
-
-struct AccessPoint {
-    inline static constexpr const char *ssid = "";
-};
-
-inline constexpr Totem::Wifi::Mode mode = Totem::Wifi::Mode::Disabled;
-
-} // namespace MasterWifiCredentials
-inline constexpr bool masterWifiCredentialsConfigured = false;
-#endif
-
 #ifndef PUBSUB_STAR_MASTER_HIGH_SPI_CLOCK_HZ
 #define PUBSUB_STAR_MASTER_HIGH_SPI_CLOCK_HZ 10000000
 #endif
@@ -168,12 +148,12 @@ inline constexpr Totem::StatusLed::Config statusLedConfig{
 };
 
 inline constexpr Totem::Wifi::Config wifiConfig{
-    .mode = MasterWifiCredentials::mode,
+    .mode = Totem::Wifi::Mode::Station,
     .station =
-        {
+        Totem::Wifi::StationConfig{
             .credentials =
                 {
-                    .ssid = MasterWifiCredentials::Station::ssid,
+                    .ssid = "dre-guest",
                     .passwordSecretName = "wifi-sta-pass",
                 },
             .reconnect = Totem::StaticConfig::Wifi::defaultStationReconnect,
@@ -181,10 +161,10 @@ inline constexpr Totem::Wifi::Config wifiConfig{
                 Totem::StaticConfig::Wifi::defaultStationMaxReconnectAttempts,
         },
     .accessPoint =
-        {
+        Totem::Wifi::AccessPointConfig{
             .credentials =
                 {
-                    .ssid = MasterWifiCredentials::AccessPoint::ssid,
+                    .ssid = "totem",
                     .passwordSecretName = "wifi-ap-pass",
                 },
             .channel = Totem::StaticConfig::Wifi::defaultApChannel,

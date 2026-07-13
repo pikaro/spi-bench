@@ -8,7 +8,6 @@
 #include "AudioTools/CoreAudio/AudioI2S/I2SESP32V1.h"
 #include "AudioTools/CoreAudio/AudioTypes.h"
 #include "AudioTools/CoreAudio/AudioI2S/I2SConfig.h"
-#include "AudioTools/CoreAudio/AudioStreams.h"
 #include "AudioTools/CoreAudio/BaseStream.h"
 #include "Macros/Facade.hpp"
 #include "Types/Error.hpp"

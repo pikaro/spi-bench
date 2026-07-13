@@ -12,6 +12,7 @@
 #include "AudioTools/CoreAudio/BaseStream.h"
 #include "Macros/Facade.hpp"
 #include "Network/detail/TcpSocket.hpp"
+#include "SecretStorage/Interfaces/Secret.hpp"
 #include "Types/Error.hpp"
 #include "driver/i2s_std.h"
 #include "esp_err.h"
@@ -162,8 +163,7 @@ class I2SOutputStream {
         platformConfig.pin_data_rx = I2S_GPIO_UNUSED;
         platformConfig.use_apll = config.useApll;
 
-        FAIL_IF(!_stream.begin(platformConfig),
-                ERR(CoreError, OperationFailed),
+        FAIL_IF(!_stream.begin(platformConfig), ERR(CoreError, OperationFailed),
                 "Failed to begin I2S output stream");
         _info = config.audio;
         _active = true;
@@ -206,8 +206,7 @@ class TcpOutputStream : public audio_tools::AudioStream {
     ReturnCode begin(const NetworkSinkConfig &config) {
         FAIL_IF(_active, ERR(CoreError, InvalidState),
                 "TCP output stream already active");
-        FAIL_IF(!config.validateEndpointOnly(),
-                ERR(CoreError, InvalidArgument),
+        FAIL_IF(!config.validateEndpointOnly(), ERR(CoreError, InvalidArgument),
                 "Invalid TCP output stream config");
         _config = config;
         setAudioInfo(toPlatformAudioInfo(_config.audio));
@@ -286,9 +285,8 @@ class TcpOutputStream : public audio_tools::AudioStream {
         _lastConnectAttemptMs = nowMs;
 
         (void)_connection.close();
-        const auto ret = _client.connectTo(_config.endpoint,
-                                           _config.connectTimeoutMs,
-                                           _connection);
+        const auto ret = _client.connectTo(
+            _config.endpoint, _config.connectTimeoutMs, _connection);
         if (!ret.ok()) {
             return false;
         }
@@ -354,11 +352,12 @@ class WebSocketOutputStream : public audio_tools::AudioStream {
 
         std::size_t offset = 0;
         while (offset < len) {
-            const auto chunk = std::min<std::size_t>(
-                _config.packetBytes, len - offset);
+            const auto chunk =
+                std::min<std::size_t>(_config.packetBytes, len - offset);
             std::memcpy(_packetBuffer.data(), data + offset, chunk);
             const auto written = esp_transport_write(
-                _webSocket, reinterpret_cast<const char *>(_packetBuffer.data()),
+                _webSocket,
+                reinterpret_cast<const char *>(_packetBuffer.data()),
                 static_cast<int>(chunk), _config.network.writeTimeoutMs);
             if (written != static_cast<int>(chunk)) {
                 _writeFailures += 1;
@@ -418,11 +417,16 @@ class WebSocketOutputStream : public audio_tools::AudioStream {
         if (!_config.hasBearerToken()) {
             return OK();
         }
-        const auto ret =
-            std::snprintf(_authHeader.data(), _authHeader.size(),
-                          "Bearer %s", _config.bearerToken);
-        FAIL_IF(ret < 0 ||
-                    static_cast<std::size_t>(ret) >= _authHeader.size(),
+        auto tokenSecret =
+            SecretStorage::Secret<webSocketMaxBearerTokenBytes, 1>{
+                _config.bearerTokenSecretName};
+        FAIL_IF_ERR_FWD(tokenSecret.read(),
+                        "Failed to read WebSocket bearer token secret");
+        const auto ret = std::snprintf(
+            _authHeader.data(), _authHeader.size(), "Bearer %.*s",
+            static_cast<int>(tokenSecret.size()),
+            reinterpret_cast<const char *>(tokenSecret.view().data()));
+        FAIL_IF(ret < 0 || static_cast<std::size_t>(ret) >= _authHeader.size(),
                 ERR(CoreError, InvalidSize),
                 "WebSocket bearer token is too long");
         return OK();
@@ -451,10 +455,9 @@ class WebSocketOutputStream : public audio_tools::AudioStream {
             return false;
         }
 
-        const auto connectRet =
-            esp_transport_connect(_webSocket, _host(),
-                                  _config.network.endpoint.port,
-                                  _config.network.connectTimeoutMs);
+        const auto connectRet = esp_transport_connect(
+            _webSocket, _host(), _config.network.endpoint.port,
+            _config.network.connectTimeoutMs);
         if (connectRet != 0) {
             _destroyTransport();
             return false;
@@ -531,10 +534,8 @@ class WebSocketOutputStream : public audio_tools::AudioStream {
 
 struct Platform {
     using AudioStream = audio_tools::AudioStream;
-    using I2SOutputStream =
-        Totem::AudioSink::detail::platform::I2SOutputStream;
-    using TcpOutputStream =
-        Totem::AudioSink::detail::platform::TcpOutputStream;
+    using I2SOutputStream = Totem::AudioSink::detail::platform::I2SOutputStream;
+    using TcpOutputStream = Totem::AudioSink::detail::platform::TcpOutputStream;
     using WebSocketOutputStream =
         Totem::AudioSink::detail::platform::WebSocketOutputStream;
 

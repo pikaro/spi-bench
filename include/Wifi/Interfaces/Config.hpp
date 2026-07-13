@@ -11,6 +11,7 @@ namespace Totem::Wifi {
 namespace detail {
 
 inline constexpr std::size_t maxSsidLength = 32;
+inline constexpr std::size_t minPasswordLength = 8;
 inline constexpr std::size_t maxPasswordLength = 63;
 inline constexpr std::size_t maxPasswordSecretNameLength = 15;
 

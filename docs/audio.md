@@ -98,6 +98,16 @@ The initial sinks mirror the source model: they expose an audio-tools
     certificate pointer in config, for example a Let's Encrypt root supplied by
     the firmware source.
 
+The AI node has one app-local PCM adapter in `src/ai/pcm16_downsampler.hpp`.
+It is intentionally not part of the shared audio component model yet: it adapts
+the current SPH0645 source format, 32 kHz 32-bit mono PCM, into the 16 kHz
+signed 16-bit little-endian mono PCM expected by NeMo ASR streaming. Because
+this is an exact 2:1 conversion, the adapter averages adjacent input samples as
+a small fixed low-pass/downsample step and clips the shifted result to PCM16.
+The current AI firmware validates that local stream by sending it through a
+one-second PCM16 delay line and then to a MAX98357 I2S sink on the separate
+output I2S port.
+
 Enabling `A2DPSource` requires the ESP-IDF Bluedroid Bluetooth stack. On the
 original 4 MiB ESP32 media board this has a large flash-size cost, so Bluedroid
 A2DP should be treated as a diagnostic input until the linked firmware size is

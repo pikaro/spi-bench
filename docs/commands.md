@@ -132,10 +132,10 @@ Runtime command discovery:
 - List the commands currently registered on a node, including subcommands and
     arguments:
     `!master /help`
-- Core secret storage registers `/secret` on every ESP32 node. Values are one
-    console token and are stored as its exact bytes; keys follow NVS's
-    15-character limit. WiFi expects `wifi-sta-pass` in station mode or
-    `wifi-ap-pass` in access-point mode:
+- Core secret storage registers `/secret` on every ESP32 node. `/secret set`
+    joins all value tokens with single spaces and stores the resulting bytes;
+    keys follow NVS's 15-character limit. WiFi expects `wifi-sta-pass` in
+    station mode or `wifi-ap-pass` in access-point mode:
     `!master /secret set wifi-sta-pass example-password`
     `!master /secret get wifi-sta-pass`
     `!master /secret list`

@@ -19,12 +19,16 @@ using Pin = platform::Esp32S3DevkitPin;
 #include "hardware/HardwareESP32S3Zero.hpp"
 using Pin = platform::Esp32S3ZeroPin;
 
+#elif defined(PLATFORM_ESP32S3_NANO)
+#include "hardware/HardwareESP32S3Nano.hpp"
+using Pin = platform::Esp32S3NanoPin;
+
 #elif defined(PLATFORM_ESP32C3_SUPERMINI)
 #include "hardware/HardwareESP32C3SuperMini.hpp"
 using Pin = platform::Esp32C3SuperMiniPin;
 
 #else
-#error "No supported platform selected"
+#error "No supported hardware selected"
 #endif
 
 // IWYU pragma: end_exports

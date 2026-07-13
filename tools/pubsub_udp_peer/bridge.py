@@ -205,6 +205,20 @@ class LocalFanout:
                 continue
             writer.write(encoded)
 
+    async def on_status(self, data: dict[str, Any]) -> None:
+        encoded = (json.dumps(data, separators=(",", ":")) + "\n").encode(
+            "utf-8"
+        )
+        for writer in list(self._clients):
+            transport = writer.transport
+            if (
+                transport is not None
+                and transport.get_write_buffer_size() > self._max_buffer
+            ):
+                self._log.warning("dropping local status event for slow client")
+                continue
+            writer.write(encoded)
+
     async def _handle_client(
         self,
         reader: asyncio.StreamReader,
@@ -358,6 +372,7 @@ class PubSubBridge:
         self._cpp_peer = cpp_peer
         self._args = args
         self._notification_handlers: list[NotificationHandler] = []
+        self._status_handlers: list[Callable[[dict[str, Any]], Awaitable[None]]] = []
         self._log = logging.getLogger("pubsub_udp_peer")
         self._stdin: asyncio.StreamWriter | None = None
         self._write_lock = asyncio.Lock()
@@ -365,6 +380,9 @@ class PubSubBridge:
 
     def on_notification(self, handler: NotificationHandler) -> None:
         self._notification_handlers.append(handler)
+
+    def on_status(self, handler: Callable[[dict[str, Any]], Awaitable[None]]) -> None:
+        self._status_handlers.append(handler)
 
     def has_persistent_subscription(self, topic: int) -> bool:
         return any(
@@ -429,6 +447,7 @@ class PubSubBridge:
                 self._args.local_client_buffer,
             )
             self.on_notification(fanout.on_notification)
+            self.on_status(fanout.on_status)
             await fanout.start()
 
         stderr_task = asyncio.create_task(self._drain_stderr(process.stderr))
@@ -555,9 +574,13 @@ class PubSubBridge:
                 self._log.info("status %s: %s", event, detail)
             else:
                 self._log.info("status %s", event)
+            for handler in self._status_handlers:
+                await handler(data)
             return
         if kind == "stats":
             self._log.info("stats %s", data)
+            for handler in self._status_handlers:
+                await handler(data)
             return
         if kind != "pubsub":
             self._log.debug("ignored event: %s", data)

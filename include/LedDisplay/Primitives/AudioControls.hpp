@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Audio/Interfaces/Types.hpp"
-#include "Audio/Interfaces/Wire.hpp"
+#include "AudioFft/Interfaces/Types.hpp"
+#include "AudioFft/Interfaces/Wire.hpp"
 #include "LedDisplay/Renderers/GenericRenderer.hpp"
 #include <algorithm>
 #include <array>
@@ -22,9 +22,9 @@ struct AudioControls {
 
 class AudioControlSmoother {
   public:
-    [[nodiscard]] AudioControls update(const Totem::Audio::FftFrame &frame,
+    [[nodiscard]] AudioControls update(const Totem::AudioFft::FftFrame &frame,
                                        bool hasFrame,
-                                       const Totem::Audio::PeakEvent &peak,
+                                       const Totem::AudioFft::PeakEvent &peak,
                                        bool hasPeak) {
         decayAttacks();
         if (hasFrame) {
@@ -109,8 +109,8 @@ class AudioControlSmoother {
         decay(_controls.highAttack);
     }
 
-    void applyPeak(const Totem::Audio::PeakEvent &peak) {
-        const auto groupIndex = Totem::Audio::peakGroupIndex(peak.group);
+    void applyPeak(const Totem::AudioFft::PeakEvent &peak) {
+        const auto groupIndex = Totem::AudioFft::peakGroupIndex(peak.group);
         if (groupIndex >= _lastPeakFrame.size()) {
             return;
         }
@@ -119,14 +119,14 @@ class AudioControlSmoother {
         }
         _lastPeakFrame[groupIndex] = peak.frameSequence;
         switch (peak.group) {
-        case Totem::Audio::PeakGroup::Bass:
+        case Totem::AudioFft::PeakGroup::Bass:
             _controls.bassAttack =
                 std::max(_controls.bassAttack, peak.energy);
             break;
-        case Totem::Audio::PeakGroup::Mid:
+        case Totem::AudioFft::PeakGroup::Mid:
             _controls.midAttack = std::max(_controls.midAttack, peak.energy);
             break;
-        case Totem::Audio::PeakGroup::High:
+        case Totem::AudioFft::PeakGroup::High:
             _controls.highAttack =
                 std::max(_controls.highAttack, peak.energy);
             break;
@@ -138,7 +138,7 @@ class AudioControlSmoother {
     }
 
     AudioControls _controls{};
-    std::array<uint32_t, Totem::Audio::peakGroupCount> _lastPeakFrame{};
+    std::array<uint32_t, Totem::AudioFft::peakGroupCount> _lastPeakFrame{};
 };
 
 } // namespace Totem::LedDisplay::Primitives

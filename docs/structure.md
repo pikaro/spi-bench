@@ -77,12 +77,15 @@ devices. Concrete device drivers such as SSD1306, PCF8574, and MCP4661 build on
 the reusable `Wire/I2C/detail/Device.hpp` handle instead of adding singleton
 registries or heap-backed maps.
 
-`include/Audio/` follows the same boundary for media-node audio. Public config
-and callback payloads live in `Audio/Interfaces/`, while selectable source
-implementations live in `Audio/detail/Sources/`. Platform integration for
-arduino-audio-tools I2S/FFT and ESP32-A2DP is hidden behind
-`Audio/detail/platform/PlatformSelect.hpp`, and selectable FFT backends are
-isolated in `Audio/detail/FftBackend.hpp`.
+`include/AudioSource/` owns PCM source devices and source config. Concrete
+sources live in `AudioSource/detail/Sources/`, and source-side
+arduino-audio-tools I2S/stream integration is hidden behind
+`AudioSource/detail/platform/PlatformSelect.hpp`. `include/AudioSink/` owns PCM
+sink devices and transports; concrete sinks live in `AudioSink/detail/Sinks/`.
+`include/AudioFft/` owns the analyzer, display, FFT wire payloads, peak/tempo
+logic, and selectable FFT backends. `AudioFft` depends on the
+`AudioSource::IAudioSource` stream surface; `AudioSource` and `AudioSink` do
+not include FFT headers.
 
 Wire-level helpers that are reused across physical transports belong in
 `include/Wire/detail/`. `Wire/detail/AttentionLine.hpp` is one such helper: it

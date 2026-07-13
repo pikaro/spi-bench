@@ -81,12 +81,18 @@ struct RingBuffer {
     }
 
     static ReturnCode destroy(RingBufferHandle handle) {
+        if (handle == nullptr) {
+            return OK();
+        }
         vRingbufferDelete(handle);
         return OK();
     }
 
     static ReturnCode send(RingBufferHandle handle, const void *data,
                            size_t sizeBytes, Tick timeout = TICK_MAX_DELAY) {
+        if (handle == nullptr) {
+            return ERR(InvalidState);
+        }
         auto result = xRingbufferSend(handle, data, sizeBytes, timeout);
         if (result != pdTRUE) {
             return ERR(Timeout);
@@ -97,6 +103,9 @@ struct RingBuffer {
     template <typename T>
     static std::expected<std::pair<const T *, size_t>, ReturnCode>
     receive(RingBufferHandle handle, Tick timeout = TICK_MAX_DELAY) {
+        if (handle == nullptr) {
+            return std::unexpected(ERR(InvalidState));
+        }
         size_t sizeBytes;
         auto *data = xRingbufferReceive(handle, &sizeBytes, timeout);
         if (data == nullptr) {
@@ -106,6 +115,9 @@ struct RingBuffer {
     }
 
     static ReturnCode returnItem(RingBufferHandle handle, void *item) {
+        if (handle == nullptr || item == nullptr) {
+            return ERR(InvalidState);
+        }
         vRingbufferReturnItem(handle, item);
         return OK();
     }

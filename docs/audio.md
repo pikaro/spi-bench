@@ -1,27 +1,39 @@
 # Audio
 
-`include/Audio/` owns the media-node audio input and FFT analysis path.
+Audio is split into three components:
+
+- `include/AudioSource/` owns PCM-producing source devices.
+- `include/AudioSink/` owns PCM-consuming output devices and transports.
+- `include/AudioFft/` owns FFT analysis, peak/tempo extraction, wire payloads,
+    metrics, and the optional debug display.
 
 ## Component Shape
 
-- `Audio/Facade.hpp` exports the public audio classes.
-- `Audio/Interfaces/Types.hpp` contains value-type configuration and callback
-    payloads for I2S input, FFT frames, magnitude scaling, peak/accent events,
-    and tempo-clock beat outcome events.
-- `Audio/detail/Sources/` owns the concrete audio inputs. The media app
-    instantiates exactly one source object and passes it to `FftAnalyzer`
-    through `IAudioSource`.
-- `Audio/detail/FftAnalyzer.hpp` feeds the source into arduino-audio-tools'
+- `AudioSource/Facade.hpp` exports the common source surface without requiring
+    FFT headers. Source configs live in `AudioSource/Interfaces/`.
+- `AudioSource/detail/Sources/` owns the concrete audio inputs. The media app
+    instantiates exactly one source object and passes it to
+    `AudioFft::FftAnalyzer` through `AudioSource::IAudioSource`.
+- `AudioSink/Facade.hpp` exports the common sink surface. Sink configs live in
+    `AudioSink/Interfaces/`, while concrete sinks live in
+    `AudioSink/detail/Sinks/`.
+- `AudioFft/Interfaces/Types.hpp` contains FFT frame, magnitude scaling,
+    peak/accent, and tempo-clock beat value types.
+- `AudioFft/detail/FftAnalyzer.hpp` feeds the source into arduino-audio-tools'
     stream/sink FFT path, calculates fixed FFT bands, updates the magnitude
     cache, and emits frame/peak/beat callbacks.
-- `Audio/detail/FftBackend.hpp` selects the active arduino-audio-tools FFT
+- `AudioFft/detail/FftBackend.hpp` selects the active arduino-audio-tools FFT
     implementation and exposes it to `FftAnalyzer` through the common
     `AudioFFTBase` surface.
-- `Audio/detail/FftDisplay.hpp` is an optional media-node debug visualizer for
+- `AudioFft/detail/FftDisplay.hpp` is an optional media-node debug visualizer for
     a 128x32 SSD1306 I2C display. It subscribes to FFT frames and peaks but
     flushes the display from its own task.
-- `Audio/detail/platform/PlatformESP32.hpp` is the component-owned ESP32
-    platform layer for arduino-audio-tools I2S/FFT types.
+- `AudioSource/detail/platform/PlatformESP32.hpp` owns source-side
+    arduino-audio-tools stream and I2S glue.
+- `AudioSink/detail/platform/PlatformESP32.hpp` owns sink-side
+    arduino-audio-tools I2S glue plus TCP/WebSocket output streams.
+- `AudioFft/detail/platform/PlatformESP32.hpp` owns FFT backend, window, and
+    stream-copy aliases.
     Bluetooth source headers include their stack-specific dependencies only
     when that source is selected.
 
@@ -68,6 +80,23 @@ SDK/library dependencies for that firmware.
 `bin/wavgen.py` writes short LittleFS-friendly fixtures to
 `data/media/littlefs/test.wav` by default. Upload the filesystem image before
 testing `WavFile` so the mounted LittleFS contains the sample.
+
+## Audio Sinks
+
+The initial sinks mirror the source model: they expose an audio-tools
+`AudioStream` and consume PCM bytes described by `AudioSink::AudioInfo`.
+
+- `I2SSink` writes PCM to an ESP32 I2S TX peripheral. Its ready-made
+    `MAX98357` preset uses ESP32-provided BCLK/WS, Philips I2S, 44.1 kHz,
+    16-bit stereo PCM.
+- `TcpSink` is an outbound TCP client. It connects lazily to a configured IPv4
+    endpoint and writes the PCM byte stream directly for local diagnostics or
+    home-network use.
+- `WebSocketSink` is an outbound WebSocket client. It sends binary frames in
+    configurable packet-sized chunks, supports `Authorization: Bearer ...`, and
+    supports WSS through ESP-IDF's transport/TLS layer. WSS expects a PEM root
+    certificate pointer in config, for example a Let's Encrypt root supplied by
+    the firmware source.
 
 Enabling `A2DPSource` requires the ESP-IDF Bluedroid Bluetooth stack. On the
 original 4 MiB ESP32 media board this has a large flash-size cost, so Bluedroid
@@ -235,7 +264,7 @@ local hardware indicators. `src/media/main.cpp` wires it to a `LedPwm` pulse on
 active-high GPIO26 so physical peak timing can be compared against the display
 without relying on serial logs.
 
-The analyzer registers metrics through `include/Audio/detail/Metrics.hpp`.
+The analyzer registers metrics through `include/AudioFft/detail/Metrics.hpp`.
 `audCore` keeps rare frame-drop counters, `audFft` keeps diagnostic
 copy/readiness/frame/peak/beat counters plus indicator-group last peak energy,
 peak rate, BPM, and tempo confidence, and `audProf` keeps profiling-only timing
@@ -266,7 +295,7 @@ FFT debugging. `enableFftDebugDisplay` currently enables it for the I2S media
 build. Bluetooth media builds may need to disable it because Classic Bluetooth,
 SPI/PubSub, FFT, and the display task can leave too little internal heap
 headroom on the original ESP32. When enabled, the media node starts
-`Wire::I2C::Master`, `Wire::I2C::Ssd1306Display`, and `Audio::FftDisplay`
+`Wire::I2C::Master`, `Wire::I2C::Ssd1306Display`, and `AudioFft::FftDisplay`
 before the analyzer starts.
 The analyzer callbacks only update a latest-frame slot; the display task owns
 the slow I2C flush so FFT processing does not block on display transfer time.

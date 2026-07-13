@@ -1,8 +1,8 @@
 #pragma once
 
 #include "CommandBackend/Interfaces/CommandDesc.hpp"
+#include "CommandBackend/Interfaces/ICommandCatalog.hpp"
 #include "CommandBackend/Interfaces/ITransport.hpp"
-#include "CommandBackend/detail/Store.hpp"
 #include "CommandBackend/detail/Types.hpp" // IWYU pragma: keep
 #include "Macros/Facade.hpp"
 #include "Platform/Console.hpp"
@@ -28,10 +28,12 @@ class ConsoleTransport : public ITransport {
     static constexpr const char *name = "Transport::Serial";
 
     ConsoleTransport() = default;
-    explicit ConsoleTransport(const Store &store) : _store(&store) {}
-    ConsoleTransport(const Store &store, void *wakeOwner,
+    explicit ConsoleTransport(const ICommandCatalog &catalog)
+        : _catalog(&catalog) {}
+    ConsoleTransport(const ICommandCatalog &catalog, void *wakeOwner,
                      WakeCallback wakeCallback)
-        : _store(&store), _wakeOwner(wakeOwner), _wakeCallback(wakeCallback) {}
+        : _catalog(&catalog), _wakeOwner(wakeOwner),
+          _wakeCallback(wakeCallback) {}
 
     [[nodiscard]] std::string_view displayName() const override { return name; }
 
@@ -494,23 +496,23 @@ class ConsoleTransport : public ITransport {
             };
         }
 
-        if (!hasSlash || _store == nullptr || tokenCount == 0 ||
+        if (!hasSlash || _catalog == nullptr || tokenCount == 0 ||
             tokens[0].size() > CommandConfig::maxNameLength) {
             return {};
         }
 
         const auto commandKey = CommandNameKey::fromStringView(tokens[0]);
-        auto containsResult = _store->contains(commandKey);
+        auto containsResult = _catalog->contains(commandKey);
         if (!containsResult || !*containsResult) {
             return {};
         }
 
-        auto commandResult = _store->get(commandKey);
+        auto commandResult = _catalog->get(commandKey);
         if (!commandResult) {
             return {};
         }
 
-        auto subcommands = commandResult->second.subcommands;
+        auto subcommands = commandResult->second->subcommands;
         for (size_t subcommandIndex = 1; subcommandIndex < tokenIndex;
              ++subcommandIndex) {
             const auto *subcommand =
@@ -534,11 +536,11 @@ class ConsoleTransport : public ITransport {
     }
 
     ReturnCode _completeRootCommand(const CompletionTarget &target) {
-        if (_store == nullptr) {
+        if (_catalog == nullptr) {
             return OK();
         }
 
-        FAIL_IF_UNEXPECTED_FWD(keys, _store->snapshotCommandKeys(),
+        FAIL_IF_UNEXPECTED_FWD(keys, _catalog->snapshotCommandKeys(),
                                "Failed to snapshot command names");
 
         CompletionScan scan{};
@@ -643,7 +645,8 @@ class ConsoleTransport : public ITransport {
     }
 
     ReturnCode _printRootCompletionMatches(
-        const Store::CommandKeySnapshot &keys, std::string_view prefix) {
+        const Totem::CommandBackend::CommandKeySnapshot &keys,
+        std::string_view prefix) {
         FAIL_IF_ERR_FWD(_writeString("\r\n"),
                         "Failed to start command completion list");
         size_t printed = 0;
@@ -690,7 +693,7 @@ class ConsoleTransport : public ITransport {
     std::array<CommandDesc::Token, CommandConfig::maxTokens> _tokens{};
     size_t _tokenCount = 0;
 
-    const Store *_store = nullptr;
+    const ICommandCatalog *_catalog = nullptr;
     void *_wakeOwner = nullptr;
     WakeCallback _wakeCallback = nullptr;
     std::array<std::array<char, CommandConfig::maxLineLen + 1>,

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Audio/Interfaces/Types.hpp"
-#include "Audio/Interfaces/Wire.hpp"
+#include "AudioFft/Interfaces/Types.hpp"
+#include "AudioFft/Interfaces/Wire.hpp"
 #include "Buttons/Interfaces/Wire.hpp"
 #include "Macros/Facade.hpp"
 #include "PubSubBackend/Interfaces/Envelope.hpp"
@@ -30,23 +30,23 @@ inline constexpr size_t beatPublishPoolSize = 8;
 
 namespace detail {
 
-inline Totem::Queue::Platform::Storage<Totem::Audio::FftFrame,
+inline Totem::Queue::Platform::Storage<Totem::AudioFft::FftFrame,
                                        fftFrameQueueSize>
     fftFrameQueueStorage{};
-inline Totem::Queue::Platform::Storage<Totem::Audio::PeakEvent,
+inline Totem::Queue::Platform::Storage<Totem::AudioFft::PeakEvent,
                                        peakEventQueueSize>
     peakEventQueueStorage{};
-inline Totem::Queue::Platform::Storage<Totem::Audio::BeatEvent,
+inline Totem::Queue::Platform::Storage<Totem::AudioFft::BeatEvent,
                                        beatEventQueueSize>
     beatEventQueueStorage{};
 inline Totem::Queue::Handle fftFrameQueue = nullptr;
 inline Totem::Queue::Handle peakEventQueue = nullptr;
 inline Totem::Queue::Handle beatEventQueue = nullptr;
-inline Totem::PubSubBackend::Pool<Totem::Audio::FftFrame, fftPublishPoolSize>
+inline Totem::PubSubBackend::Pool<Totem::AudioFft::FftFrame, fftPublishPoolSize>
     fftPool{PubSubService::nextMessageId};
-inline Totem::PubSubBackend::Pool<Totem::Audio::PeakEvent, peakPublishPoolSize>
+inline Totem::PubSubBackend::Pool<Totem::AudioFft::PeakEvent, peakPublishPoolSize>
     peakPool{PubSubService::nextMessageId};
-inline Totem::PubSubBackend::Pool<Totem::Audio::BeatEvent, beatPublishPoolSize>
+inline Totem::PubSubBackend::Pool<Totem::AudioFft::BeatEvent, beatPublishPoolSize>
     beatPool{PubSubService::nextMessageId};
 inline Totem::PubSubBackend::SubscriberKey buttonSubscription = 0;
 inline uint32_t droppedBackpressurePayloads = 0;
@@ -66,9 +66,9 @@ inline void noteBackpressureDrop(NodeData::PubSub::Topic topic,
     }
 }
 
-inline Totem::Audio::FftFrame makeWireFrame(
-    const Totem::Audio::FftResult &frame) {
-    return Totem::Audio::FftFrame{
+inline Totem::AudioFft::FftFrame makeWireFrame(
+    const Totem::AudioFft::FftResult &frame) {
+    return Totem::AudioFft::FftFrame{
         .subBass = frame.bands[0].scaled,
         .bass = frame.bands[1].scaled,
         .lowMid = frame.bands[2].scaled,
@@ -80,9 +80,9 @@ inline Totem::Audio::FftFrame makeWireFrame(
     };
 }
 
-inline Totem::Audio::PeakEvent makeWirePeak(
-    const Totem::Audio::PeakResult &event) {
-    return Totem::Audio::PeakEvent{
+inline Totem::AudioFft::PeakEvent makeWirePeak(
+    const Totem::AudioFft::PeakResult &event) {
+    return Totem::AudioFft::PeakEvent{
         .group = event.group,
         .energy = event.energy,
         .lowerBand = event.bands.lower,
@@ -91,9 +91,9 @@ inline Totem::Audio::PeakEvent makeWirePeak(
     };
 }
 
-inline Totem::Audio::BeatEvent makeWireBeat(
-    const Totem::Audio::BeatResult &event) {
-    return Totem::Audio::BeatEvent{
+inline Totem::AudioFft::BeatEvent makeWireBeat(
+    const Totem::AudioFft::BeatResult &event) {
+    return Totem::AudioFft::BeatEvent{
         .kind = event.kind,
         .bpm = event.bpm,
         .confidence = event.confidence,
@@ -159,7 +159,7 @@ inline void enqueueLatest(Totem::Queue::Handle queue, const T &value) {
 }
 
 inline ReturnCode onFrame(void * /*unused*/,
-                          const Totem::Audio::FftResult &frame) {
+                          const Totem::AudioFft::FftResult &frame) {
     if (!config.publishFftFrames || fftFrameQueue == nullptr) {
         return OK();
     }
@@ -168,7 +168,7 @@ inline ReturnCode onFrame(void * /*unused*/,
 }
 
 inline ReturnCode onPeak(void * /*unused*/,
-                         const Totem::Audio::PeakResult &event) {
+                         const Totem::AudioFft::PeakResult &event) {
     if (!config.publishPeakEvents || peakEventQueue == nullptr) {
         return OK();
     }
@@ -178,7 +178,7 @@ inline ReturnCode onPeak(void * /*unused*/,
 }
 
 inline ReturnCode onBeat(void * /*unused*/,
-                         const Totem::Audio::BeatResult &event) {
+                         const Totem::AudioFft::BeatResult &event) {
     if (!config.publishBeatEvents || beatEventQueue == nullptr) {
         return OK();
     }
@@ -275,7 +275,7 @@ inline ReturnCode begin(Analyzer &analyzer) {
 
 inline ReturnCode work() {
     if (detail::beatEventQueue != nullptr) {
-        Totem::Audio::BeatEvent beat{};
+        Totem::AudioFft::BeatEvent beat{};
         while (
             Totem::Queue::Platform::receive(detail::beatEventQueue, &beat, 0)
                 .ok()) {
@@ -287,7 +287,7 @@ inline ReturnCode work() {
     }
 
     if (detail::peakEventQueue != nullptr) {
-        Totem::Audio::PeakEvent peak{};
+        Totem::AudioFft::PeakEvent peak{};
         while (
             Totem::Queue::Platform::receive(detail::peakEventQueue, &peak, 0)
                 .ok()) {
@@ -299,8 +299,8 @@ inline ReturnCode work() {
     }
 
     if (detail::fftFrameQueue != nullptr) {
-        Totem::Audio::FftFrame frame{};
-        Totem::Audio::FftFrame latest{};
+        Totem::AudioFft::FftFrame frame{};
+        Totem::AudioFft::FftFrame latest{};
         bool hasFrame = false;
         while (
             Totem::Queue::Platform::receive(detail::fftFrameQueue, &frame, 0)

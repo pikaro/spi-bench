@@ -1,0 +1,313 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import argparse
+import errno
+import platform
+import socket
+import subprocess
+import sys
+import time
+from collections.abc import Sequence
+
+
+DEFAULT_PORT = 2026
+DEFAULT_TIMEOUT_S = 3.0
+DEFAULT_COUNT = 3
+DEFAULT_INTERVAL_S = 0.5
+KEEPALIVE = b'TPUDPKA1'
+
+
+def log(message: str) -> None:
+    now = time.strftime('%H:%M:%S')
+    print(f'[{now}] {message}', flush=True)
+
+
+def indent(text: str) -> str:
+    return ''.join(f'    {line}\n' for line in text.splitlines())
+
+
+def run_command(command: Sequence[str]) -> int:
+    log(f'$ {" ".join(command)}')
+    try:
+        proc = subprocess.run(command, check=False, capture_output=True, text=True)
+    except FileNotFoundError as exc:
+        log(f'command unavailable: {exc}')
+        return 127
+    if proc.stdout:
+        print(indent(proc.stdout), end='')
+    if proc.stderr:
+        print(indent(proc.stderr), end='', file=sys.stderr)
+    log(f'exit={proc.returncode}')
+    return proc.returncode
+
+
+def route_command(host: str) -> list[str] | None:
+    system = platform.system().lower()
+    if system == 'darwin':
+        return ['route', '-n', 'get', host]
+    if system == 'linux':
+        return ['ip', 'route', 'get', host]
+    return None
+
+
+def ping_command(host: str) -> list[str] | None:
+    system = platform.system().lower()
+    if system == 'darwin':
+        return ['ping', '-c', '1', '-W', '1000', host]
+    if system == 'linux':
+        return ['ping', '-c', '1', '-W', '1', host]
+    return None
+
+
+def arp_command(host: str) -> list[str] | None:
+    system = platform.system().lower()
+    if system == 'darwin':
+        return ['arp', '-n', host]
+    if system == 'linux':
+        return ['ip', 'neigh', 'show', host]
+    return None
+
+
+def arp_clear_command(host: str) -> list[str] | None:
+    system = platform.system().lower()
+    if system == 'darwin':
+        return ['arp', '-d', host]
+    if system == 'linux':
+        return ['ip', 'neigh', 'flush', 'to', host]
+    return None
+
+
+def interface_command() -> list[str] | None:
+    system = platform.system().lower()
+    if system == 'darwin':
+        return ['ifconfig']
+    if system == 'linux':
+        return ['ip', '-brief', 'addr']
+    return None
+
+
+def print_route(host: str) -> None:
+    command = route_command(host)
+    if command is None:
+        log(f'route lookup unsupported on {platform.system()}')
+        return
+    run_command(command)
+
+
+def print_ping(args: argparse.Namespace) -> None:
+    if args.no_ping:
+        return
+    command = ping_command(args.host)
+    if command is None:
+        log(f'ping unsupported on {platform.system()}')
+        return
+    run_command(command)
+
+
+def print_arp(args: argparse.Namespace) -> None:
+    if args.no_arp:
+        return
+    command = arp_command(args.host)
+    if command is None:
+        log(f'ARP/neighbour lookup unsupported on {platform.system()}')
+        return
+    run_command(command)
+
+
+def clear_arp(args: argparse.Namespace) -> None:
+    if args.no_arp_clear:
+        return
+    command = arp_clear_command(args.host)
+    if command is None:
+        log(f'ARP/neighbour clear unsupported on {platform.system()}')
+        return
+    log('clearing ARP/neighbour entry before reachability checks')
+    ret = run_command(command)
+    if ret != 0:
+        log('ARP/neighbour clear failed; continuing with probe')
+
+
+def print_interfaces(args: argparse.Namespace) -> None:
+    if not args.interfaces:
+        return
+    command = interface_command()
+    if command is None:
+        log(f'interface listing unsupported on {platform.system()}')
+        return
+    run_command(command)
+
+
+def bind_socket(sock: socket.socket, args: argparse.Namespace) -> None:
+    if args.bind_ip is None and args.bind_port is None:
+        return
+    bind_ip = args.bind_ip or ''
+    bind_port = args.bind_port if args.bind_port is not None else 0
+    log(f'binding UDP socket to {bind_ip or "0.0.0.0"}:{bind_port}')
+    sock.bind((bind_ip, bind_port))
+    log(f'bound local={format_peer(sock.getsockname())}')
+
+
+def format_peer(peer: tuple[str, int] | tuple[str, int, int, int]) -> str:
+    return f'{peer[0]}:{peer[1]}'
+
+
+def explain_os_error(exc: OSError) -> str:
+    if exc.errno == errno.EHOSTUNREACH:
+        return 'No route to host: OS route/ARP cannot reach the target.'
+    if exc.errno == errno.ENETUNREACH:
+        return 'Network is unreachable: no usable route to the target network.'
+    if exc.errno == errno.EADDRINUSE:
+        return 'Address already in use: another PubSub peer is probably bound.'
+    if exc.errno == errno.EADDRNOTAVAIL:
+        return 'Bind address is not assigned to a local interface.'
+    if exc.errno == errno.EPIPE:
+        return (
+            'Broken pipe on UDP: the kernel has a peer/socket error, often '
+            'from ICMP unreachable/refused or a link-layer failure.'
+        )
+    if exc.errno == errno.ECONNREFUSED:
+        return 'Connection refused: target replied that this UDP port is closed.'
+    return exc.strerror or str(exc)
+
+
+def connect_socket(sock: socket.socket, args: argparse.Namespace) -> bool:
+    target = (args.host, args.port)
+    try:
+        log(f'connecting UDP socket to {args.host}:{args.port}')
+        sock.connect(target)
+        log(f'connected local={format_peer(sock.getsockname())}')
+    except OSError as exc:
+        log(f'connect failed: {exc} ({explain_os_error(exc)})')
+        return False
+    return True
+
+
+def udp_probe(args: argparse.Namespace) -> int:
+    log(f'PubSub UDP check target={args.host}:{args.port}')
+    log(f'keepalive={KEEPALIVE!r} timeout={args.timeout}s count={args.count}')
+    print_route(args.host)
+    clear_arp(args)
+    print_ping(args)
+    print_arp(args)
+    print_interfaces(args)
+
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.settimeout(args.timeout)
+        try:
+            bind_socket(sock, args)
+        except OSError as exc:
+            log(f'socket bind failed: {exc} ({explain_os_error(exc)})')
+            return 1
+        if not connect_socket(sock, args):
+            return 1
+
+        for index in range(args.count):
+            try:
+                sent = sock.send(KEEPALIVE)
+            except OSError as exc:
+                log(
+                    f'send failed index={index + 1}: '
+                    f'{exc} ({explain_os_error(exc)})',
+                )
+                return 1
+            log(
+                f'sent keepalive bytes={sent} '
+                f'local={format_peer(sock.getsockname())} '
+                f'target={args.host}:{args.port} '
+                f'index={index + 1}/{args.count}',
+            )
+            if index + 1 < args.count:
+                time.sleep(args.interval)
+
+        deadline = time.monotonic() + args.timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                log('timeout waiting for MCU UDP response')
+                log('send succeeded locally, but no keepalive/pubsub datagram came back')
+                return 2
+            sock.settimeout(remaining)
+            try:
+                data, peer = sock.recvfrom(2300)
+            except socket.timeout:
+                log('timeout waiting for MCU UDP response')
+                return 2
+            except OSError as exc:
+                log(f'receive failed: {exc} ({explain_os_error(exc)})')
+                return 1
+
+            if data == KEEPALIVE:
+                log(
+                    f'received keepalive response bytes={len(data)} '
+                    f'peer={format_peer(peer)}',
+                )
+                return 0
+            log(
+                f'received datagram bytes={len(data)} '
+                f'peer={format_peer(peer)} hex={data.hex()}',
+            )
+            return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description='Verbose PubSub UDP reachability check.',
+    )
+    parser.add_argument('host', help='MCU IPv4 address, e.g. 192.168.4.1')
+    parser.add_argument('--port', type=int, default=DEFAULT_PORT)
+    parser.add_argument(
+        '--bind-ip',
+        help='Optional local IPv4 address to bind before sending.',
+    )
+    parser.add_argument(
+        '--bind-port',
+        type=int,
+        default=DEFAULT_PORT,
+        help='Local UDP port to bind. Defaults to PubSub port 2026.',
+    )
+    parser.add_argument('--timeout', type=float, default=DEFAULT_TIMEOUT_S)
+    parser.add_argument('--count', type=int, default=DEFAULT_COUNT)
+    parser.add_argument('--interval', type=float, default=DEFAULT_INTERVAL_S)
+    parser.add_argument(
+        '--interfaces',
+        action='store_true',
+        help='Also print local interface addresses.',
+    )
+    parser.add_argument(
+        '--no-ping',
+        action='store_true',
+        help='Skip the ICMP ping check.',
+    )
+    parser.add_argument(
+        '--no-arp',
+        action='store_true',
+        help='Skip the ARP/neighbour table check.',
+    )
+    parser.add_argument(
+        '--no-arp-clear',
+        action='store_true',
+        help='Do not clear the target ARP/neighbour entry before probing.',
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.count < 1:
+        parser.error('--count must be >= 1')
+    if args.timeout <= 0:
+        parser.error('--timeout must be > 0')
+    if args.interval < 0:
+        parser.error('--interval must be >= 0')
+    try:
+        return udp_probe(args)
+    except KeyboardInterrupt:
+        log('interrupted')
+        return 130
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

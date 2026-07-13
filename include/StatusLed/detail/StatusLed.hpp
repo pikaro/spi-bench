@@ -111,7 +111,7 @@ class StatusLed : public HasLifecycle<StatusLed, Config>,
 
     ReturnCode _onBegin() {
         if (config().configured) {
-            FAIL_IF_ERR_FWD(_output.begin(config().pin, config().colorOrder),
+            FAIL_IF_ERR_FWD(_output.begin(config()),
                             "Failed to begin status LED output");
         }
         FAIL_IF_ERR_FWD(_registerPredefinedStates(),

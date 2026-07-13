@@ -1,18 +1,28 @@
 #pragma once
 
-#include "Audio/Interfaces/Types.hpp"
-#include "Audio/Interfaces/Wire.hpp"
+#include "AudioFft/Interfaces/Types.hpp"
+#include "AudioFft/Interfaces/Wire.hpp"
 #include "Buttons/Interfaces/EventFactory.hpp"
 #include "Buttons/Interfaces/Wire.hpp"
 #include "CommandBackend/Interfaces/CommandDesc.hpp"
 #include "Data/Peripherals.hpp"
+#include "LedDisplay/Animations/Bolt/Command.hpp"
+#include "LedDisplay/Animations/Bolt/Config.hpp"
 #include "LedDisplay/Animations/CenterWave/Command.hpp"
 #include "LedDisplay/Animations/OrbitSparks/Command.hpp"
+#include "LedDisplay/Animations/PolarLattice/Command.hpp"
+#include "LedDisplay/Animations/PolarLattice/Config.hpp"
+#include "LedDisplay/Animations/RadialCurtain/Command.hpp"
+#include "LedDisplay/Animations/RadialCurtain/Config.hpp"
 #include "LedDisplay/Animations/SineWave/Command.hpp"
 #include "LedDisplay/Animations/SineWave/Config.hpp"
+#include "LedDisplay/Animations/Sinelon/Command.hpp"
+#include "LedDisplay/Animations/Sinelon/Config.hpp"
 #include "LedDisplay/Animations/SpectralIris/Command.hpp"
 #include "LedDisplay/Animations/SpectralWeave/Command.hpp"
 #include "LedDisplay/Animations/StainedCells/Command.hpp"
+#include "LedDisplay/Animations/Starburst/Command.hpp"
+#include "LedDisplay/Animations/Starburst/Config.hpp"
 #include "LedDisplay/Animations/WheelIndicator/Command.hpp"
 #include "LedDisplay/Animations/WheelIndicator/Config.hpp"
 #include "LedDisplay/Interfaces/AnimationCommand.hpp"
@@ -49,14 +59,14 @@ struct WheelMapping {
 
 struct PeakWaveMapping {
     bool publishCenterWave = false;
-    // std::array<uint8_t, Totem::Audio::peakGroupCount> hueByGroup{{0, 24,
+    // std::array<uint8_t, Totem::AudioFft::peakGroupCount> hueByGroup{{0, 24,
     // 48}};
-    std::array<uint8_t, Totem::Audio::peakGroupCount> hueByGroup{{0, 32, 64}};
-    std::array<std::pair<uint8_t, uint8_t>, Totem::Audio::peakGroupCount>
+    std::array<uint8_t, Totem::AudioFft::peakGroupCount> hueByGroup{{0, 32, 64}};
+    std::array<std::pair<uint8_t, uint8_t>, Totem::AudioFft::peakGroupCount>
         // saturationByGroup{{{240, 15}, {230, 25}, {220, 25}}};
         saturationByGroup{{{245, 10}, {240, 15}, {235, 20}}};
-    std::array<std::pair<uint8_t, uint8_t>, Totem::Audio::peakGroupCount>
-        valueByGroup{{{150, 100}, {100, 100}, {50, 100}}};
+    std::array<std::pair<uint8_t, uint8_t>, Totem::AudioFft::peakGroupCount>
+        valueByGroup{{{150, 100}, {0, 0}, {0, 0}}};
     // valueByGroup{{{255, 0}, {255, 0}, {255, 0}}};
     uint16_t lifetimeMs = 2000;
     uint8_t rise = 2;
@@ -84,19 +94,19 @@ struct FftVisualMapping {
     uint16_t fftRequestId = 3;
     uint16_t fftAltRequestId = 4;
     uint32_t refreshIntervalMs = 5000;
-    std::array<FftVisualPreset, 4> presets{{
+    std::array<FftVisualPreset, 3> presets{{
         {.kind = FftVisualKind::SpectralWeave,
          .name = "weave",
-         .dwellMs = 45000,
+         .dwellMs = 200000,
          .fadeMs = 10000},
         {.kind = FftVisualKind::SpectralIris,
          .name = "iris",
-         .dwellMs = 45000,
+         .dwellMs = 200000,
          .fadeMs = 10000},
-        {.kind = FftVisualKind::OrbitSparks,
-         .name = "sparks",
-         .dwellMs = 45000,
-         .fadeMs = 10000},
+        // {.kind = FftVisualKind::OrbitSparks,
+        //  .name = "sparks",
+        //  .dwellMs = 45000,
+        //  .fadeMs = 10000},
         {.kind = FftVisualKind::StainedCells,
          .name = "cells",
          .dwellMs = 45000,
@@ -109,7 +119,20 @@ struct DropWaveMapping {
     uint32_t quietWindowMs = 2000;
     uint32_t minIntervalMs = 2500;
     uint16_t lifetimeMs = 1400;
-    std::array<uint8_t, Totem::Audio::peakGroupCount> hueByGroup{{0, 32, 64}};
+    std::array<uint8_t, Totem::AudioFft::peakGroupCount> hueByGroup{{0, 32, 64}};
+    uint8_t saturation = 255;
+    uint8_t value = 180;
+    uint8_t rise = 2;
+    uint8_t peak = 1;
+    uint8_t wake = 4;
+};
+
+struct TotalEnergyWaveMapping {
+    bool publishCenterWave = true;
+    uint8_t triggerEnergy = 200;
+    uint32_t minIntervalMs = 2500;
+    uint16_t lifetimeMs = 1400;
+    uint8_t hue = 0;
     uint8_t saturation = 255;
     uint8_t value = 180;
     uint8_t rise = 2;
@@ -185,7 +208,43 @@ struct BellMapping {
     bool publish = true;
     uint16_t publishDelayMs = 100;
     uint16_t minIntervalMs = 1000;
-    Totem::LedDisplay::Animations::SineWaveConfig config{
+    uint16_t boltDurationMs = 900;
+    bool randomizeBoltSeed = true;
+    Totem::LedDisplay::Animations::BoltConfig bolt{
+        .hue = 24,
+        .saturation = 255,
+        .value = 255,
+        .width = 1,
+        .jitter = 1,
+        .forks = 1,
+        .seed = 0,
+        .outerOrigin = true,
+    };
+    uint16_t polarLatticeDurationMs = 2400;
+    Totem::LedDisplay::Animations::PolarLatticeConfig polarLattice{
+        .hue = 64,
+        .saturation = 255,
+        .value = 170,
+        .radialMode = 4,
+        .angularMode = 3,
+        .speed = 96,
+        .mix = 128,
+        .contrast = 160,
+    };
+    uint16_t radialCurtainDurationMs = 2600;
+    Totem::LedDisplay::Animations::RadialCurtainConfig radialCurtain{
+        .hue = 200,
+        .saturation = 220,
+        .value = 190,
+        .width = 8,
+        .tilt = 64,
+        .speed = 128,
+        .outerOrigin = true,
+        .spokePhase = 16,
+    };
+    // Zero uses SineWaveCommand's projected lifetime from the visible trail.
+    uint16_t sineWaveLifetimeMs = 0;
+    Totem::LedDisplay::Animations::SineWaveConfig sineWave{
         .hue = 128,
         .saturation = 255,
         .value = 255,
@@ -194,10 +253,36 @@ struct BellMapping {
         .durationMs = 1500,
         .wavelength = 8,
         .outerOrigin = true,
-        // .travelRings = 0,
-        // .spokeGainPct = 200,
-        // .tailDecay = 8,
-        // .peakHold = 200,
+        .travelRings = 0,
+        .spokeGainPct = 100,
+        .tailDecay = 8,
+        .peakHold = 160,
+    };
+    uint16_t sinelonDurationMs = 2400;
+    Totem::LedDisplay::Animations::SinelonConfig sinelon{
+        .hue = 96,
+        .saturation = 255,
+        .value = 220,
+        .width = 3,
+        .periodMs = 1000,
+        .outerOrigin = false,
+        .travelRings = 0,
+        .bounceAttenuation = 255,
+        .spokeGainPct = 100,
+        .spokeGainPhaseStep = 64,
+    };
+    uint16_t starburstDurationMs = 1200;
+    Totem::LedDisplay::Animations::StarburstConfig starburst{
+        .hue = 32,
+        .saturation = 255,
+        .value = 220,
+        .rise = 1,
+        .peak = 2,
+        .wake = 16,
+        .points = 2,
+        .pointGain = 2,
+        .twist = 16,
+        .cycles = 1,
     };
 };
 
@@ -221,6 +306,7 @@ struct Config {
     WheelMapping wheel{};
     FftVisualMapping fftVisuals{};
     DropWaveMapping dropWave{};
+    TotalEnergyWaveMapping totalEnergyWave{};
     PeakWaveMapping peakWave{};
     BeatMapping beat{};
     LayerMapping layers{};
@@ -231,6 +317,7 @@ struct Config {
 inline constexpr Config config{};
 inline constexpr size_t wheelEventQueueSize = 8;
 inline constexpr size_t beatEventQueueSize = 8;
+inline constexpr size_t fftFrameQueueSize = 2;
 inline constexpr size_t peakEventQueueSize = 8;
 inline constexpr size_t buttonEventQueueSize = 4;
 
@@ -239,10 +326,13 @@ namespace detail {
 inline Totem::Queue::Platform::Storage<Totem::Wheel::WheelState,
                                        wheelEventQueueSize>
     wheelEventQueueStorage{};
-inline Totem::Queue::Platform::Storage<Totem::Audio::BeatEvent,
+inline Totem::Queue::Platform::Storage<Totem::AudioFft::BeatEvent,
                                        beatEventQueueSize>
     beatEventQueueStorage{};
-inline Totem::Queue::Platform::Storage<Totem::Audio::PeakEvent,
+inline Totem::Queue::Platform::Storage<Totem::AudioFft::FftFrame,
+                                       fftFrameQueueSize>
+    fftFrameQueueStorage{};
+inline Totem::Queue::Platform::Storage<Totem::AudioFft::PeakEvent,
                                        peakEventQueueSize>
     peakEventQueueStorage{};
 inline Totem::Queue::Platform::Storage<Totem::Buttons::ButtonEvent,
@@ -250,10 +340,12 @@ inline Totem::Queue::Platform::Storage<Totem::Buttons::ButtonEvent,
     buttonEventQueueStorage{};
 inline Totem::Queue::Handle wheelEventQueue = nullptr;
 inline Totem::Queue::Handle beatEventQueue = nullptr;
+inline Totem::Queue::Handle fftFrameQueue = nullptr;
 inline Totem::Queue::Handle peakEventQueue = nullptr;
 inline Totem::Queue::Handle buttonEventQueue = nullptr;
 inline Totem::PubSubBackend::SubscriberKey wheelSubscription = 0;
 inline Totem::PubSubBackend::SubscriberKey beatSubscription = 0;
+inline Totem::PubSubBackend::SubscriberKey fftSubscription = 0;
 inline Totem::PubSubBackend::SubscriberKey peakSubscription = 0;
 inline Totem::PubSubBackend::SubscriberKey buttonSubscription = 0;
 inline Totem::PubSubBackend::SubscriberKey animationSubscription = 0;
@@ -278,14 +370,15 @@ inline uint32_t lastFftVisualPublishMs = 0;
 inline uint32_t lastFftSwitchMs = 0;
 inline uint32_t fftFadeStartMs = 0;
 inline uint16_t fftFadeDurationMs = 0;
-inline uint32_t lastBellSinelonMs = 0;
+inline uint32_t lastBellAnimationMs = 0;
 inline uint32_t lastAnyPeakMs = 0;
 inline uint32_t lastDropWaveMs = 0;
+inline uint32_t lastTotalEnergyWaveMs = 0;
 inline uint32_t lastBeatSequence = 0;
-inline Totem::Audio::BeatEventKind lastBeatKind =
-    Totem::Audio::BeatEventKind::Lost;
-inline std::array<uint32_t, Totem::Audio::peakGroupCount> lastPeakWaveMs{};
-inline std::array<uint32_t, Totem::Audio::peakGroupCount> lastIoPeakMs{};
+inline Totem::AudioFft::BeatEventKind lastBeatKind =
+    Totem::AudioFft::BeatEventKind::Lost;
+inline std::array<uint32_t, Totem::AudioFft::peakGroupCount> lastPeakWaveMs{};
+inline std::array<uint32_t, Totem::AudioFft::peakGroupCount> lastIoPeakMs{};
 inline uint32_t randomState = 0xC0FFEE23UL;
 
 inline Angle<uint8_t> scaleToCommandAngle(Angle<uint16_t> angle,
@@ -310,15 +403,123 @@ inline uint16_t randomRange(uint16_t min, uint16_t max, uint32_t salt) {
     return static_cast<uint16_t>(min + (nextRandom(salt) % span));
 }
 
-inline const char *beatKindName(Totem::Audio::BeatEventKind kind) {
+inline uint8_t scaledTotalFrameEnergy(const Totem::AudioFft::FftFrame &frame) {
+    constexpr uint32_t bandCount = 8;
+    const uint32_t total = static_cast<uint32_t>(frame.subBass) +
+                           static_cast<uint32_t>(frame.bass) +
+                           static_cast<uint32_t>(frame.lowMid) +
+                           static_cast<uint32_t>(frame.mid) +
+                           static_cast<uint32_t>(frame.highMid) +
+                           static_cast<uint32_t>(frame.presence) +
+                           static_cast<uint32_t>(frame.brilliance) +
+                           static_cast<uint32_t>(frame.air);
+    return static_cast<uint8_t>((total + (bandCount / 2U)) / bandCount);
+}
+
+inline void enqueueLatestFftFrame(const Totem::AudioFft::FftFrame &frame) {
+    auto ret = Totem::Queue::Platform::send(fftFrameQueue, &frame, 0);
+    if (ret.ok()) {
+        return;
+    }
+
+    Totem::AudioFft::FftFrame dropped{};
+    (void)Totem::Queue::Platform::receive(fftFrameQueue, &dropped, 0);
+    ret = Totem::Queue::Platform::send(fftFrameQueue, &frame, 0);
+    if (!ret.ok()) {
+        _log_w("Dropping FFT frame: orchestration queue is full");
+    }
+}
+
+inline ReturnCode publishBellAnimation(uint32_t nowMs) {
+    constexpr uint16_t bellAnimationChoiceCount = 6;
+    constexpr uint16_t lastBellAnimationChoice = bellAnimationChoiceCount - 1;
+    const auto choice =
+        randomRange(0, lastBellAnimationChoice, nowMs ^ 0xBE110001UL);
+
+    switch (choice) {
+    case 0: {
+        auto animationConfig = config.bell.bolt;
+        if (config.bell.randomizeBoltSeed) {
+            animationConfig.seed =
+                static_cast<uint8_t>(nextRandom(nowMs ^ 0xB0115EEDUL));
+        }
+        FAIL_IF_UNEXPECTED_FWD(
+            cmd,
+            Totem::LedDisplay::Animations::BoltCommand::makeCommand(
+                animationConfig, 0, config.bell.boltDurationMs),
+            "Failed to build bell bolt command");
+        animationConfig.seed += 1;
+        FAIL_IF_UNEXPECTED_FWD(
+            cmd2,
+            Totem::LedDisplay::Animations::BoltCommand::makeCommand(
+                animationConfig, 0, config.bell.boltDurationMs),
+            "Failed to build bell bolt command");
+        animationConfig.seed += 1;
+        FAIL_IF_UNEXPECTED_FWD(
+            cmd3,
+            Totem::LedDisplay::Animations::BoltCommand::makeCommand(
+                animationConfig, 0, config.bell.boltDurationMs),
+            "Failed to build bell bolt command");
+        auto ret = OK();
+        ret.combine(Totem::LedDisplay::publishAnimationPlayCommand(cmd));
+        ret.combine(Totem::LedDisplay::publishAnimationPlayCommand(cmd2));
+        ret.combine(Totem::LedDisplay::publishAnimationPlayCommand(cmd3));
+        return ret;
+    }
+    case 1: {
+        FAIL_IF_UNEXPECTED_FWD(
+            cmd,
+            Totem::LedDisplay::Animations::PolarLatticeCommand::makeCommand(
+                config.bell.polarLattice, 0,
+                config.bell.polarLatticeDurationMs),
+            "Failed to build bell polar lattice command");
+        return Totem::LedDisplay::publishAnimationPlayCommand(cmd);
+    }
+    case 2: {
+        FAIL_IF_UNEXPECTED_FWD(
+            cmd,
+            Totem::LedDisplay::Animations::RadialCurtainCommand::makeCommand(
+                config.bell.radialCurtain, 0,
+                config.bell.radialCurtainDurationMs),
+            "Failed to build bell radial curtain command");
+        return Totem::LedDisplay::publishAnimationPlayCommand(cmd);
+    }
+    case 3: {
+        FAIL_IF_UNEXPECTED_FWD(
+            cmd,
+            Totem::LedDisplay::Animations::SineWaveCommand::makeCommand(
+                config.bell.sineWave, 0, config.bell.sineWaveLifetimeMs),
+            "Failed to build bell sine wave command");
+        return Totem::LedDisplay::publishAnimationPlayCommand(cmd);
+    }
+    case 4: {
+        FAIL_IF_UNEXPECTED_FWD(
+            cmd,
+            Totem::LedDisplay::Animations::SinelonCommand::makeCommand(
+                config.bell.sinelon, 0, config.bell.sinelonDurationMs),
+            "Failed to build bell sinelon command");
+        return Totem::LedDisplay::publishAnimationPlayCommand(cmd);
+    }
+    default: {
+        FAIL_IF_UNEXPECTED_FWD(
+            cmd,
+            Totem::LedDisplay::Animations::StarburstCommand::makeCommand(
+                config.bell.starburst, 0, config.bell.starburstDurationMs),
+            "Failed to build bell starburst command");
+        return Totem::LedDisplay::publishAnimationPlayCommand(cmd);
+    }
+    }
+}
+
+inline const char *beatKindName(Totem::AudioFft::BeatEventKind kind) {
     switch (kind) {
-    case Totem::Audio::BeatEventKind::ExpectedHit:
+    case Totem::AudioFft::BeatEventKind::ExpectedHit:
         return "expected-hit";
-    case Totem::Audio::BeatEventKind::ExpectedMiss:
+    case Totem::AudioFft::BeatEventKind::ExpectedMiss:
         return "expected-miss";
-    case Totem::Audio::BeatEventKind::Reacquired:
+    case Totem::AudioFft::BeatEventKind::Reacquired:
         return "reacquired";
-    case Totem::Audio::BeatEventKind::Lost:
+    case Totem::AudioFft::BeatEventKind::Lost:
         return "lost";
     default:
         return "unknown";
@@ -327,7 +528,7 @@ inline const char *beatKindName(Totem::Audio::BeatEventKind kind) {
 
 inline Totem::LedPwm::Brightness
 randomPeak(const BulbPulseProfile &profile,
-           const Totem::Audio::PeakEvent &event, uint32_t salt) {
+           const Totem::AudioFft::PeakEvent &event, uint32_t salt) {
     const auto minRaw = profile.minPeak.value.value;
     const auto maxRaw = profile.maxPeak.value.value;
     if (maxRaw <= minRaw) {
@@ -344,7 +545,7 @@ randomPeak(const BulbPulseProfile &profile,
 }
 
 inline Totem::LedPwm::Pulse makePulse(const BulbPulseProfile &profile,
-                                      const Totem::Audio::PeakEvent &event,
+                                      const Totem::AudioFft::PeakEvent &event,
                                       uint32_t nowMs, uint32_t salt) {
     return Totem::LedPwm::Pulse{
         .peak = randomPeak(profile, event, nowMs ^ salt),
@@ -480,7 +681,7 @@ inline uint16_t requestIdForFftLayer(Totem::LedDisplay::Layer layer) {
 }
 
 inline ReturnCode publishFftPreset(size_t presetIndex,
-    Totem::LedDisplay::Layer layer,
+                                   Totem::LedDisplay::Layer layer,
                                    uint16_t requestId) {
     const auto &preset = fftPreset(presetIndex);
     Totem::LedDisplay::AnimationPlayCommand cmd{};
@@ -685,7 +886,7 @@ inline ReturnCode
 onBeatEnvelope(void * /*unused*/,
                const Totem::PubSubBackend::Envelope &envelope) {
     FAIL_IF_UNEXPECTED_FWD(event,
-                           envelope.getPayloadAs<Totem::Audio::BeatEvent>(),
+                           envelope.getPayloadAs<Totem::AudioFft::BeatEvent>(),
                            "Failed to decode orchestrated beat event");
 
     if (beatEventQueue == nullptr) {
@@ -701,10 +902,26 @@ onBeatEnvelope(void * /*unused*/,
 }
 
 inline ReturnCode
+onFftEnvelope(void * /*unused*/,
+              const Totem::PubSubBackend::Envelope &envelope) {
+    FAIL_IF_UNEXPECTED_FWD(frame,
+                           envelope.getPayloadAs<Totem::AudioFft::FftFrame>(),
+                           "Failed to decode orchestrated FFT frame");
+
+    if (fftFrameQueue == nullptr) {
+        _log_w("Dropping FFT frame before orchestration queue is ready");
+        return OK();
+    }
+
+    enqueueLatestFftFrame(frame);
+    return OK();
+}
+
+inline ReturnCode
 onPeakEnvelope(void * /*unused*/,
                const Totem::PubSubBackend::Envelope &envelope) {
     FAIL_IF_UNEXPECTED_FWD(event,
-                           envelope.getPayloadAs<Totem::Audio::PeakEvent>(),
+                           envelope.getPayloadAs<Totem::AudioFft::PeakEvent>(),
                            "Failed to decode orchestrated peak event");
 
     if (peakEventQueue == nullptr) {
@@ -745,10 +962,10 @@ onAnimationStopEnvelope(void * /*unused*/,
         stop, envelope.getPayloadAs<Totem::LedDisplay::AnimationStopCommand>(),
         "Failed to decode orchestrated animation stop command");
 
-    const auto stopsFftVisual = stop.requestId == 0 ||
-                                stop.requestId == config.fftVisuals.fftRequestId ||
-                                stop.requestId ==
-                                    config.fftVisuals.fftAltRequestId;
+    const auto stopsFftVisual =
+        stop.requestId == 0 ||
+        stop.requestId == config.fftVisuals.fftRequestId ||
+        stop.requestId == config.fftVisuals.fftAltRequestId;
     if (stopsFftVisual && !fftVisualSuppressed) {
         fftVisualSuppressed = true;
         fftVisualPublished = false;
@@ -798,6 +1015,15 @@ inline ReturnCode begin() {
         }
         detail::beatEventQueue = *queueResult;
     }
+    if (detail::fftFrameQueue == nullptr) {
+        auto queueResult =
+            Totem::Queue::Platform::create(detail::fftFrameQueueStorage);
+        if (!queueResult) {
+            FAIL_ERR_FWD(queueResult.error(),
+                         "Failed to create master orchestration FFT queue");
+        }
+        detail::fftFrameQueue = *queueResult;
+    }
     if (detail::peakEventQueue == nullptr) {
         auto queueResult =
             Totem::Queue::Platform::create(detail::peakEventQueueStorage);
@@ -839,6 +1065,16 @@ inline ReturnCode begin() {
             "Failed to subscribe master orchestration to beat events");
         detail::beatSubscription = sub;
     }
+    if (detail::fftSubscription == 0) {
+        FAIL_IF_UNEXPECTED_FWD(
+            sub,
+            PubSubService::get().subscribe(
+                "master-orch-fft",
+                {.subscriber = nullptr, .callback = detail::onFftEnvelope},
+                PubSubService::Topic::FftFrame),
+            "Failed to subscribe master orchestration to FFT frames");
+        detail::fftSubscription = sub;
+    }
     if (detail::peakSubscription == 0) {
         FAIL_IF_UNEXPECTED_FWD(
             sub,
@@ -867,7 +1103,8 @@ inline ReturnCode begin() {
                 {.subscriber = nullptr,
                  .callback = detail::onAnimationStopEnvelope},
                 PubSubService::Topic::AnimationStop),
-            "Failed to subscribe master orchestration to animation stop commands");
+            "Failed to subscribe master orchestration to animation stop "
+            "commands");
         detail::animationSubscription = sub;
     }
     if (!detail::calibrateAudioCommandRegistered) {
@@ -878,8 +1115,8 @@ inline ReturnCode begin() {
         (void)commandKey;
         detail::calibrateAudioCommandRegistered = true;
     }
-    _log_i("Master orchestration subscribed to wheel, beat, peak, button, and "
-           "animation events");
+    _log_i("Master orchestration subscribed to wheel, beat, FFT, peak, button, "
+           "and animation events");
     return OK();
 }
 
@@ -893,13 +1130,52 @@ inline ReturnCode handleWheel(const Totem::Wheel::WheelState &state) {
     return OK();
 }
 
-inline ReturnCode handlePeakWave(const Totem::Audio::PeakEvent &event,
+inline ReturnCode handleTotalEnergyWave(const Totem::AudioFft::FftFrame &frame,
+                                        uint32_t nowMs) {
+    if (!config.totalEnergyWave.publishCenterWave) {
+        return OK();
+    }
+
+    const auto energy = detail::scaledTotalFrameEnergy(frame);
+    if (energy < config.totalEnergyWave.triggerEnergy) {
+        return OK();
+    }
+
+    const auto lastMs = detail::lastTotalEnergyWaveMs;
+    const auto elapsed = nowMs - lastMs;
+    if (lastMs != 0 && elapsed < config.totalEnergyWave.minIntervalMs) {
+        return OK();
+    }
+
+    detail::lastTotalEnergyWaveMs = nowMs;
+    FAIL_IF_UNEXPECTED_FWD(
+        cmd,
+        Totem::LedDisplay::Animations::CenterWaveCommand::makeCommand(
+            {.hue = config.totalEnergyWave.hue,
+             .saturation = config.totalEnergyWave.saturation,
+             .value = config.totalEnergyWave.value,
+             .rise = config.totalEnergyWave.rise,
+             .peak = config.totalEnergyWave.peak,
+             .wake = config.totalEnergyWave.wake},
+            0, config.totalEnergyWave.lifetimeMs),
+        "Failed to build total-energy center wave command");
+    _log_i("Published total-energy center wave energy=%u",
+           static_cast<unsigned>(energy));
+    return Totem::LedDisplay::publishAnimationPlayCommand(cmd);
+}
+
+inline ReturnCode handlePeakWave(const Totem::AudioFft::PeakEvent &event,
                                  uint32_t nowMs) {
     if (!config.peakWave.publishCenterWave) {
         return OK();
     }
-    const auto groupIndex = Totem::Audio::peakGroupIndex(event.group);
-    if (groupIndex >= Totem::Audio::peakGroupCount) {
+    const auto groupIndex = Totem::AudioFft::peakGroupIndex(event.group);
+    if (groupIndex >= Totem::AudioFft::peakGroupCount) {
+        return OK();
+    }
+
+    if (config.peakWave.valueByGroup[groupIndex].second == 0 ||
+        config.peakWave.saturationByGroup[groupIndex].second == 0) {
         return OK();
     }
 
@@ -934,15 +1210,15 @@ inline ReturnCode handlePeakWave(const Totem::Audio::PeakEvent &event,
     return Totem::LedDisplay::publishAnimationPlayCommand(cmd);
 }
 
-inline ReturnCode handleDropWave(const Totem::Audio::PeakEvent &event,
+inline ReturnCode handleDropWave(const Totem::AudioFft::PeakEvent &event,
                                  uint32_t nowMs) {
     if (!config.dropWave.publishCenterWave) {
         detail::lastAnyPeakMs = nowMs;
         return OK();
     }
 
-    const auto groupIndex = Totem::Audio::peakGroupIndex(event.group);
-    if (groupIndex >= Totem::Audio::peakGroupCount) {
+    const auto groupIndex = Totem::AudioFft::peakGroupIndex(event.group);
+    if (groupIndex >= Totem::AudioFft::peakGroupCount) {
         detail::lastAnyPeakMs = nowMs;
         return OK();
     }
@@ -976,26 +1252,26 @@ inline ReturnCode handleDropWave(const Totem::Audio::PeakEvent &event,
     return Totem::LedDisplay::publishAnimationPlayCommand(cmd);
 }
 
-inline ReturnCode handleIoPeak(const Totem::Audio::PeakEvent &event,
+inline ReturnCode handleIoPeak(const Totem::AudioFft::PeakEvent &event,
                                uint32_t nowMs) {
     if (!config.ioLed.publishPeakFlicker) {
         return OK();
     }
 
-    const auto groupIndex = Totem::Audio::peakGroupIndex(event.group);
-    if (groupIndex >= Totem::Audio::peakGroupCount) {
+    const auto groupIndex = Totem::AudioFft::peakGroupIndex(event.group);
+    if (groupIndex >= Totem::AudioFft::peakGroupCount) {
         return OK();
     }
 
     const BulbPulseProfile *profile = nullptr;
     switch (event.group) {
-    case Totem::Audio::PeakGroup::Bass:
+    case Totem::AudioFft::PeakGroup::Bass:
         profile = &config.ioLed.bassPulse;
         break;
-    case Totem::Audio::PeakGroup::Mid:
+    case Totem::AudioFft::PeakGroup::Mid:
         profile = &config.ioLed.midPulse;
         break;
-    case Totem::Audio::PeakGroup::High:
+    case Totem::AudioFft::PeakGroup::High:
         profile = &config.ioLed.treblePulse;
         break;
     default:
@@ -1010,15 +1286,15 @@ inline ReturnCode handleIoPeak(const Totem::Audio::PeakEvent &event,
     detail::lastIoPeakMs[groupIndex] = nowMs;
 
     auto ret = OK();
-    if (event.group == Totem::Audio::PeakGroup::Bass ||
-        event.group == Totem::Audio::PeakGroup::High) {
+    if (event.group == Totem::AudioFft::PeakGroup::Bass ||
+        event.group == Totem::AudioFft::PeakGroup::High) {
         ret.combine(
             detail::publishIoCommand(Totem::LedPwm::CommandEvent::startPulse(
                 PeripheralLed::Bulb1,
                 detail::makePulse(*profile, event, nowMs, 0xB11BU))));
     }
-    if (event.group == Totem::Audio::PeakGroup::Mid ||
-        event.group == Totem::Audio::PeakGroup::High) {
+    if (event.group == Totem::AudioFft::PeakGroup::Mid ||
+        event.group == Totem::AudioFft::PeakGroup::High) {
         ret.combine(
             detail::publishIoCommand(Totem::LedPwm::CommandEvent::startPulse(
                 PeripheralLed::Bulb2,
@@ -1027,13 +1303,13 @@ inline ReturnCode handleIoPeak(const Totem::Audio::PeakEvent &event,
     return ret;
 }
 
-inline ReturnCode handleBeat(const Totem::Audio::BeatEvent &event) {
+inline ReturnCode handleBeat(const Totem::AudioFft::BeatEvent &event) {
     detail::lastBeatSequence = event.sequence;
     const bool transition = event.kind != detail::lastBeatKind;
     detail::lastBeatKind = event.kind;
     if (config.beat.logStateTransitions &&
-        (transition || event.kind == Totem::Audio::BeatEventKind::Reacquired ||
-         event.kind == Totem::Audio::BeatEventKind::Lost)) {
+        (transition || event.kind == Totem::AudioFft::BeatEventKind::Reacquired ||
+         event.kind == Totem::AudioFft::BeatEventKind::Lost)) {
         _log_i("Beat %s: bpm=%u confidence=%u energy=%u sequence=%lu",
                detail::beatKindName(event.kind), event.bpm, event.confidence,
                event.energy, static_cast<unsigned long>(event.sequence));
@@ -1041,7 +1317,7 @@ inline ReturnCode handleBeat(const Totem::Audio::BeatEvent &event) {
     return OK();
 }
 
-inline ReturnCode handlePeak(const Totem::Audio::PeakEvent &event,
+inline ReturnCode handlePeak(const Totem::AudioFft::PeakEvent &event,
                              uint32_t nowMs) {
     auto ret = OK();
     ret.combine(handleDropWave(event, nowMs));
@@ -1065,23 +1341,19 @@ inline ReturnCode handleButton(const Totem::Buttons::ButtonEvent &event,
         return OK();
     }
 
-    const auto elapsed = nowMs - detail::lastBellSinelonMs;
-    if (detail::lastBellSinelonMs != 0 && elapsed < config.bell.minIntervalMs) {
+    const auto elapsed = nowMs - detail::lastBellAnimationMs;
+    if (detail::lastBellAnimationMs != 0 &&
+        elapsed < config.bell.minIntervalMs) {
         return OK();
     }
 
-    detail::lastBellSinelonMs = nowMs;
-    FAIL_IF_UNEXPECTED_FWD(
-        cmd,
-        Totem::LedDisplay::Animations::SineWaveCommand::makeCommand(
-            config.bell.config),
-        "Failed to build bell bell command");
-    return Totem::LedDisplay::publishAnimationPlayCommand(cmd);
+    detail::lastBellAnimationMs = nowMs;
+    return detail::publishBellAnimation(nowMs);
 }
 
 inline ReturnCode work(uint32_t nowMs, bool allowNormalOperation = true) {
     if (detail::beatEventQueue != nullptr) {
-        Totem::Audio::BeatEvent beat{};
+        Totem::AudioFft::BeatEvent beat{};
         while (Totem::Queue::Platform::receive(detail::beatEventQueue, &beat, 0)
                    .ok()) {
             if (allowNormalOperation) {
@@ -1091,8 +1363,23 @@ inline ReturnCode work(uint32_t nowMs, bool allowNormalOperation = true) {
         }
     }
 
+    if (detail::fftFrameQueue != nullptr) {
+        Totem::AudioFft::FftFrame frame{};
+        Totem::AudioFft::FftFrame latest{};
+        bool hasFrame = false;
+        while (Totem::Queue::Platform::receive(detail::fftFrameQueue, &frame, 0)
+                   .ok()) {
+            latest = frame;
+            hasFrame = true;
+        }
+        if (allowNormalOperation && hasFrame) {
+            FAIL_IF_ERR_FWD(handleTotalEnergyWave(latest, nowMs),
+                            "Failed to handle queued FFT frame");
+        }
+    }
+
     if (detail::peakEventQueue != nullptr) {
-        Totem::Audio::PeakEvent peak{};
+        Totem::AudioFft::PeakEvent peak{};
         while (Totem::Queue::Platform::receive(detail::peakEventQueue, &peak, 0)
                    .ok()) {
             if (allowNormalOperation) {

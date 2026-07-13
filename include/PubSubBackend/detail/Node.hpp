@@ -24,6 +24,7 @@
 #include "PubSubBackend/detail/Types.hpp"
 #include "Queue/Facade.hpp"
 #include "Services/PubSub.hpp"
+#include "Support/NetworkedCommands.hpp"
 #include "TaskController/Facade.hpp"
 #include "TaskController/Interfaces/IRegistry.hpp"
 #include "TaskController/Interfaces/TaskHooks.hpp"
@@ -202,6 +203,8 @@ class Node : public HasLifecycle<Node, Config>,
         _taskKey = task;
         INIT_QUEUE_OR_FAIL(_publishQueue);
         START_TASK();
+        FAIL_IF_ERR_FWD(register_network_commands(),
+                        "Failed to register network commands");
         return OK();
     }
 
@@ -327,9 +330,9 @@ class Node : public HasLifecycle<Node, Config>,
 
             if (enqueueRet == ERR(Timeout) || enqueueRet == ERR(Overflow) ||
                 enqueueRet == ERR(InvalidState)) {
-                _log_w("%s: direct relay dropped target " SV_FMT " for "
-                       MAGIC_PUBSUB_SV_FMT " after egress backpressure: "
-                       ERR_FMT,
+                _log_w("%s: direct relay dropped target " SV_FMT
+                       " for " MAGIC_PUBSUB_SV_FMT
+                       " after egress backpressure: " ERR_FMT,
                        name, SV_ARG(directDispatch.name),
                        MAGIC_PUBSUB_SV_ARG(header), ERR_ARG(enqueueRet));
                 continue;

@@ -9,6 +9,7 @@ fi
 FULL=0
 if [ "$1" = "-f" ]; then
     FULL=1
+    shift
 fi
 
 ENV="${1}"
@@ -38,7 +39,7 @@ color() {
 }
 
 case "$ENV" in
-master | gpu0 | gpu1 | media)
+master | gpu0 | gpu1 | media | ai)
     ADDR2LINE=~/.platformio/packages/toolchain-xtensa-esp-elf/bin/xtensa-esp32s3-elf-addr2line
     ;;
 io)
@@ -51,7 +52,16 @@ io)
 esac
 
 LINE_COUNT="$(echo "$@" | wc -w)"
-TRACE="$("${ADDR2LINE}" -fCe ".pio/build/${ENV}/firmware.elf" "$@")"
+ELF="build/${ENV}/firmware.elf"
+if [ ! -f "${ELF}" ]; then
+    ELF=".pio/build/${ENV}/firmware.elf"
+fi
+if [ ! -f "${ELF}" ]; then
+    echo "Firmware ELF not found for ${ENV}: checked build/${ENV}/firmware.elf and .pio/build/${ENV}/firmware.elf" >&2
+    exit 1
+fi
+
+TRACE="$("${ADDR2LINE}" -fCe "${ELF}" "$@")"
 
 if [ $FULL -ne 1 ]; then
     _DIR_REPR=(

@@ -8,6 +8,7 @@
 #include "Platform/PlatformSelect.hpp"
 #include "StaticConfig/Network.hpp"
 #include "Types/Error.hpp"
+#include "esp_heap_caps.h"
 #include "lwip/sockets.h"
 #include <array>
 #include <cerrno>
@@ -24,6 +25,8 @@
 namespace Totem::Network::detail::platform {
 
 static constexpr LogComponent logComponent = LogComponent::System;
+static constexpr uint8_t udpSendAttempts = 4;
+static constexpr uint32_t udpSendRetryDelayMs = 5;
 
 struct ReceiveResult {
     Ipv4Endpoint remote{};
@@ -191,10 +194,34 @@ class UdpSocket {
                 "Cannot send empty UDP packet");
 
         const auto remote = toSockaddr(endpoint);
-        errno = 0;
-        const auto sent = lwip_sendto(
-            _fd, data.data(), data.size(), 0,
-            reinterpret_cast<const sockaddr *>(&remote), sizeof(remote));
+        int failureErrno = 0;
+        ssize_t sent = -1;
+        for (uint8_t attempt = 0; attempt < udpSendAttempts; ++attempt) {
+            errno = 0;
+            sent = lwip_sendto(
+                _fd, data.data(), data.size(), 0,
+                reinterpret_cast<const sockaddr *>(&remote), sizeof(remote));
+            if (sent >= 0) {
+                break;
+            }
+            failureErrno = errno;
+            if ((failureErrno != ENOMEM && failureErrno != ENOBUFS) ||
+                attempt + 1U >= udpSendAttempts) {
+                break;
+            }
+            ::platform::delay(::platform::ms_to_ticks(udpSendRetryDelayMs));
+        }
+        if (sent < 0) {
+            _log_w("UDPtx fail fd=%d n=%zu e=%d def=%zu/%zu int=%zu/%zu dma=%zu/%zu",
+                   _fd, data.size(), failureErrno,
+                   heap_caps_get_free_size(MALLOC_CAP_DEFAULT),
+                   heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT),
+                   heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                   heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                   heap_caps_get_free_size(MALLOC_CAP_DMA),
+                   heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+            errno = failureErrno;
+        }
         FAIL_IF(sent < 0, socketFailure(), "Failed to send UDP packet");
         FAIL_IF(static_cast<std::size_t>(sent) != data.size(),
                 ERR(CoreError, InvalidSize), "Partial UDP send");

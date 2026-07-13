@@ -27,6 +27,8 @@ from .connection import PubSubConnection
 
 FIELD_DROPDOWN_LAYER = 1000
 EVENT_MENU_LAYER = 2000
+STATUS_LABEL_DETAIL_LIMIT = 72
+CONNECTION_DETAIL_PREVIEW_LIMIT = 4000
 
 
 @dataclass
@@ -116,6 +118,7 @@ class ViewerApp:
         self.needs_redraw = True
         self._last_connection_poll_s = -10.0
         self._last_status_text = ""
+        self._last_connection_detail = ""
 
         self._build_ui()
         self._select_event(self.selected_event)
@@ -1217,7 +1220,12 @@ class ViewerApp:
                 payload=payload,
                 traffic_class=self.selected_event.traffic_class,
             )
-            self.result_label.set_text(f"Published {len(payload)} bytes")
+            state = self.connection.state
+            if state.status == "mcu-seen":
+                suffix = "MCU seen"
+            else:
+                suffix = "MCU not confirmed"
+            self.result_label.set_text(f"Published {len(payload)} bytes ({suffix})")
         except Exception as exc:
             self._show_error("Publish error", exc)
         self.needs_redraw = True
@@ -1229,11 +1237,47 @@ class ViewerApp:
             return
         self._last_connection_poll_s = now_s
         state = self.connection.poll()
-        text = f"Status: {state.status} {state.detail}".strip()
+        text = self._connection_status_text(state)
         if text != self._last_status_text:
             self._last_status_text = text
             self.status_label.set_text(text)
             self.needs_redraw = True
+        if state.status == "error" and state.detail != self._last_connection_detail:
+            self._last_connection_detail = state.detail
+            self._show_connection_detail(state)
+
+    @staticmethod
+    def _connection_detail_summary(detail: str) -> str:
+        lines = [line.strip() for line in detail.splitlines() if line.strip()]
+        if not lines:
+            return ""
+        first = " ".join(lines[0].split())
+        if len(first) <= STATUS_LABEL_DETAIL_LIMIT:
+            return first
+        return first[: STATUS_LABEL_DETAIL_LIMIT - 3] + "..."
+
+    def _connection_status_text(self, state: Any) -> str:
+        summary = self._connection_detail_summary(state.detail)
+        if not summary:
+            return f"Status: {state.status}"
+        return f"Status: {state.status} - {summary}"
+
+    @staticmethod
+    def _connection_preview_detail(detail: str) -> str:
+        detail = detail.strip()
+        if len(detail) <= CONNECTION_DETAIL_PREVIEW_LIMIT:
+            return detail
+        head = detail[:200].rstrip()
+        tail = detail[-(CONNECTION_DETAIL_PREVIEW_LIMIT - 208) :].lstrip()
+        return f"{head}\n...\n{tail}"
+
+    def _show_connection_detail(self, state: Any) -> None:
+        detail = self._connection_preview_detail(state.detail)
+        self.result_label.set_text("Connection error")
+        self.preview_box.set_text(
+            "<br>".join(html.escape(line) for line in detail.splitlines())
+        )
+        self.needs_redraw = True
 
     def _show_error(self, title: str, exc: Exception) -> None:
         self.result_label.set_text(title)

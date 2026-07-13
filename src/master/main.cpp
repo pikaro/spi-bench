@@ -153,11 +153,14 @@ void setup() {
 
     pubSubNetwork.setup();
     if constexpr (Totem::StaticConfig::PubSubUdp::enabled) {
+        _log_i("Starting UDP PubSub transport");
         ABORT_IF_ERR_BEGIN(pubSubUdpTransport.begin());
+        _log_i("UDP PubSub transport began; registering with PubSub node");
         ABORT_IF_UNEXPECTED(udpHandle,
                             pubSubNetwork.node().registerTransport(
                                 pubSubUdpTransport),
                             "Failed to register UDP PubSub transport");
+        _log_i("UDP PubSub transport registered with PubSub node");
         (void)udpHandle;
     }
 

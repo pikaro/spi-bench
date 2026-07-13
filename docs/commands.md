@@ -322,6 +322,12 @@ Useful audio-source validation command:
 
 Useful host PubSub UDP bridge commands:
 
+- Check route, local socket source, UDP send, and MCU keepalive response with a
+    verbose one-shot diagnostic:
+    `bin/pubsub-check 192.168.4.1`
+    It binds local UDP port `2026` by default to match the real PubSub peer. If
+    another bridge is still running, this should fail with an address-in-use
+    error instead of hiding the stale process.
 - Run the host UDP participant and expose a local Unix-domain socket for
     arbitrary local PubSub tools:
     `bin/pubsub-udp-peer --mcu-ip <master-ip> --bind-ip <host-ip> --local-socket /tmp/totem-pubsub.sock`

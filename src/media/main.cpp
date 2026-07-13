@@ -1,5 +1,5 @@
-#include "Audio/Facade.hpp"
-#include "Audio/Interfaces/Types.hpp"
+#include "AudioFft/Facade.hpp"
+#include "AudioFft/Interfaces/Types.hpp"
 #include "Clock/Facade.hpp"
 #include "Data/Peripherals.hpp"
 #include "LedPwm/Facade.hpp"
@@ -22,8 +22,8 @@ Totem::LedPwm::LedPwm ledPwm{core.taskRegistry};
 Totem::Wire::I2C::Master i2cMaster{};
 Totem::Wire::I2C::Ssd1306Display fftDisplay{i2cMaster};
 MediaAudioSourceType audioSource{};
-Totem::Audio::FftAnalyzer fftAnalyzer{core.taskRegistry, audioSource};
-Totem::Audio::FftDisplay fftDisplayVisualizer{core.taskRegistry, fftAnalyzer,
+Totem::AudioFft::FftAnalyzer fftAnalyzer{core.taskRegistry, audioSource};
+Totem::AudioFft::FftDisplay fftDisplayVisualizer{core.taskRegistry, fftAnalyzer,
                                               fftDisplay};
 
 Totem::Wire::Spi::Slave spiSlave{core.taskRegistry};
@@ -43,7 +43,7 @@ class PeakIndicatorLed {
     }
 
     static ReturnCode onPeak(void *owner,
-                             const Totem::Audio::PeakResult &event) {
+                             const Totem::AudioFft::PeakResult &event) {
         auto *self = static_cast<PeakIndicatorLed *>(owner);
         FAIL_IF_NULL(self, ERR(CoreError, InvalidArgument),
                      "Peak indicator owner is null");
@@ -51,7 +51,7 @@ class PeakIndicatorLed {
     }
 
   private:
-    ReturnCode pulse(const Totem::Audio::PeakResult & /*unused*/) {
+    ReturnCode pulse(const Totem::AudioFft::PeakResult & /*unused*/) {
         FAIL_IF(!_bound, ERR(CoreError, InvalidState),
                 "Peak indicator LED is not bound");
         auto command = Totem::LedPwm::LedCommand::pulse({

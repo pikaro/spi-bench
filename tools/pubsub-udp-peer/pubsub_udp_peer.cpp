@@ -307,16 +307,21 @@ int createSocket(const Args &args, sockaddr_in &remote, std::string &error) {
     remote.sin_family = AF_INET;
     remote.sin_addr = remoteAddress;
     remote.sin_port = htons(args.port);
+    if (connect(fd, reinterpret_cast<const sockaddr *>(&remote),
+                sizeof(remote)) != 0) {
+        error = "connect() failed: " + std::string(std::strerror(errno));
+        close(fd);
+        return -1;
+    }
     return fd;
 }
 
 bool sendDatagram(int fd, const sockaddr_in &remote,
                   std::span<const std::byte> payload, std::string &error) {
-    const auto sent = sendto(fd, payload.data(), payload.size(), 0,
-                             reinterpret_cast<const sockaddr *>(&remote),
-                             sizeof(remote));
+    (void)remote;
+    const auto sent = send(fd, payload.data(), payload.size(), 0);
     if (sent < 0) {
-        error = "sendto() failed: " + std::string(std::strerror(errno));
+        error = "send() failed: " + std::string(std::strerror(errno));
         return false;
     }
     if (static_cast<size_t>(sent) != payload.size()) {
@@ -612,6 +617,9 @@ int run(const Args &args) {
         auto datagram = std::span<const std::byte>{
             buffer.data(), static_cast<size_t>(received)};
         if (isKeepalive(datagram)) {
+            if (stats.keepaliveRx == 0) {
+                emitStatus("keepalive-rx");
+            }
             ++stats.keepaliveRx;
             continue;
         }

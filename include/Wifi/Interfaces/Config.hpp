@@ -4,6 +4,7 @@
 #include "Wifi/Interfaces/Types.hpp"
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 
 namespace Totem::Wifi {
 
@@ -74,8 +75,8 @@ struct AccessPointConfig {
 
 struct Config {
     Mode mode = Mode::Disabled;
-    StationConfig station{};
-    AccessPointConfig accessPoint{};
+    std::optional<StationConfig> station = std::nullopt;
+    std::optional<AccessPointConfig> accessPoint = std::nullopt;
     bool disableNvsStorage = true;
 
     [[nodiscard]] constexpr bool validate() const {
@@ -83,14 +84,19 @@ struct Config {
         case Mode::Disabled:
             return true;
         case Mode::Station:
-            return station.validate();
+            if (!station.has_value()) {
+                return false;
+            }
+            return station->validate();
         case Mode::AccessPoint:
-            return accessPoint.validate();
+            if (!accessPoint.has_value()) {
+                return false;
+            }
+            return accessPoint->validate();
         default:
             return false;
         }
     }
-
 };
 
 } // namespace Totem::Wifi

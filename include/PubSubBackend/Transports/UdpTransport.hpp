@@ -19,6 +19,7 @@
 #include "TaskController/Interfaces/TaskHooks.hpp"
 #include "TaskController/Interfaces/Types.hpp"
 #include "Types/Error.hpp"
+#include "Types/Signal.hpp"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -26,6 +27,7 @@
 #include <cstdint>
 #include <cstring>
 #include <expected>
+#include <limits>
 #include <optional>
 #include <span>
 
@@ -40,6 +42,7 @@ struct UdpTransportConfig {
     uint32_t keepaliveIntervalMs =
         StaticConfig::PubSubUdp::keepaliveIntervalMs;
     uint32_t peerTimeoutMs = StaticConfig::PubSubUdp::peerTimeoutMs;
+    size_t txBurstLimit = StaticConfig::PubSubUdp::txBurstLimit;
     TaskController::Config task = StaticConfig::PubSubUdp::task;
 
     [[nodiscard]] ReturnCode validate() const {
@@ -54,6 +57,8 @@ struct UdpTransportConfig {
         FAIL_IF(peerTimeoutMs <= keepaliveIntervalMs,
                 ERR(CoreError, InvalidArgument),
                 "UDP PubSub peer timeout must exceed keepalive interval");
+        FAIL_IF(txBurstLimit == 0, ERR(CoreError, InvalidArgument),
+                "UDP PubSub TX burst limit must be non-zero");
         FAIL_IF(!task.validate(), ERR(CoreError, InvalidArgument),
                 "UDP PubSub task config is invalid");
         return OK();
@@ -120,6 +125,8 @@ class UdpTransport : public BaseTransport,
         detail::prewarmMetrics();
         FAIL_IF_ERR_FWD(_config.validate(),
                         "Invalid UDP PubSub transport config");
+        _log_i("%s: bringup start; binding UDP port %u on all IPv4 interfaces",
+               name, static_cast<unsigned>(_config.localPort));
 
         auto rxQueueResult =
             Totem::Queue::Platform::create(_rxFrameQueueStorage);
@@ -128,29 +135,49 @@ class UdpTransport : public BaseTransport,
                  "Failed to create UDP PubSub RX queue");
         }
         _rxFrameQueue = *rxQueueResult;
+        _log_i("%s: RX queue ready depth=%u", name,
+               static_cast<unsigned>(_config.rxQueueDepth));
+        auto txRawQueueResult =
+            Totem::Queue::Platform::create(_txRawFrameQueueStorage);
+        if (!txRawQueueResult) {
+            (void)_destroyRxQueue();
+            FAIL(txRawQueueResult.error(),
+                 "Failed to create UDP PubSub raw TX queue");
+        }
+        _txRawFrameQueue = *txRawQueueResult;
 
+        _log_i("%s: opening UDP socket 0.0.0.0:%u", name,
+               static_cast<unsigned>(_config.localPort));
         auto openRet = _socket.open(_config.localPort);
         if (!openRet.ok()) {
             (void)_destroyRxQueue();
+            (void)_destroyTxRawQueue();
             FAIL(openRet, "Failed to open UDP PubSub socket on port %u",
                  static_cast<unsigned>(_config.localPort));
         }
         _socketOpen.store(true, std::memory_order_release);
+        _log_i("%s: UDP socket bound on all IPv4 interfaces port=%u", name,
+               static_cast<unsigned>(_config.localPort));
 
+        _log_i("%s: beginning PubSub base transport", name);
         auto baseRet = Base::begin();
         if (!baseRet.ok()) {
             (void)_cleanupStartedTransport(false);
             FAIL(baseRet, "Failed to begin UDP PubSub base transport");
         }
+        _log_i("%s: PubSub base transport ready", name);
 
         auto hooks = TaskController::TaskHooks::bind(*this);
+        _log_i("%s: beginning task controller", name);
         auto beginTaskRet = _beginTaskController();
         if (!beginTaskRet.ok()) {
             (void)_cleanupStartedTransport(true);
             FAIL(beginTaskRet,
                  "Failed to begin UDP PubSub transport task controller");
         }
+        _log_i("%s: task controller ready", name);
 
+        _log_i("%s: adding task %s", name, _config.task.name);
         auto taskResult =
             _taskController.addTask(_config.task.name, hooks);
         if (!taskResult) {
@@ -158,7 +185,9 @@ class UdpTransport : public BaseTransport,
             (void)_endTaskController();
             FAIL(taskResult.error(), "Failed to add UDP PubSub task");
         }
+        _log_i("%s: task %s registered", name, _config.task.name);
 
+        _log_i("%s: starting task %s", name, _config.task.name);
         auto startRet = _taskController.startTask(
             *taskResult, _taskConfig(_config.task));
         if (!startRet.ok()) {
@@ -166,9 +195,10 @@ class UdpTransport : public BaseTransport,
             (void)_endTaskController();
             FAIL(startRet, "Failed to start UDP PubSub task");
         }
+        _log_i("%s: task %s started", name, _config.task.name);
 
         _taskKey = *taskResult;
-        _log_i("%s: listening on UDP port %u", name,
+        _log_i("%s: bringup complete; listening on UDP port %u on all IPv4 interfaces", name,
                static_cast<unsigned>(_config.localPort));
         return OK();
     }
@@ -182,6 +212,27 @@ class UdpTransport : public BaseTransport,
         }
         ret.combine(_cleanupStartedTransport(Base::active()));
         return ret;
+    }
+
+    ReturnCode
+    send(size_t maxCount = std::numeric_limits<size_t>::max()) override {
+        (void)maxCount;
+        return _wakeTransportTask();
+    }
+
+    ReturnCode
+    enqueueRaw(const Header &header, std::span<const std::byte> frame,
+               const detail::TransportDispatch &dispatch = {}) override {
+        (void)dispatch;
+        FAIL_IF_ERR_FWD(_observeAvailability(),
+                        "Failed to observe UDP transport availability");
+        FAIL_IF_NOT(_available(), ERR(InvalidState),
+                    "Cannot enqueue raw frame for unavailable UDP transport "
+                    SV_FMT,
+                    SV_ARG(instanceName()));
+        detail::log_trace_packet("udp.transport.enqueueRaw", header,
+                                 instanceName().data());
+        return _enqueueTxRawFrame(frame);
     }
 
   private:
@@ -288,9 +339,11 @@ class UdpTransport : public BaseTransport,
         const auto nowMs = ::platform::get_time();
         _expirePeerIfNeeded(nowMs);
         if (!_socketOpen.load(std::memory_order_acquire) ||
-            !_networkIsReady()) {
+            !_networkIsReadyLogged()) {
             return OK();
         }
+        FAIL_IF_ERR_FWD(_sendQueuedFrames(),
+                        "Failed to send queued UDP PubSub frames");
 
         RxFrame rxFrame{};
         Network::detail::ReceiveResult receiveResult{};
@@ -299,11 +352,15 @@ class UdpTransport : public BaseTransport,
                                               receiveResult);
         if (!receiveRet.ok()) {
             if (_isTimeout(receiveRet)) {
+                FAIL_IF_ERR_FWD(_sendQueuedFrames(),
+                                "Failed to send queued UDP PubSub frames");
                 return _sendKeepaliveIfDue(::platform::get_time());
             }
             detail::metrics().addUdpFailure();
             _log_w("%s: UDP receive failed: " ERR_FMT, name,
                    ERR_ARG(receiveRet));
+            FAIL_IF_ERR_FWD(_sendQueuedFrames(),
+                            "Failed to send queued UDP PubSub frames");
             return _sendKeepaliveIfDue(::platform::get_time());
         }
 
@@ -312,8 +369,12 @@ class UdpTransport : public BaseTransport,
         FAIL_IF_ERR_FWD(_handleDatagram(receiveResult.remote, payload,
                                         ::platform::get_time()),
                         "Failed to handle UDP PubSub datagram");
+        FAIL_IF_ERR_FWD(_sendQueuedFrames(),
+                        "Failed to send queued UDP PubSub frames");
         return _sendKeepaliveIfDue(::platform::get_time());
     }
+
+    static ReturnCode _onTaskNotify(Signal /*signal*/) { return OK(); }
 
     ReturnCode _handleDatagram(Network::Ipv4Endpoint remote,
                                std::span<const std::byte> payload,
@@ -327,6 +388,8 @@ class UdpTransport : public BaseTransport,
             }
             detail::metrics().addUdpKeepaliveRx();
             detail::metrics().addUdpRxBytes(payload.size());
+            _log_d("%s: received UDP keepalive from %s", name,
+                   Network::detail::formatEndpoint(remote).c_str());
             return OK();
         }
 
@@ -358,6 +421,11 @@ class UdpTransport : public BaseTransport,
             return OK();
         }
 
+        _log_i("%s: rx event t=%lu m=%lu src=%u n=%u", name,
+               static_cast<unsigned long>(headerResult->topic),
+               static_cast<unsigned long>(headerResult->messageId),
+               static_cast<unsigned>(headerResult->source),
+               static_cast<unsigned>(payload.size()));
         if (headerResult->topic ==
             static_cast<TopicId>(detail::Spec::Topic::PubSub)) {
             detail::metrics().addUdpControlFrame();
@@ -420,6 +488,72 @@ class UdpTransport : public BaseTransport,
         return _wake();
     }
 
+    ReturnCode _enqueueTxRawFrame(std::span<const std::byte> payload) {
+        if (_txRawFrameQueue == nullptr) {
+            return ERR(CoreError, InvalidState);
+        }
+        if (payload.size() > Base::bufferSize) {
+            detail::metrics().addUdpDrop();
+            return ERR(CoreError, Overflow);
+        }
+
+        RxFrame txFrame{};
+        std::memcpy(txFrame.data.data(), payload.data(), payload.size());
+        txFrame.size = payload.size();
+        FAIL_IF_ERR_FWD(
+            Totem::Queue::Platform::send(_txRawFrameQueue, &txFrame, 0),
+            "Failed to enqueue raw UDP PubSub TX frame");
+        return _wakeTransportTask();
+    }
+
+    ReturnCode _sendQueuedFrames() {
+        auto ret = OK();
+        ret.combine(Base::send(_config.txBurstLimit));
+        ret.combine(_sendRawFrames(_config.txBurstLimit));
+        return ret;
+    }
+
+    ReturnCode _sendRawFrames(size_t maxCount) {
+        if (_txRawFrameQueue == nullptr) {
+            return ERR(CoreError, InvalidState);
+        }
+
+        auto ret = OK();
+        size_t count = 0;
+        while (ret.ok() && count < maxCount) {
+            RxFrame txFrame{};
+            ret.combine(
+                Totem::Queue::Platform::receive(_txRawFrameQueue, &txFrame, 0));
+            if (ret.ok()) {
+                auto frame = std::span<const std::byte>{txFrame.data.data(),
+                                                        txFrame.size};
+                auto sendRet = _send(Header{}, frame);
+                if (!sendRet.ok()) {
+                    _log_w("%s: dropping queued raw UDP PubSub frame of %zu "
+                           "bytes after send failed: " ERR_FMT,
+                           name, frame.size(), ERR_ARG(sendRet));
+                }
+                ++count;
+            }
+        }
+        if (ret == ERR(CoreError, Timeout) || ret == ERR(Timeout)) {
+            return OK();
+        }
+        return ret;
+    }
+
+    ReturnCode _wakeTransportTask() {
+        if (_taskKey == 0) {
+            return OK();
+        }
+        auto signalRet = _taskController.signalTaskDirect(_taskKey);
+        if (!signalRet.ok()) {
+            _log_w("%s: failed to wake UDP task: " ERR_FMT, name,
+                   ERR_ARG(signalRet));
+        }
+        return OK();
+    }
+
     ReturnCode _sendKeepaliveIfDue(uint32_t nowMs) {
         auto peer = _peerEndpoint();
         if (!peer.has_value()) {
@@ -443,7 +577,24 @@ class UdpTransport : public BaseTransport,
         }
         detail::metrics().addUdpKeepaliveTx();
         detail::metrics().addUdpTxBytes(frame.size());
+        _log_d("%s: sent UDP keepalive to %s", name,
+               Network::detail::formatEndpoint(*peer).c_str());
         return OK();
+    }
+
+    [[nodiscard]] bool _networkIsReadyLogged() {
+        const auto ready = _networkIsReady();
+        if (!_networkReadyLogged || ready != _lastNetworkReady) {
+            _networkReadyLogged = true;
+            _lastNetworkReady = ready;
+            if (ready) {
+                _log_i("%s: network ready; UDP RX active on port %u", name,
+                       static_cast<unsigned>(_config.localPort));
+            } else {
+                _log_i("%s: waiting for WiFi network readiness", name);
+            }
+        }
+        return ready;
     }
 
     void _expirePeerIfNeeded(uint32_t nowMs) {
@@ -483,6 +634,7 @@ class UdpTransport : public BaseTransport,
         if (_socketOpen.exchange(false, std::memory_order_acq_rel)) {
             ret.combine(_socket.close());
         }
+        ret.combine(_destroyTxRawQueue());
         ret.combine(_destroyRxQueue());
         return ret;
     }
@@ -493,6 +645,15 @@ class UdpTransport : public BaseTransport,
         }
         auto ret = Totem::Queue::Platform::destroy(_rxFrameQueue);
         _rxFrameQueue = nullptr;
+        return ret;
+    }
+
+    ReturnCode _destroyTxRawQueue() {
+        if (_txRawFrameQueue == nullptr) {
+            return OK();
+        }
+        auto ret = Totem::Queue::Platform::destroy(_txRawFrameQueue);
+        _txRawFrameQueue = nullptr;
         return ret;
     }
 
@@ -512,11 +673,17 @@ class UdpTransport : public BaseTransport,
     std::atomic<uint32_t> _lastSeenMs{0};
     std::atomic<uint32_t> _nextKeepaliveMs{0};
     TaskController::RunnerKey _taskKey = 0;
+    bool _networkReadyLogged = false;
+    bool _lastNetworkReady = false;
 
     Totem::Queue::Handle _rxFrameQueue{};
     Totem::Queue::Platform::Storage<RxFrame,
                                     StaticConfig::PubSubUdp::rxQueueDepth>
         _rxFrameQueueStorage{};
+    Totem::Queue::Handle _txRawFrameQueue{};
+    Totem::Queue::Platform::Storage<RxFrame,
+                                    StaticConfig::PubSubUdp::rxQueueDepth>
+        _txRawFrameQueueStorage{};
 };
 
 } // namespace Totem::PubSubBackend::Transports

@@ -1,5 +1,6 @@
 # Name,   Type, SubType,  Offset,   Size,      Flags
-nvs,      data, nvs,      0x9000,   0x5000,
+nvs,      data, nvs,     0x9000,   0x4000,
+secrets,  data, nvs,     0xD000,   0x3000,
 app0,     app,  factory,  0x10000,  0x200000,
 littlefs, data, littlefs, 0x210000, 0x1E0000,
 coredump, data, coredump, 0x3F0000, 0x10000,

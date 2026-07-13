@@ -1,11 +1,11 @@
 #pragma once
 
-#include "Audio/Interfaces/AnalyzerConfig.hpp"
-#include "Audio/Interfaces/DisplayConfig.hpp"
-#include "Audio/Interfaces/SourceConfig.hpp"
-#include "Audio/Interfaces/Types.hpp"
-#include "Audio/detail/Sources/I2SSource.hpp"
-#include "Audio/detail/Sources/WavSource.hpp"
+#include "AudioFft/Interfaces/AnalyzerConfig.hpp"
+#include "AudioFft/Interfaces/DisplayConfig.hpp"
+#include "AudioSource/Interfaces/SourceConfig.hpp"
+#include "AudioFft/Interfaces/Types.hpp"
+#include "AudioSource/detail/Sources/I2SSource.hpp"
+#include "AudioSource/detail/Sources/WavSource.hpp"
 #include "Data/Peripherals.hpp"
 #include "LedPwm/Interfaces/Config.hpp"
 #include "Platform/Hardware.hpp"
@@ -19,10 +19,10 @@
 #include "Wire/Spi/Interfaces/Types.hpp"
 #include "Types/Error.hpp"
 
-namespace Totem::Audio::detail {
+namespace Totem::AudioSource::detail {
 class A2DPSource;
 class BtstackA2DPSource;
-} // namespace Totem::Audio::detail
+} // namespace Totem::AudioSource::detail
 
 inline constexpr bool enableFftDebugDisplay = true;
 
@@ -67,7 +67,7 @@ inline Totem::Wire::I2C::Ssd1306Config fftDisplayConfig{
     .height = 32,
 };
 
-inline Totem::Audio::FftDisplayConfig fftDisplayVisualizerConfig{
+inline Totem::AudioFft::FftDisplayConfig fftDisplayVisualizerConfig{
     .showRawBands = false,
     .peakBarHoldMs = 90,
     .task =
@@ -81,11 +81,11 @@ inline Totem::Audio::FftDisplayConfig fftDisplayVisualizerConfig{
         },
 };
 
-inline constexpr Totem::Audio::AudioSourceKind mediaAudioSourceKind =
-    Totem::Audio::AudioSourceKind::I2S;
+inline constexpr Totem::AudioSource::AudioSourceKind mediaAudioSourceKind =
+    Totem::AudioSource::AudioSourceKind::I2S;
 
-inline constexpr Totem::Audio::I2SSourceConfig i2sAudioSourceConfig{
-    .device = Totem::Audio::I2SDevicePreset::SPH0645,
+inline constexpr Totem::AudioSource::I2SSourceConfig i2sAudioSourceConfig{
+    .device = Totem::AudioSource::I2SDevicePreset::SPH0645,
     .readiness =
         {
             .probeBytes = 64,
@@ -102,16 +102,16 @@ inline constexpr Totem::Audio::I2SSourceConfig i2sAudioSourceConfig{
         },
 };
 
-inline constexpr Totem::Audio::WavSourceConfig wavAudioSourceConfig{
+inline constexpr Totem::AudioSource::WavSourceConfig wavAudioSourceConfig{
     .path = "/test.wav",
     .loop = true,
 };
 
-inline constexpr Totem::Audio::A2DPSourceConfig a2dpAudioSourceConfig{
+inline constexpr Totem::AudioSource::A2DPSourceConfig a2dpAudioSourceConfig{
     .deviceName = "Totem Media",
 };
 
-inline constexpr Totem::Audio::BtstackA2DPSourceConfig
+inline constexpr Totem::AudioSource::BtstackA2DPSourceConfig
     btstackA2DPAudioSourceConfig{
         .deviceName = "Totem Media",
         .bufferStartThresholdBytes = 256,
@@ -119,46 +119,46 @@ inline constexpr Totem::Audio::BtstackA2DPSourceConfig
         .cooperativeYieldIntervalMs = 4,
 };
 
-template <Totem::Audio::AudioSourceKind Kind>
+template <Totem::AudioSource::AudioSourceKind Kind>
 struct MediaAudioSourceBinding;
 
 template <>
-struct MediaAudioSourceBinding<Totem::Audio::AudioSourceKind::I2S> {
-    using Source = Totem::Audio::detail::I2SSource;
+struct MediaAudioSourceBinding<Totem::AudioSource::AudioSourceKind::I2S> {
+    using Source = Totem::AudioSource::detail::I2SSource;
 };
 
 template <>
-struct MediaAudioSourceBinding<Totem::Audio::AudioSourceKind::WavFile> {
-    using Source = Totem::Audio::detail::WavSource;
+struct MediaAudioSourceBinding<Totem::AudioSource::AudioSourceKind::WavFile> {
+    using Source = Totem::AudioSource::detail::WavSource;
 };
 
 template <>
-struct MediaAudioSourceBinding<Totem::Audio::AudioSourceKind::A2DP> {
-    using Source = Totem::Audio::detail::A2DPSource;
+struct MediaAudioSourceBinding<Totem::AudioSource::AudioSourceKind::A2DP> {
+    using Source = Totem::AudioSource::detail::A2DPSource;
 };
 
 template <>
-struct MediaAudioSourceBinding<Totem::Audio::AudioSourceKind::BtstackA2DP> {
-    using Source = Totem::Audio::detail::BtstackA2DPSource;
+struct MediaAudioSourceBinding<Totem::AudioSource::AudioSourceKind::BtstackA2DP> {
+    using Source = Totem::AudioSource::detail::BtstackA2DPSource;
 };
 
 using MediaAudioSourceType =
     typename MediaAudioSourceBinding<mediaAudioSourceKind>::Source;
 
-template <Totem::Audio::AudioSourceKind Kind>
+template <Totem::AudioSource::AudioSourceKind Kind>
 inline ReturnCode beginMediaAudioSource(
     typename MediaAudioSourceBinding<Kind>::Source &source) {
-    if constexpr (Kind == Totem::Audio::AudioSourceKind::I2S) {
+    if constexpr (Kind == Totem::AudioSource::AudioSourceKind::I2S) {
         return source.begin(i2sAudioSourceConfig);
-    } else if constexpr (Kind == Totem::Audio::AudioSourceKind::WavFile) {
+    } else if constexpr (Kind == Totem::AudioSource::AudioSourceKind::WavFile) {
         return source.begin(wavAudioSourceConfig);
-    } else if constexpr (Kind == Totem::Audio::AudioSourceKind::A2DP) {
+    } else if constexpr (Kind == Totem::AudioSource::AudioSourceKind::A2DP) {
         return source.begin(a2dpAudioSourceConfig);
     } else if constexpr (Kind ==
-                         Totem::Audio::AudioSourceKind::BtstackA2DP) {
+                         Totem::AudioSource::AudioSourceKind::BtstackA2DP) {
         return source.begin(btstackA2DPAudioSourceConfig);
     } else {
-        static_assert(Totem::Audio::isAudioSourceKind(Kind),
+        static_assert(Totem::AudioSource::isAudioSourceKind(Kind),
                       "Unsupported media audio source kind");
     }
 }
@@ -167,8 +167,8 @@ inline ReturnCode beginMediaAudioSource(MediaAudioSourceType &source) {
     return beginMediaAudioSource<mediaAudioSourceKind>(source);
 }
 
-inline Totem::Audio::FftAnalyzerConfig fftAnalyzerConfig{
-    .backend = Totem::Audio::FftBackendLibrary::EspressifFft,
+inline Totem::AudioFft::FftAnalyzerConfig fftAnalyzerConfig{
+    .backend = Totem::AudioFft::FftBackendLibrary::EspressifFft,
     .length = 1024,
     .stride = 1024,
     .copyBufferSizeBytes = 512,

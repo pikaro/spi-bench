@@ -41,7 +41,7 @@ class Controller : public HasLifecycle<Controller, Config>,
         : HasTaskController(registry), _registrar(_store) {}
 
     Registrar &registrar() { return _registrar; }
-    [[nodiscard]] const Store &store() const { return _store; }
+    [[nodiscard]] const ICommandCatalog &catalog() const { return _store; }
 
     ReturnCode wake(Signal signal = Signal::Ping) {
         FAIL_IF(!_taskKey.has_value(), ERR(InvalidState),
@@ -85,7 +85,7 @@ class Controller : public HasLifecycle<Controller, Config>,
             _store.get(CommandNameKey::fromStringView(commandLine[0])),
             "Command " SV_FMT " not found in store", SV_ARG(commandLine[0]));
 
-        return Dispatcher::dispatch(commandEntry.second, commandEntry.first,
+        return Dispatcher::dispatch(*commandEntry.second, commandEntry.first,
                                     commandLine.subspan(1));
     }
 

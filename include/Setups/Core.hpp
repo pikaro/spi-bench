@@ -24,13 +24,11 @@
 struct CoreSetup {
     CoreSetup()
         : metricsBinding(metricsBackend), statusLedBinding(statusLed),
-          aggregator(taskRegistry),
-          errorJournal(taskRegistry),
+          aggregator(taskRegistry), errorJournal(taskRegistry),
           commandController(taskRegistry),
-          consoleSource(commandController.store(), &commandController,
+          consoleSource(commandController.catalog(), &commandController,
                         Totem::CommandBackend::Controller::wake),
-          systemTaskSource(taskRegistry), monitoring(taskRegistry) {
-    }
+          systemTaskSource(taskRegistry), monitoring(taskRegistry) {}
 
     ReturnCode beginStatusLedEarly(const Totem::StatusLed::Config &config) {
         return statusLed.begin(config);
@@ -38,22 +36,23 @@ struct CoreSetup {
 
     void setup() {
         ::platform::wait_for_ready();
+        ABORT_IF_ERR_BEGIN(::platform::init());
 
         ABORT_IF_ERR_BEGIN(::platform::Console::init());
 
         ABORT_IF_ERR_BEGIN(taskRegistry.begin());
 
         ABORT_IF_ERR_BEGIN(consoleOutput.begin());
-        ABORT_IF_ERR_BEGIN(consoleSource.begin());
 
         ABORT_IF_ERR(commandController.addTransport(consoleSource),
                      "Failed to add console transport to command controller");
         CommandRegistrarService::set(commandController.registrar());
+        CommandCatalogService::set(commandController.catalog());
 
         ABORT_IF_ERR_BEGIN(metricsBackend.begin());
         Totem::Mutex::detail::prewarmMetrics();
 
-        ABORT_IF_ERR(register_core_commands(commandController.store()),
+        ABORT_IF_ERR(register_core_commands(),
                      "Failed to register core commands to command controller");
 
         ABORT_IF_ERR_BEGIN(aggregator.begin());
@@ -85,6 +84,7 @@ struct CoreSetup {
 
         ABORT_IF_ERR_BEGIN(monitoring.begin());
         ABORT_IF_ERR_BEGIN(commandController.begin());
+        ABORT_IF_ERR_BEGIN(consoleSource.begin());
 
         _log_i("Core setup complete");
         ABORT_IF_ERR(StatusLedService::setCoreReady(),

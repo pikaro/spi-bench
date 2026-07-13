@@ -4,7 +4,7 @@
 struct PubSubConfig {
     static constexpr size_t maxTopics = 32;
     static constexpr size_t maxTopicNameLength = 16;
-    static constexpr size_t maxSubscribers = 8;
+    static constexpr size_t maxSubscribers = 16;
     static constexpr size_t maxSubscriberNameLength = 8;
     static constexpr size_t maxTransports = 8;
     static constexpr size_t maxTransportNameLength = 16;

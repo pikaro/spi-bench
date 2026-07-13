@@ -2,10 +2,10 @@
 
 #include <cstdint>
 
-namespace Totem::Audio::detail {
+namespace Totem::AudioFft::detail {
 class FftAnalyzer;
 class FftDisplay;
-} // namespace Totem::Audio::detail
+} // namespace Totem::AudioFft::detail
 
 namespace Totem::Buttons::detail {
 class Buttons;
@@ -58,7 +58,7 @@ inline constexpr bool defaultTaskStorageStatic = true;
 
 inline constexpr uint32_t loggingAggregator = 4096;
 inline constexpr uint32_t loggingErrorJournal = 4096;
-inline constexpr uint32_t command = 6144;
+inline constexpr uint32_t command = 10240;
 inline constexpr uint32_t ledPwm = 4096;
 inline constexpr uint32_t ledDisplay = 8192;
 inline constexpr uint32_t buttons = 4096;
@@ -84,12 +84,12 @@ template <class Owner> struct StaticTaskStorageEnabled {
 };
 
 template <>
-struct StaticStackSize<Totem::Audio::detail::FftAnalyzer> {
+struct StaticStackSize<Totem::AudioFft::detail::FftAnalyzer> {
     static constexpr uint32_t value = Totem::StaticConfig::TaskStacks::audioFft;
 };
 
 template <>
-struct StaticStackSize<Totem::Audio::detail::FftDisplay> {
+struct StaticStackSize<Totem::AudioFft::detail::FftDisplay> {
     static constexpr uint32_t value =
         Totem::StaticConfig::TaskStacks::audioFftDisplay;
 };

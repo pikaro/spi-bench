@@ -13,6 +13,7 @@
 #include "freertos/projdefs.h"
 #include "freertos/queue.h"
 #include "freertos/ringbuf.h"
+#include "nvs_flash.h"
 #include "portmacro.h"
 #include <cstdint>
 
@@ -21,6 +22,11 @@ namespace platform {
 using Tick = TickType_t;
 using TaskHandle = TaskHandle_t;
 using TaskFunction = TaskFunction_t;
+
+inline ReturnCode init() {
+    nvs_flash_init();
+    return OK();
+}
 
 inline Tick ms_to_ticks(uint32_t millis) { return pdMS_TO_TICKS(millis); }
 inline uint32_t ticks_to_ms(Tick ticks) { return ticks * portTICK_PERIOD_MS; }

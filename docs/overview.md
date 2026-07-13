@@ -27,7 +27,8 @@ subscribe to those events and render their own LED segment locally.
 - The master firmware has optional WiFi enabled through the `Wifi` component.
     Current operation is either station mode or access-point mode, selected by
     ignored local master credentials/config; combined AP+STA mode is not part
-    of the active runtime shape.
+    of the active runtime shape. Access-point mode is a single-client control
+    link, and the master ESP-IDF network pools are sized around that constraint.
 - Hardware SPI now supports multiple logical master links sharing the same
     ESP32 SPI bus. The active high-speed bus uses one PubSub SPI router
     transport with GPU0 and GPU1 peers. The low-speed bus remains a
@@ -96,9 +97,12 @@ organized as follows:
     NimBLE backend for node-local device profiles
 - `include/Wheel/`: BLE wheel device-profile driver and wire payload used by
     `io` to publish wheel rotation events
-- `include/Audio/`: media-node compile-time selected I2S, LittleFS WAV,
-    Bluedroid A2DP, or BTstack A2DP audio input, FFT analysis, magnitude
-    scaling, peak extraction, and first-pass tempo tracking; see
+- `include/AudioSource/`: media-node compile-time selected I2S, LittleFS WAV,
+    Bluedroid A2DP, or BTstack A2DP PCM input sources; see [audio.md](audio.md)
+- `include/AudioSink/`: PCM output sinks for I2S, TCP, and WebSocket/WSS
+    transports; see [audio.md](audio.md)
+- `include/AudioFft/`: FFT analysis, magnitude scaling, peak extraction,
+    first-pass tempo tracking, wire payloads, and the media debug display; see
     [audio.md](audio.md)
 - `include/LedTopology/` and `include/LedDisplay/`: GPU-node logical LED
     topology, compile-time ownership, FastLED-backed output, local animation

@@ -198,16 +198,16 @@ and commands. Split this without changing behavior first.
 
 Initial files to create or reshape:
 
-- `include/Audio/Interfaces/PipelineConfig.hpp`
-- `include/Audio/Interfaces/FeatureFrames.hpp`
-- `include/Audio/detail/InputConditioner.hpp`
-- `include/Audio/detail/SpectrumAnalyzer.hpp`
-- `include/Audio/detail/BandProjector.hpp`
-- `include/Audio/detail/BandScaler.hpp`
-- `include/Audio/detail/OnsetExtractor.hpp`
-- `include/Audio/detail/PeakExtractor.hpp`
-- `include/Audio/detail/TempoTracker.hpp`
-- `include/Audio/detail/AudioPipeline.hpp`
+- `include/AudioFft/Interfaces/PipelineConfig.hpp`
+- `include/AudioFft/Interfaces/FeatureFrames.hpp`
+- `include/AudioFft/detail/InputConditioner.hpp`
+- `include/AudioFft/detail/SpectrumAnalyzer.hpp`
+- `include/AudioFft/detail/BandProjector.hpp`
+- `include/AudioFft/detail/BandScaler.hpp`
+- `include/AudioFft/detail/OnsetExtractor.hpp`
+- `include/AudioFft/detail/PeakExtractor.hpp`
+- `include/AudioFft/detail/TempoTracker.hpp`
+- `include/AudioFft/detail/AudioPipeline.hpp`
 
 Implementation rules:
 

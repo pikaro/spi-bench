@@ -45,6 +45,8 @@ enum class Esp32S3Pin : uint8_t {
     GPIO40 = GPIO_NUM_40,
     GPIO41 = GPIO_NUM_41,
     GPIO42 = GPIO_NUM_42,
+    GPIO43 = GPIO_NUM_43,
+    GPIO44 = GPIO_NUM_44,
 
     StrappingGPIO45 = GPIO_NUM_45,
     StrappingGPIO46 = GPIO_NUM_46,

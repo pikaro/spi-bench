@@ -283,7 +283,7 @@ first code pass:
 | All | TaskRestarted | Warning | purple | Task registry/controller |
 | Master | SpiPeerLate | Warning | orange | SPI star setup |
 | Master | Rs485PeerLate | Warning | teal | RS485/star setup |
-| Media | FftFrameLate | Warning | yellow | `Audio::FftAnalyzer` |
+| Media | FftFrameLate | Warning | yellow | `AudioFft::FftAnalyzer` |
 | Media | AudioSourceOffline | Warning | pink | active audio source |
 | GPU | LedFrameLate | Warning | violet | `LedDisplay` |
 | GPU | FftFrameStale | Warning | lime | `LedDisplay` FFT input |

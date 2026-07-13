@@ -3,6 +3,7 @@
 #include "Data/Nodes.hpp"
 #include "StaticConfig/PubSub.hpp"
 #include <cstdint>
+#include <magic_enum/magic_enum.hpp>
 
 namespace Totem::Data::PubSub {
 
@@ -128,3 +129,8 @@ template <NodeName N> struct PubSubData {
 };
 
 } // namespace Totem::Data::PubSub
+
+template <>
+struct magic_enum::customize::enum_range<Totem::Data::PubSub::Topic> {
+    static constexpr bool is_flags = true;
+};

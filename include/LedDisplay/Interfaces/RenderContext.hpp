@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Audio/Interfaces/Wire.hpp"
+#include "AudioFft/Interfaces/Wire.hpp"
 #include "LedDisplay/Primitives/AudioControls.hpp"
 #include "LedDisplay/Primitives/Canvas.hpp"
 #include "Wheel/Interfaces/Wire.hpp"
@@ -16,8 +16,8 @@ struct FrameClock {
 };
 
 struct AnimationInputSnapshot {
-    Totem::Audio::FftFrame fftFrame{};
-    Totem::Audio::PeakEvent peakEvent{};
+    Totem::AudioFft::FftFrame fftFrame{};
+    Totem::AudioFft::PeakEvent peakEvent{};
     Totem::Wheel::WheelState wheelState{};
     bool hasFftFrame = false;
     bool hasPeakEvent = false;

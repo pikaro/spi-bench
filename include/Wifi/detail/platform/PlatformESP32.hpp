@@ -8,8 +8,12 @@
 #include "Types/Error.hpp"
 #include "Wifi/Interfaces/Config.hpp"
 #include "Wifi/Interfaces/Types.hpp"
+#include "esp_err.h"
 #include "esp_event.h"
+#include "esp_event_base.h"
 #include "esp_netif.h"
+#include "esp_netif_ip_addr.h"
+#include "esp_netif_types.h"
 #include "esp_wifi.h"
 #include "esp_wifi_default.h"
 #include "esp_wifi_types_generic.h"
@@ -122,9 +126,8 @@ class PlatformESP32 {
     ReturnCode beginEnabled() {
         FAIL_IF_ERR_FWD(mapAlreadyInitialized(esp_netif_init()),
                         "Failed to initialize esp-netif");
-        FAIL_IF_ERR_FWD(
-            mapAlreadyInitialized(esp_event_loop_create_default()),
-            "Failed to create default ESP event loop");
+        FAIL_IF_ERR_FWD(mapAlreadyInitialized(esp_event_loop_create_default()),
+                        "Failed to create default ESP event loop");
 
         _netif = _config.mode == Mode::Station
                      ? esp_netif_create_default_wifi_sta()
@@ -133,14 +136,14 @@ class PlatformESP32 {
                      "Failed to create default WiFi network interface");
 
         FAIL_IF_PLATFORM_FWD(
-            esp_event_handler_instance_register(
-                WIFI_EVENT, ESP_EVENT_ANY_ID, &PlatformESP32::onWifiEvent,
-                this, &_wifiEventHandler),
+            esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
+                                                &PlatformESP32::onWifiEvent,
+                                                this, &_wifiEventHandler),
             "Failed to register WiFi event handler");
         FAIL_IF_PLATFORM_FWD(
-            esp_event_handler_instance_register(
-                IP_EVENT, ESP_EVENT_ANY_ID, &PlatformESP32::onIpEvent, this,
-                &_ipEventHandler),
+            esp_event_handler_instance_register(IP_EVENT, ESP_EVENT_ANY_ID,
+                                                &PlatformESP32::onIpEvent, this,
+                                                &_ipEventHandler),
             "Failed to register IP event handler");
 
         wifi_init_config_t initConfig = WIFI_INIT_CONFIG_DEFAULT();
@@ -161,9 +164,9 @@ class PlatformESP32 {
         if (_config.mode == Mode::Station) {
             FAIL_IF_PLATFORM_FWD(esp_wifi_set_ps(WIFI_PS_NONE),
                                  "Failed to disable station WiFi power save");
-            FAIL_IF_PLATFORM_FWD(esp_wifi_set_bandwidth(WIFI_IF_STA,
-                                                        WIFI_BW_HT20),
-                                 "Failed to select station WiFi bandwidth");
+            FAIL_IF_PLATFORM_FWD(
+                esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT20),
+                "Failed to select station WiFi bandwidth");
         }
 
         FAIL_IF_ERR_FWD(configureDriver(), "Failed to configure WiFi driver");
@@ -175,9 +178,9 @@ class PlatformESP32 {
     ReturnCode configureDriver() {
         wifi_config_t driverConfig{};
         if (_config.mode == Mode::Station) {
-            copyBytes(driverConfig.sta.ssid, _config.station.credentials.ssid);
+            copyBytes(driverConfig.sta.ssid, _config.station->credentials.ssid);
             copyBytes(driverConfig.sta.password,
-                      _config.station.credentials.password);
+                      _config.station->credentials.password);
             driverConfig.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
             driverConfig.sta.pmf_cfg.capable = true;
             driverConfig.sta.pmf_cfg.required = false;
@@ -188,17 +191,16 @@ class PlatformESP32 {
         }
 
         const auto ssidLength =
-            stringLength(_config.accessPoint.credentials.ssid);
+            stringLength(_config.accessPoint->credentials.ssid);
         const auto passwordLength =
-            stringLength(_config.accessPoint.credentials.password);
-        copyBytes(driverConfig.ap.ssid,
-                  _config.accessPoint.credentials.ssid);
+            stringLength(_config.accessPoint->credentials.password);
+        copyBytes(driverConfig.ap.ssid, _config.accessPoint->credentials.ssid);
         copyBytes(driverConfig.ap.password,
-                  _config.accessPoint.credentials.password);
+                  _config.accessPoint->credentials.password);
         driverConfig.ap.ssid_len = static_cast<uint8_t>(ssidLength);
-        driverConfig.ap.channel = _config.accessPoint.channel;
-        driverConfig.ap.ssid_hidden = _config.accessPoint.hidden ? 1U : 0U;
-        driverConfig.ap.max_connection = _config.accessPoint.maxConnections;
+        driverConfig.ap.channel = _config.accessPoint->channel;
+        driverConfig.ap.ssid_hidden = _config.accessPoint->hidden ? 1U : 0U;
+        driverConfig.ap.max_connection = _config.accessPoint->maxConnections;
         driverConfig.ap.authmode =
             passwordLength == 0 ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_PSK;
         driverConfig.ap.pmf_cfg.capable = true;
@@ -335,13 +337,13 @@ class PlatformESP32 {
                    static_cast<int>(event->rssi));
         }
 
-        if (!_config.station.reconnect || !_started.load()) {
+        if (!_config.station->reconnect || !_started.load()) {
             return;
         }
 
         auto attempts = _stationReconnectAttempts.load();
-        if (_config.station.maxReconnectAttempts != 0 &&
-            attempts >= _config.station.maxReconnectAttempts) {
+        if (_config.station->maxReconnectAttempts != 0 &&
+            attempts >= _config.station->maxReconnectAttempts) {
             _log_w("WiFi station reconnect limit reached");
             return;
         }
@@ -357,8 +359,7 @@ class PlatformESP32 {
             return;
         }
         const auto ret = esp_netif_dhcpc_start(_netif);
-        if (ret == ESP_OK ||
-            ret == ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED) {
+        if (ret == ESP_OK || ret == ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED) {
             return;
         }
         _log_w("Failed to start WiFi DHCP client: " ERR_FMT,
@@ -393,8 +394,7 @@ class PlatformESP32 {
             _stationIpv4Raw.store(event->ip_info.ip.addr);
             _stationHasIpv4.store(true);
             _stationReconnectAttempts.store(0);
-            _log_i("WiFi station got IP " IPSTR,
-                   IP2STR(&event->ip_info.ip));
+            _log_i("WiFi station got IP " IPSTR, IP2STR(&event->ip_info.ip));
             break;
         }
         case IP_EVENT_STA_LOST_IP:

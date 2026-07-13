@@ -75,8 +75,8 @@ class BINDING Aggregator : public HasLifecycle<Aggregator, AggregatorConfig>,
                 ++droppedRecords;
                 return OK();
             }
-            FAIL_IF_ERR_FWD(
-                ret, "Failed to send log record to ring buffer in %s", name);
+            ++droppedRecords;
+            return ret;
         }
         ++processedRecords;
         return OK();
@@ -201,7 +201,7 @@ class BINDING Aggregator : public HasLifecycle<Aggregator, AggregatorConfig>,
         EmptyRingBufferStorage>;
 
     RingBufferStorage _ringBufferStorage{};
-    ::platform::RingBufferHandle _ringBuffer;
+    ::platform::RingBufferHandle _ringBuffer = nullptr;
     std::array<IRecordSink *, LoggingConfig::maxSinks> _sinks{nullptr};
 
     uint32_t droppedRecords = 0;

@@ -46,6 +46,6 @@ guarded by `enableFftDebugDisplay` in `src/media/config.hpp`, which defaults to
 `false` until hardware is wired.
 
 When enabled, the media node starts one `Wire::I2C::Master`, an SSD1306
-display, and `Audio::FftDisplay`. FFT callbacks only copy the latest scaled
+display, and `AudioFft::FftDisplay`. FFT callbacks only copy the latest scaled
 band frame into a small value slot; the separate display task performs the slow
 I2C framebuffer flush at its configured refresh interval.

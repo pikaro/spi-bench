@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Audio/Interfaces/Wire.hpp"
+#include "AudioFft/Interfaces/Wire.hpp"
 #include "LedDisplay/Animations/Registry.hpp"
 #include "LedDisplay/Interfaces/AnimationCommand.hpp"
 #include "LedDisplay/Interfaces/AnimationCommandCodec.hpp"
@@ -302,7 +302,7 @@ class AnimationEngine {
         auto *self = static_cast<AnimationEngine *>(owner);
         FAIL_IF_NULL(self, ERR(CoreError, InvalidArgument),
                      "LED animation engine FFT subscriber owner is null");
-        auto frame = envelope.getPayloadAs<Totem::Audio::FftFrame>();
+        auto frame = envelope.getPayloadAs<Totem::AudioFft::FftFrame>();
         if (!frame) {
             metrics().addInputFailure();
             FAIL_ERR_FWD(frame.error(), "Failed to decode FFT frame");
@@ -330,7 +330,7 @@ class AnimationEngine {
         auto *self = static_cast<AnimationEngine *>(owner);
         FAIL_IF_NULL(self, ERR(CoreError, InvalidArgument),
                      "LED animation engine peak subscriber owner is null");
-        auto event = envelope.getPayloadAs<Totem::Audio::PeakEvent>();
+        auto event = envelope.getPayloadAs<Totem::AudioFft::PeakEvent>();
         if (!event) {
             metrics().addInputFailure();
             FAIL_ERR_FWD(event.error(), "Failed to decode peak event");
@@ -339,7 +339,7 @@ class AnimationEngine {
     }
 
   private:
-    ReturnCode _captureFftFrame(const Totem::Audio::FftFrame &frame) {
+    ReturnCode _captureFftFrame(const Totem::AudioFft::FftFrame &frame) {
         Totem::Mutex::ScopedSpinlockGuard guard{_inputLock};
         _inputs.fftFrame = frame;
         _inputs.hasFftFrame = true;
@@ -355,7 +355,7 @@ class AnimationEngine {
         return OK();
     }
 
-    ReturnCode _capturePeakEvent(const Totem::Audio::PeakEvent &event) {
+    ReturnCode _capturePeakEvent(const Totem::AudioFft::PeakEvent &event) {
         Totem::Mutex::ScopedSpinlockGuard guard{_inputLock};
         _inputs.peakEvent = event;
         _inputs.hasPeakEvent = true;
@@ -378,8 +378,12 @@ class AnimationEngine {
                 }
                 FAIL_ERR_FWD(result, "Failed to receive LED animation command");
             }
-            FAIL_IF_ERR_FWD(_handleCommand(cmd, nowMs),
-                            "Failed to handle LED animation command");
+            const auto handled = _handleCommand(cmd, nowMs);
+            if (!handled.ok()) {
+                metrics().addBadCommand();
+                _log_w("Dropped LED animation command type=%u: " ERR_FMT,
+                       static_cast<unsigned>(cmd.type), ERR_ARG(handled));
+            }
         }
     }
 
@@ -618,6 +622,8 @@ class AnimationEngine {
 
         const auto firstOpacity = _layers.opacity(cmd.first);
         const auto secondOpacity = _layers.opacity(cmd.second);
+        const auto firstEnabled = _layers.enabled(cmd.first);
+        const auto secondEnabled = _layers.enabled(cmd.second);
         Layer from = Layer::Effect;
         Layer to = Layer::Effect;
         if (firstOpacity == layerFullOpacity && secondOpacity == 0) {
@@ -626,13 +632,18 @@ class AnimationEngine {
         } else if (firstOpacity == 0 && secondOpacity == layerFullOpacity) {
             from = cmd.second;
             to = cmd.first;
+        } else if (firstEnabled != secondEnabled) {
+            from = firstEnabled ? cmd.first : cmd.second;
+            to = firstEnabled ? cmd.second : cmd.first;
         } else {
             FAIL(ERR(CoreError, InvalidState),
                  "Layer fade swap requires one layer at opacity 255 and the "
                  "other at opacity 0");
         }
-        FAIL_IF(!_layers.enabled(from), ERR(CoreError, InvalidState),
-                "Layer fade swap source layer is disabled");
+        if (!_layers.enabled(from)) {
+            _log_w("Starting LED layer fade swap from disabled source layer=%u",
+                   static_cast<unsigned>(from));
+        }
 
         _layers.setEnabled(from, true);
         _layers.setEnabled(to, true);

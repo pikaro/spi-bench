@@ -7,6 +7,10 @@ class FftAnalyzer;
 class FftDisplay;
 } // namespace Totem::AudioFft::detail
 
+namespace Totem::AudioAfe::detail {
+class AfeProcessor;
+} // namespace Totem::AudioAfe::detail
+
 namespace Totem::Buttons::detail {
 class Buttons;
 } // namespace Totem::Buttons::detail
@@ -70,6 +74,7 @@ inline constexpr uint32_t rs485Master = 8192;
 inline constexpr uint32_t rs485Slave = 8192;
 inline constexpr uint32_t audioFft = 3072;
 inline constexpr uint32_t audioFftDisplay = 3072;
+inline constexpr uint32_t audioAfe = 8192;
 inline constexpr uint32_t pubSubUdp = 4096;
 
 } // namespace Totem::StaticConfig::TaskStacks
@@ -83,45 +88,42 @@ template <class Owner> struct StaticTaskStorageEnabled {
         Totem::StaticConfig::TaskStacks::defaultTaskStorageStatic;
 };
 
-template <>
-struct StaticStackSize<Totem::AudioFft::detail::FftAnalyzer> {
+template <> struct StaticStackSize<Totem::AudioFft::detail::FftAnalyzer> {
     static constexpr uint32_t value = Totem::StaticConfig::TaskStacks::audioFft;
 };
 
-template <>
-struct StaticStackSize<Totem::AudioFft::detail::FftDisplay> {
+template <> struct StaticStackSize<Totem::AudioFft::detail::FftDisplay> {
     static constexpr uint32_t value =
         Totem::StaticConfig::TaskStacks::audioFftDisplay;
 };
 
-template <>
-struct StaticStackSize<Totem::Buttons::detail::Buttons> {
+template <> struct StaticStackSize<Totem::AudioAfe::detail::AfeProcessor> {
+    static constexpr uint32_t value = Totem::StaticConfig::TaskStacks::audioAfe;
+};
+
+template <> struct StaticStackSize<Totem::Buttons::detail::Buttons> {
     static constexpr uint32_t value = Totem::StaticConfig::TaskStacks::buttons;
 };
 
-template <>
-struct StaticStackSize<Totem::Bluetooth::detail::Central> {
+template <> struct StaticStackSize<Totem::Bluetooth::detail::Central> {
     static constexpr uint32_t value =
         Totem::StaticConfig::TaskStacks::bluetooth;
 };
 
-template <>
-struct StaticStackSize<Totem::CommandBackend::detail::Controller> {
+template <> struct StaticStackSize<Totem::CommandBackend::detail::Controller> {
     static constexpr uint32_t value = Totem::StaticConfig::TaskStacks::command;
 };
 
-template <>
-struct StaticStackSize<Totem::LedDisplay::detail::Display> {
-    static constexpr uint32_t value = Totem::StaticConfig::TaskStacks::ledDisplay;
+template <> struct StaticStackSize<Totem::LedDisplay::detail::Display> {
+    static constexpr uint32_t value =
+        Totem::StaticConfig::TaskStacks::ledDisplay;
 };
 
-template <>
-struct StaticStackSize<Totem::LedPwm::detail::LedPwm> {
+template <> struct StaticStackSize<Totem::LedPwm::detail::LedPwm> {
     static constexpr uint32_t value = Totem::StaticConfig::TaskStacks::ledPwm;
 };
 
-template <>
-struct StaticStackSize<Totem::LoggingBackend::detail::Aggregator> {
+template <> struct StaticStackSize<Totem::LoggingBackend::detail::Aggregator> {
     static constexpr uint32_t value =
         Totem::StaticConfig::TaskStacks::loggingAggregator;
 };
@@ -133,35 +135,33 @@ struct StaticStackSize<
         Totem::StaticConfig::TaskStacks::loggingErrorJournal;
 };
 
-template <>
-struct StaticStackSize<Totem::PubSubBackend::detail::Node> {
-    static constexpr uint32_t value = Totem::StaticConfig::TaskStacks::pubSubNode;
+template <> struct StaticStackSize<Totem::PubSubBackend::detail::Node> {
+    static constexpr uint32_t value =
+        Totem::StaticConfig::TaskStacks::pubSubNode;
 };
 
 template <>
 struct StaticStackSize<Totem::PubSubBackend::Transports::UdpTransport> {
-    static constexpr uint32_t value = Totem::StaticConfig::TaskStacks::pubSubUdp;
+    static constexpr uint32_t value =
+        Totem::StaticConfig::TaskStacks::pubSubUdp;
 };
 
-template <>
-struct StaticStackSize<Totem::Wire::Rs485::detail::Master> {
+template <> struct StaticStackSize<Totem::Wire::Rs485::detail::Master> {
     static constexpr uint32_t value =
         Totem::StaticConfig::TaskStacks::rs485Master;
 };
 
-template <>
-struct StaticStackSize<Totem::Wire::Rs485::detail::Slave> {
+template <> struct StaticStackSize<Totem::Wire::Rs485::detail::Slave> {
     static constexpr uint32_t value =
         Totem::StaticConfig::TaskStacks::rs485Slave;
 };
 
-template <>
-struct StaticStackSize<Totem::Wire::Spi::detail::Master> {
-    static constexpr uint32_t value = Totem::StaticConfig::TaskStacks::spiMaster;
+template <> struct StaticStackSize<Totem::Wire::Spi::detail::Master> {
+    static constexpr uint32_t value =
+        Totem::StaticConfig::TaskStacks::spiMaster;
 };
 
-template <>
-struct StaticStackSize<Totem::Wire::Spi::detail::Slave> {
+template <> struct StaticStackSize<Totem::Wire::Spi::detail::Slave> {
     static constexpr uint32_t value = Totem::StaticConfig::TaskStacks::spiSlave;
 };
 

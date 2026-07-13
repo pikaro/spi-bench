@@ -38,7 +38,7 @@ if(ENABLE_BTSTACK OR environment STREQUAL "media-btstack")
     list(APPEND app_requires btstack)
 endif()
 if(src_root STREQUAL "ai")
-    list(APPEND app_requires tcp_transport)
+    list(APPEND app_requires tcp_transport audio_afe_esp_sr)
 endif()
 
 idf_component_register(

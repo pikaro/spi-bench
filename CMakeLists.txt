@@ -146,6 +146,10 @@ if(ENABLE_PSRAM)
     list(APPEND COMPONENTS esp_psram)
 endif()
 
+if(ENABLE_ESP_SR)
+    list(APPEND COMPONENTS audio_afe_esp_sr)
+endif()
+
 if(ENABLE_I2C)
     list(APPEND COMPONENTS esp_driver_i2c)
 endif()

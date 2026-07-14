@@ -1,14 +1,52 @@
 # AI audio AFE implementation plan
 
-This is the working plan for inserting an ESP-SR Audio Front-End (AFE) into the
-AI node's delayed microphone loopback. The first implementation is deliberately
-local: detect a wake word, indicate recording immediately on the status LED,
-then play the cleaned and normalized microphone stream through the existing
-one-second delay and MAX98357 speaker output.
+This is the implementation plan and record for inserting an ESP-SR Audio
+Front-End (AFE) into the AI node's delayed microphone loopback. The first
+implementation is deliberately local: detect a wake word, indicate recording
+immediately on the status LED, then play the cleaned and normalized microphone
+stream through the existing one-second delay and MAX98357 speaker output.
 
 The processed stream must remain independent of the local speaker sink. The
 next step will route the same post-wake stream to a WebSocket sink and use a
 separate response stream for speaker playback.
+
+## Implementation status
+
+Implemented and hardware-validated on the AI node on 2026-07-14.
+
+- ESP-SR 2.4.6 is pinned for the AI build on ESP-IDF 5.5.0. The packed model
+  image contains `wn9_alexa` and `vadnet1_medium` and is flashed automatically
+  to the AI-only `model` partition during a normal upload.
+- The effective runtime pipeline is
+  `NS(WebRTC) -> VAD(vadnet1_medium) -> WakeNet(wn9_alexa) -> AGC(WakeNet)`.
+  ESP-SR requires WakeNet AGC while WakeNet is active, so configuration
+  validation rejects the incompatible WebRTC AGC combination instead of
+  accepting an implicit library substitution.
+- WakeNet is processed continuously and independently from VAD. It opens the
+  two-state recording session and sets the amber `Recording` status
+  immediately. Only post-wake VAD speech followed by silence, or a configured
+  safety timeout, closes it.
+- The debug path continuously advances its one-second delay with cleaned PCM
+  while recording and zeros while waiting. It has no production `Draining`
+  state. The fixed delay buffer is allocated once in PSRAM to preserve internal
+  DRAM for the AFE and WiFi.
+- All detector, gain, timing, memory, task, frame-capacity, and session values
+  are validated configuration fields under `src/ai/config.hpp`.
+- A real Alexa wake test opened `Recording`, post-wake VAD detected command
+  speech, and the VAD silence endpoint closed it 671 ms later. After 5.5
+  minutes, the final image reported three opens and three VAD closes, 33,040
+  feed frames and 10,325 fetch frames, with zero AFE failures, fetch misses,
+  sink drops, or status failures.
+- The final build uses 116,604 bytes of statically reported RAM (35.6%) and
+  1,509,287 bytes of the 3 MiB app partition (48.0%). At roughly 5.8 minutes of
+  runtime, core utilization was 5.1% / 35.0%, the AFE task high-water usage was
+  3,200 / 8,192 bytes, internal free-memory low water was 19,079 bytes, and
+  external free-memory low water was 7,612,264 bytes.
+
+The remaining checks are subjective tuning and soak work: repeat detection at
+different distances and noise levels, judge cleaned playback volume, and leave
+the complete WiFi/audio stack running for an extended period. They do not block
+the current clean-boot and wake-test readiness target.
 
 ## Scope
 
@@ -19,7 +57,7 @@ In scope:
 - The existing 32 kHz, signed 32-bit mono microphone input.
 - Conversion to the 16 kHz, signed 16-bit mono format required by ESP-SR.
 - Single-channel noise suppression, VAD, WakeNet, and AGC.
-- A stock ESP-SR wake word for initial validation, preferably `Hi ESP`.
+- The stock ESP-SR `Alexa` wake word for initial validation.
 - Speaker output contains only delayed frames captured during a post-wake
   recording session; waiting-state microphone audio never reaches the speaker.
 - The existing one-second PCM delay between the session-selected stream and
@@ -41,9 +79,9 @@ Out of scope:
 - A general runtime-configurable DSP graph.
 - Reworking the shared `AudioSource` or `AudioSink` interfaces.
 
-## Current baseline
+## Pre-implementation baseline
 
-The AI node currently does this:
+The AI node previously did this:
 
 ```text
 SPH0645
@@ -55,8 +93,8 @@ SPH0645
 -> MAX98357 I2S sink
 ```
 
-This proves the microphone, format conversion, second I2S port, amplifier, and
-speaker path. The new work should retain that known-good hardware setup while
+This proved the microphone, format conversion, second I2S port, amplifier, and
+speaker path. The implementation retains that known-good hardware setup while
 inserting AFE processing and wake-word gating before the existing delay.
 
 The one-second delay line must remain. The status LED, rather than immediate
@@ -68,7 +106,7 @@ the reusable AFE output contract.
 
 Non-blocking assumptions for the first implementation:
 
-- Use the stock `Hi ESP` WakeNet model. Model customization is a later product
+- Use the stock `Alexa` WakeNet model. Model customization is a later product
   decision.
 - WakeNet runs continuously. A wake detection always opens the recording
   session regardless of the current or previous VAD state.
@@ -91,11 +129,11 @@ Non-blocking assumptions for the first implementation:
 - ESP-SR may allocate its model and internal processing storage dynamically.
   Project-owned frame buffers and routing state remain fixed-capacity.
 
-One implementation prerequisite must be resolved before coding: ESP-SR models
-require a flash partition labelled `model`. The proposed solution is an
-AI-specific 16 MiB partition table so other S3 nodes keep their existing layout.
-Its app, model, LittleFS, secrets, and coredump sizes should be chosen after the
-selected model bundle and firmware sizes are measured.
+ESP-SR models require a flash partition labelled `model`. The implementation
+uses an AI-specific 16 MiB partition table so other S3 nodes keep their existing
+layout: a 3 MiB app partition, 6 MiB model partition, 0x5e0000-byte LittleFS
+partition, and the existing NVS, secrets, and coredump partitions. The selected
+model image is 579,100 bytes.
 
 ## Target pipeline
 
@@ -218,7 +256,7 @@ No pre-wake audio is required in this phase. The debug delay stores zero PCM
 while waiting, so it cannot play pre-wake microphone audio. The beginning of
 the wake word may already have passed when WakeNet reports detection; the local
 test should use a phrase such as
-`Hi ESP, testing one two three` and validate the speech following the wake word.
+`Alexa, testing one two three` and validate the speech following the wake word.
 A bounded pre-roll can be added later only if remote ASR proves to need it.
 
 ## Status LED integration
@@ -287,7 +325,8 @@ first-pass policy explicitly:
 - WakeNet enabled with the selected stock model
 - VAD channel-trigger gating disabled
 - no application-side VAD check around WakeNet result handling
-- AGC enabled
+- AGC enabled in WakeNet mode; ESP-SR does not retain WebRTC AGC while WakeNet
+  is active
 - AEC and multi-microphone speech enhancement disabled
 - PSRAM-favoring allocation on the AI node
 - explicit AFE core, priority, and ring-buffer sizing
@@ -531,14 +570,18 @@ Do not log unchanged per-frame WakeNet or VAD results.
 
 ### Phase 1: dependency and model image
 
+Status: complete.
+
 1. Pin ESP-SR and resolve it in `env:ai`.
-2. Select one NS model, VADNet, and the stock `Hi ESP` WakeNet model.
+2. Select one NS mode, VADNet, and the stock `Alexa` WakeNet model.
 3. Add the AI-specific model partition and verify the model binary is generated.
 4. Build and flash a minimal AFE initialization probe.
 5. Confirm the final pipeline, firmware size, model size, internal RAM, and
    PSRAM usage before adding routing behavior.
 
 ### Phase 2: AFE processor
+
+Status: complete.
 
 1. Add the `AudioAfe` component and lifecycle handling.
 2. Feed the existing converted PCM16 stream in complete AFE chunks.
@@ -549,6 +592,8 @@ Do not log unchanged per-frame WakeNet or VAD results.
    transitions, ring-buffer headroom, and task runtime.
 
 ### Phase 3: wake-gated local playback
+
+Status: complete, including a real wake/VAD session cycle.
 
 1. Add the small session state machine in the AI application.
 2. Register the amber `Recording` status and connect WakeNet/VAD transitions to
@@ -563,6 +608,10 @@ Do not log unchanged per-frame WakeNet or VAD results.
    new wake while the previous debug playback tail is still emerging.
 
 ### Phase 4: hardening and documentation
+
+Status: clean boot, runtime metrics, resource review, and documentation are
+complete for the current readiness target. Extended soak and subjective audio
+tuning remain manual follow-up work.
 
 1. Run an extended hardware test with WiFi enabled.
 2. Confirm no task watchdog events, AFE overruns, sink drops, or growing heap
@@ -586,7 +635,7 @@ Hardware acceptance checks:
 2. Speak near the microphone without the wake word until VAD reports speech and
    silence. The speaker must remain silent and the status LED must remain at its
    normal ready state, proving VAD activity cannot open a session.
-3. Say `Hi ESP, testing one two three` at several levels and around VAD state
+3. Say `Alexa, testing one two three` at several levels and around VAD state
    changes. Every valid WakeNet detection must open the session and turn the
    status LED amber immediately, regardless of VAD.
 4. Confirm that the cleaned speech begins at the speaker after the configured

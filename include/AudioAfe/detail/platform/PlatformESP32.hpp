@@ -80,8 +80,7 @@ class PlatformESP32 {
                                           : AFE_AGC_MODE_WAKENET;
         if (!_config->wakenet_init || !_config->vad_init ||
             !_config->agc_init || _config->agc_mode != requestedAgcMode ||
-            !_config->ns_init ||
-            _config->vad_enable_channel_trigger) {
+            !_config->ns_init || _config->vad_enable_channel_trigger) {
             return _beginFailure(
                 ERR(CoreError, InvalidState),
                 "Effective ESP-SR pipeline violates the AI audio policy");

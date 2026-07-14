@@ -9,6 +9,9 @@ These are the primary project commands currently used in practice.
 - Build the active GPU0 SPI target: `bin/build -e gpu0`
 - Build the active GPU1 SPI target: `bin/build -e gpu1`
 - Build the active IO RS485 target: `bin/build -e io`
+- Build the standalone AI speech prototype: `bin/build -e ai`
+- Build, pack the selected ESP-SR models, and upload the complete AI image:
+    `bin/build -e ai -t upload`
 - Build and emit a compilation database: `pio run -e master -t compiledb`
 - Build LittleFS images for all active devices:
     `.venv/bin/pio run -e master -e media -e gpu0 -e gpu1 -e io -t buildfs`
@@ -66,6 +69,8 @@ Build output notes:
     `bin/monitor-multi --strip-ansi --include WRN --log-file /tmp/master.log master`
 - Collapse repeated matching lines:
     `bin/monitor-multi --strip-ansi --include 'SPI write failed' --summary master`
+- Send one runtime command after attaching, then capture bounded output:
+    `bin/monitor-multi ai --command /metrics --timeout 8s --strip-ansi`
 - Capture raw early boot/reset bytes without PlatformIO monitor filters:
     `bin/monitor-early master -d 15`
 - Force ROM download-mode line states for diagnosis:
@@ -326,6 +331,18 @@ Useful audio-source validation command:
     `!master /calibrate-audio`
 - Generate a short media-node WAV fixture:
     `bin/wavgen.py test.wav beat --sample-rate 16000 --duration-ms 12000 --bpm 100 --freq 100`
+
+Useful AI AFE validation commands:
+
+- Reset the AI node and capture the AFE/model/session startup path:
+    `bin/monitor-multi ai --reset --timeout 30s --strip-ansi --include 'ESP-SR ready|AFE Pipeline|Audio AFE|Wake session|Setup complete|ERR|watchdog'`
+- Inspect continuous feed/fetch, WakeNet/VAD, delayed playback, and failure
+    counters: `bin/monitor-multi ai --command /metrics --timeout 8s --strip-ansi`
+- Inspect AFE CPU load, static-task stack high water, internal DRAM, and PSRAM:
+    `bin/monitor-multi ai --command /monitor --timeout 8s --strip-ansi`
+
+A normal AI upload includes `build/ai/srmodels/srmodels.bin` at the offset from
+`partitions/esp32_16mib_ai.csv`; no separate model-flash command is required.
 
 Useful host PubSub UDP bridge commands:
 

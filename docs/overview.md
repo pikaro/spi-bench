@@ -20,6 +20,10 @@ subscribe to those events and render their own LED segment locally.
     targets for the current hardware PubSub network. The master owns a
     low-speed SPI bus currently wired to media, a high-speed SPI bus shared by
     GPU0 and GPU1, and one RS485 link to IO.
+- `env:ai` is an explicit standalone prototype target outside the current
+    PubSub network. It runs the SPH0645 microphone through ESP-SR noise
+    suppression, neural VAD, Alexa WakeNet, and WakeNet AGC; wake/VAD session
+    state drives its status LED and a delayed local MAX98357 validation path.
 - Production node entrypoints use `include/Setups/PubSubNetwork.hpp`, which
     registers the real transports and exposes `PubSubService` without starting
     synthetic test publishers or subscribers. The synthetic multi-board
@@ -104,6 +108,9 @@ organized as follows:
     Bluedroid A2DP, or BTstack A2DP PCM input sources; see [audio.md](audio.md)
 - `include/AudioSink/`: PCM output sinks for I2S, TCP, and WebSocket/WSS
     transports; see [audio.md](audio.md)
+- `include/AudioAfe/`: ESP-SR model lifecycle, speech front-end processing,
+    detector metadata, and AFE health metrics for the AI node; see
+    [audio.md](audio.md)
 - `include/AudioFft/`: FFT analysis, magnitude scaling, peak extraction,
     first-pass tempo tracking, wire payloads, and the media debug display; see
     [audio.md](audio.md)
@@ -119,7 +126,7 @@ organized as follows:
 - `include/Wire/Spi/`: in-progress DMA-oriented SPI wire layer with a
     component-owned ESP32 platform abstraction; see
     [spi-transport-plan.md](spi-transport-plan.md)
-- `src/master/`, `src/media/`, `src/gpu/`, and `src/io/`:
+- `src/master/`, `src/media/`, `src/gpu/`, `src/io/`, and `src/ai/`:
     environment-specific execution roots selected by build configuration.
     Both GPU PlatformIO environments currently map to `src/gpu/`.
 - `src/master/orchestration.hpp`: master-local show orchestration. It
@@ -220,6 +227,10 @@ failures, queued/handled command counts, and opt-in task-step profiling.
     parent environment arguments when overriding the field; otherwise ESP-IDF
     component flags such as `ENABLE_SPI` are silently dropped for that
     environment.
+- The AI target uses `partitions/esp32_16mib_ai.csv`. Its full upload packs the
+    selected ESP-SR models and flashes the resulting image to the dedicated
+    `model` partition in addition to the normal bootloader, partition table,
+    and app images.
 - Master WiFi network selection is not tracked. Create
     `src/master/wifi_credentials.hpp` from
     `src/master/wifi_credentials.example.hpp` for local station/AP SSIDs and

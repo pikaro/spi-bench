@@ -167,8 +167,8 @@ class AfeProcessor : public HasLifecycle<AfeProcessor, Config>,
             if (_inputSamplesAwaitingFetch < _platform.fetchSamples()) {
                 return OK();
             }
-            auto *result = _platform.fetch(
-                ::platform::ms_to_ticks(config().fetchWaitMs));
+            auto *result =
+                _platform.fetch(::platform::ms_to_ticks(config().fetchWaitMs));
             if (result == nullptr || result->ret_value == ESP_ERR_TIMEOUT ||
                 result->ret_value == ESP_FAIL) {
                 if (_metrics != nullptr) {

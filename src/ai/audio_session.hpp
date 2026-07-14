@@ -10,6 +10,7 @@
 #include "StaticConfig/AudioAfe.hpp"
 #include "StatusLed/Interfaces/Types.hpp"
 #include "Types/Error.hpp"
+#include "esp_heap_caps.h"
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -199,8 +200,17 @@ class DelayedPlayback {
                     "Invalid delayed playback config");
         FAIL_IF(!sink.active(), ERR(CoreError, InvalidState),
                 "Cannot begin delayed playback before I2S sink");
+
+        const auto delaySamples = config.delaySamples();
+        auto *delayLine = static_cast<int16_t *>(
+            heap_caps_calloc(delaySamples, sizeof(int16_t),
+                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        FAIL_IF_NULL(delayLine, ERR(CoreError, OutOfMemory),
+                     "Failed to allocate delayed playback in PSRAM");
+
         _sink = &sink;
-        _delaySamples = config.delaySamples();
+        _delayLine = delayLine;
+        _delaySamples = delaySamples;
         clear();
         return OK();
     }
@@ -235,15 +245,16 @@ class DelayedPlayback {
     }
 
     void clear() {
-        _delayLine.fill(0);
+        if (_delayLine != nullptr) {
+            std::fill_n(_delayLine, _delaySamples, int16_t{0});
+        }
         _output.fill(0);
         _delayIndex = 0;
     }
 
   private:
-    static constexpr std::size_t maximumDelaySamples = 16000;
     Totem::AudioSink::I2SSink *_sink = nullptr;
-    std::array<int16_t, maximumDelaySamples> _delayLine{};
+    int16_t *_delayLine = nullptr;
     std::array<int16_t, Totem::StaticConfig::AudioAfe::maxFetchSamples>
         _output{};
     std::size_t _delaySamples = 0;

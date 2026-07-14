@@ -1,9 +1,10 @@
 # Audio
 
-Audio is split into three components:
+Audio is split into four components:
 
 - `include/AudioSource/` owns PCM-producing source devices.
 - `include/AudioSink/` owns PCM-consuming output devices and transports.
+- `include/AudioAfe/` owns the ESP-SR speech front end used by the AI node.
 - `include/AudioFft/` owns FFT analysis, peak/tempo extraction, wire payloads,
     metrics, and the optional debug display.
 
@@ -17,6 +18,9 @@ Audio is split into three components:
 - `AudioSink/Facade.hpp` exports the common sink surface. Sink configs live in
     `AudioSink/Interfaces/`, while concrete sinks live in
     `AudioSink/detail/Sinks/`.
+- `AudioAfe/Facade.hpp` exports the AFE processor, validated speech-processing
+    config, and its synchronous non-owning input/output bindings. The ESP-SR C
+    API and model lifecycle remain in `AudioAfe/detail/platform/`.
 - `AudioFft/Interfaces/Types.hpp` contains FFT frame, magnitude scaling,
     peak/accent, and tempo-clock beat value types.
 - `AudioFft/detail/FftAnalyzer.hpp` feeds the source into arduino-audio-tools'
@@ -98,15 +102,64 @@ The initial sinks mirror the source model: they expose an audio-tools
     certificate pointer in config, for example a Let's Encrypt root supplied by
     the firmware source.
 
+## AI Speech Front End
+
 The AI node has one app-local PCM adapter in `src/ai/pcm16_downsampler.hpp`.
 It is intentionally not part of the shared audio component model yet: it adapts
 the current SPH0645 source format, 32 kHz 32-bit mono PCM, into the 16 kHz
-signed 16-bit little-endian mono PCM expected by NeMo ASR streaming. Because
-this is an exact 2:1 conversion, the adapter averages adjacent input samples as
-a small fixed low-pass/downsample step and clips the shifted result to PCM16.
-The current AI firmware validates that local stream by sending it through a
-one-second PCM16 delay line and then to a MAX98357 I2S sink on the separate
-output I2S port.
+signed 16-bit little-endian mono PCM required by ESP-SR and the planned NeMo
+ASR stream. Because this is an exact 2:1 conversion, the adapter averages
+adjacent input samples as a small fixed low-pass/downsample step and clips the
+shifted result to PCM16.
+
+The active `env:ai` pipeline is:
+
+```text
+SPH0645 -> PCM16 adapter
+-> NS(WebRTC)
+-> VAD(vadnet1_medium)
+-> WakeNet(wn9_alexa)
+-> AGC(WakeNet)
+-> wake/VAD session controller
+-> one-second debug delay
+-> MAX98357
+```
+
+ESP-SR 2.4.6 is pinned through the AI-only `audio_afe_esp_sr` component. The AI
+partition table reserves a 6 MiB `model` partition, and the PlatformIO model
+scripts pack and flash the selected Alexa and VADNet assets during an ordinary
+`bin/build -e ai -t upload`. ESP-SR forces its WakeNet AGC mode whenever
+WakeNet is active, so the project config validates that combination explicitly.
+The selected WebRTC noise suppression stage is intentional for the cleanup
+prototype even though ESP-SR logs that NS can reduce recognition accuracy; it
+remains a tuning choice rather than an implicit pipeline change.
+
+`AudioAfe::AfeProcessor` continuously feeds and fetches the AFE in complete
+chunks. WakeNet is always evaluated and VAD channel-trigger gating is disabled:
+VAD never qualifies or suppresses a wake detection. A wake opens the AI-local
+`Recording` state and sets the amber status LED immediately. Only VAD speech
+observed after that wake, followed by the configured VAD silence transition,
+can perform the normal close. Separate no-speech and maximum-duration timeouts
+provide bounded fallback exits.
+
+Local speaker playback remains a debug-only consumer. Its ring always advances
+with cleaned PCM while recording and zeros while waiting, preserving the proven
+one-second feedback-avoidance delay. Frames already in the ring emerge
+naturally after recording closes; there is no `Draining` production state. The
+fixed delay buffer is allocated once in PSRAM so it does not consume roughly
+32 KiB of internal DRAM. The next phase replaces this consumer with the
+WebSocket request stream and routes response PCM to the speaker.
+
+All tuning values live in validated structs assembled in `src/ai/config.hpp`,
+including NS/VAD/WakeNet/AGC selection and thresholds, VAD speech/silence and
+look-back durations, linear gain, AFE memory/ring/task placement, bounded frame
+sizes, fetch wait, session safety timeouts, recording status, and debug delay.
+The `audAfe` metric group reports source/feed/fetch health, detector
+transitions, ring headroom, level/peak/RMS/clipping, and failures. `aiSess`
+reports session close reasons, routed/zero-filled bytes, playback samples,
+sink drops, status failures, and current session state. See
+the [AI audio AFE implementation plan](ai-audio-afe-plan.md) for the
+implementation record and hardware measurements.
 
 Enabling `A2DPSource` requires the ESP-IDF Bluedroid Bluetooth stack. On the
 original 4 MiB ESP32 media board this has a large flash-size cost, so Bluedroid

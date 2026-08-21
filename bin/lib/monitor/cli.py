@@ -198,6 +198,11 @@ def parse_args(argv: list[str]) -> Config:
         type=Path,
         help='append the full monitor stream to PATH before filtering',
     )
+    parser.add_argument(
+        '--timestamps',
+        action='store_true',
+        help='print timestamps for each monitor line',
+    )
     parser.add_argument('envs', nargs='+', metavar='env')
     parsed = parser.parse_args(argv)
 
@@ -230,4 +235,5 @@ def parse_args(argv: list[str]) -> Config:
         max_lines=parsed.max_lines,
         log_file=parsed.log_file,
         command=parsed.command,
+        timestamps=parsed.timestamps,
     )

@@ -30,7 +30,7 @@ struct StateDef {
     StateKind kind = StateKind::Informational;
 
     [[nodiscard]] constexpr bool validate() const {
-        return name != nullptr && name[0] != '\0' && color.any();
+        return name != nullptr && name[0] != '\0';
     }
 };
 

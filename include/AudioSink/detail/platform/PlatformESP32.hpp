@@ -25,7 +25,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <span>
 #include <utility>
@@ -107,6 +106,19 @@ class I2SAudioStream : public audio_tools::AudioStream {
         }
     }
 
+    [[nodiscard]] bool updateAudioInfo(audio_tools::AudioInfo info) {
+        if (!_active) {
+            return false;
+        }
+        auto config = _driver.config();
+        config.copyFrom(info);
+        if (!_driver.setAudioInfo(config)) {
+            return false;
+        }
+        audio_tools::AudioStream::setAudioInfo(info);
+        return true;
+    }
+
     size_t write(const uint8_t *data, size_t len) override {
         if (!_active || data == nullptr || len == 0) {
             return 0;
@@ -184,6 +196,18 @@ class I2SOutputStream {
 
     ReturnCode setWriteTimeoutMs(uint32_t timeoutMs) {
         _stream.driver()->setWaitTimeWriteMs(timeoutMs);
+        return OK();
+    }
+
+    ReturnCode setAudioInfo(AudioInfo info) {
+        FAIL_IF(!_active, ERR(CoreError, InvalidState),
+                "Cannot reconfigure inactive I2S output stream");
+        FAIL_IF(!info.validate(), ERR(CoreError, InvalidArgument),
+                "Invalid I2S output audio format");
+        FAIL_IF(!_stream.updateAudioInfo(toPlatformAudioInfo(info)),
+                ERR(CoreError, OperationFailed),
+                "Failed to update I2S output audio format");
+        _info = info;
         return OK();
     }
 
@@ -323,7 +347,8 @@ class WebSocketOutputStream : public audio_tools::AudioStream {
         _config = config;
         setAudioInfo(toPlatformAudioInfo(_config.network.audio));
         FAIL_IF_ERR_FWD(_prepareHost(), "Failed to prepare WebSocket host");
-        FAIL_IF_ERR_FWD(_prepareAuth(), "Failed to prepare WebSocket auth");
+        FAIL_IF_ERR_FWD(_prepareAuthorizationHeader(),
+                        "Failed to prepare WebSocket authorization header");
         _ready = false;
         _reconnects = 0;
         _writeFailures = 0;
@@ -412,23 +437,26 @@ class WebSocketOutputStream : public audio_tools::AudioStream {
         return OK();
     }
 
-    ReturnCode _prepareAuth() {
-        _authHeader[0] = '\0';
-        if (!_config.hasBearerToken()) {
+    ReturnCode _prepareAuthorizationHeader() {
+        _authorizationHeader.fill('\0');
+        if (!_config.hasAuthorizationHeader()) {
             return OK();
         }
-        auto tokenSecret =
-            SecretStorage::Secret<webSocketMaxBearerTokenBytes, 1>{
-                _config.bearerTokenSecretName};
-        FAIL_IF_ERR_FWD(tokenSecret.read(),
-                        "Failed to read WebSocket bearer token secret");
-        const auto ret = std::snprintf(
-            _authHeader.data(), _authHeader.size(), "Bearer %.*s",
-            static_cast<int>(tokenSecret.size()),
-            reinterpret_cast<const char *>(tokenSecret.view().data()));
-        FAIL_IF(ret < 0 || static_cast<std::size_t>(ret) >= _authHeader.size(),
-                ERR(CoreError, InvalidSize),
-                "WebSocket bearer token is too long");
+        auto headerSecret =
+            SecretStorage::Secret<webSocketMaxAuthorizationHeaderBytes, 1>{
+                _config.authorizationHeaderSecretName};
+        FAIL_IF_ERR_FWD(headerSecret.read(),
+                        "Failed to read WebSocket authorization header secret");
+
+        const auto header = headerSecret.view();
+        const auto invalid = std::ranges::any_of(header, [](std::byte value) {
+            const auto character = std::to_integer<unsigned char>(value);
+            return character == 0U || character == '\r' || character == '\n';
+        });
+        FAIL_IF(invalid, ERR(CoreError, InvalidData),
+                "WebSocket authorization header contains an invalid byte");
+        std::memcpy(_authorizationHeader.data(), header.data(), header.size());
+        _authorizationHeader[header.size()] = '\0';
         return OK();
     }
 
@@ -478,7 +506,7 @@ class WebSocketOutputStream : public audio_tools::AudioStream {
         if (_config.secure) {
             esp_transport_ssl_set_cert_data(
                 _parent, _config.trustedRootPem,
-                static_cast<int>(std::strlen(_config.trustedRootPem) + 1U));
+                static_cast<int>(std::strlen(_config.trustedRootPem)));
         }
 
         _webSocket = esp_transport_ws_init(_parent);
@@ -488,9 +516,9 @@ class WebSocketOutputStream : public audio_tools::AudioStream {
         }
 
         esp_transport_ws_set_path(_webSocket, _config.path);
-        if (_config.hasBearerToken()) {
-            const auto authRet =
-                esp_transport_ws_set_auth(_webSocket, _authHeader.data());
+        if (_config.hasAuthorizationHeader()) {
+            const auto authRet = esp_transport_ws_set_auth(
+                _webSocket, _authorizationHeader.data());
             if (authRet != ESP_OK) {
                 _destroyTransport();
                 return false;
@@ -520,7 +548,8 @@ class WebSocketOutputStream : public audio_tools::AudioStream {
 
     WebSocketSinkConfig _config{};
     std::array<char, 16> _hostBuffer{};
-    std::array<char, webSocketMaxBearerTokenBytes + 8> _authHeader{};
+    std::array<char, webSocketMaxAuthorizationHeaderBytes + 1>
+        _authorizationHeader{};
     std::array<uint8_t, webSocketMaxPacketBytes> _packetBuffer{};
     esp_transport_handle_t _parent = nullptr;
     esp_transport_handle_t _webSocket = nullptr;

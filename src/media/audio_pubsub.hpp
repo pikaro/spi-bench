@@ -128,14 +128,19 @@ inline ReturnCode publish(T payload, NodeData::PubSub::Topic topic,
         .requireSyncedClock = false,
     });
     if (!envelopeResult) {
-        (void)pool.release({.header = {.messageId = *stored}});
+        REPORT_IF_ERR(
+            pool.release({.header = {.messageId = *stored}}),
+            "Failed to release media audio payload after envelope creation "
+            "failure");
         FAIL_ERR_FWD(envelopeResult.error(),
                      "Failed to create media audio PubSub envelope");
     }
 
     auto publishResult = PubSubService::get().publish(*envelopeResult);
     if (!publishResult.ok()) {
-        (void)pool.release(*envelopeResult);
+        REPORT_IF_ERR(
+            pool.release(*envelopeResult),
+            "Failed to release media audio payload after publish failure");
         if (isBackpressure(publishResult)) {
             noteBackpressureDrop(topic, publishResult);
             return OK();

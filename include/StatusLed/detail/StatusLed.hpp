@@ -59,12 +59,21 @@ class StatusLed : public HasLifecycle<StatusLed, Config>,
         return _refreshImmediate(::platform::get_time());
     }
 
-    ReturnCode recordLogError() override {
+    ReturnCode setOff() override {
         if (!this->active()) {
             return OK();
         }
-        if (_logError.valid()) {
-            return _setState(_logError.id, true);
+        FAIL_IF_ERR_FWD(_setInfoState(_off),
+                        "Failed to set off status LED state");
+        return _refreshImmediate(::platform::get_time());
+    }
+
+    ReturnCode recordUnhandledError() override {
+        if (!this->active()) {
+            return OK();
+        }
+        if (_unhandledError.valid()) {
+            return _setState(_unhandledError.id, true);
         }
         return OK();
     }
@@ -103,7 +112,10 @@ class StatusLed : public HasLifecycle<StatusLed, Config>,
     static constexpr RgbColor targetsReadyColor{.red = 0,
                                                 .green = 160,
                                                 .blue = 0};
-    static constexpr RgbColor logErrorColor{.red = 180, .green = 0, .blue = 0};
+    static constexpr RgbColor offColor{};
+    static constexpr RgbColor unhandledErrorColor{.red = 180,
+                                                   .green = 0,
+                                                   .blue = 0};
     static constexpr RgbColor abortColor{.red = 180,
                                          .green = 0,
                                          .blue = 180};
@@ -171,12 +183,19 @@ class StatusLed : public HasLifecycle<StatusLed, Config>,
             "Failed to register targets-ready status LED state");
         _targetsReady = targetsReady;
         FAIL_IF_UNEXPECTED_FWD(
-            logError,
-            _registerState({.name = "LogError",
-                            .color = logErrorColor,
+            off,
+            _registerState({.name = "Off",
+                            .color = offColor,
+                            .kind = StateKind::Informational}),
+            "Failed to register off status LED state");
+        _off = off;
+        FAIL_IF_UNEXPECTED_FWD(
+            unhandledError,
+            _registerState({.name = "UnhandledError",
+                            .color = unhandledErrorColor,
                             .kind = StateKind::Error}),
-            "Failed to register log-error status LED state");
-        _logError = logError;
+            "Failed to register unhandled-error status LED state");
+        _unhandledError = unhandledError;
         FAIL_IF_UNEXPECTED_FWD(
             abortCritical,
             _registerState({.name = "Abort",
@@ -211,7 +230,11 @@ class StatusLed : public HasLifecycle<StatusLed, Config>,
         const auto index = kindIndex(_states[id].def.kind);
         const auto bit = bitFor(id);
         if (active) {
-            _activeMasks[index].fetch_or(bit, std::memory_order_acq_rel);
+            if (_states[id].def.kind == StateKind::Informational) {
+                _activeMasks[index].store(bit, std::memory_order_release);
+            } else {
+                _activeMasks[index].fetch_or(bit, std::memory_order_acq_rel);
+            }
         } else {
             _activeMasks[index].fetch_and(~bit, std::memory_order_acq_rel);
         }
@@ -331,7 +354,8 @@ class StatusLed : public HasLifecycle<StatusLed, Config>,
         _booting = {};
         _coreReady = {};
         _targetsReady = {};
-        _logError = {};
+        _off = {};
+        _unhandledError = {};
         _abortCritical = {};
     }
 
@@ -347,7 +371,8 @@ class StatusLed : public HasLifecycle<StatusLed, Config>,
     StateHandle _booting{};
     StateHandle _coreReady{};
     StateHandle _targetsReady{};
-    StateHandle _logError{};
+    StateHandle _off{};
+    StateHandle _unhandledError{};
     StateHandle _abortCritical{};
 
     Platform _output{};

@@ -8,6 +8,7 @@
 #include "Types/Error.hpp"
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <span>
 #include <string_view>
@@ -15,9 +16,25 @@
 namespace Totem::SecretStorage::detail {
 
 template <typename Owner> struct Commands {
+    static constexpr std::string_view sealKey = "seal";
+    static constexpr std::size_t minSealTokenLength = 8;
+
+    static ReturnCode requireUnsealed(const Owner &storage) {
+        FAIL_IF(storage._commandsSealed, ERR(CoreError, Forbidden),
+                "Secret commands are sealed; use /secret list or /secret "
+                "unseal <token>");
+        return OK();
+    }
+
     static ReturnCode handleRoot(CommandDesc::ParsedArgs /*unused*/,
-                                 void * /*unused*/) {
-        _log_i("Use /secret get|set|list");
+                                 void *ctx) {
+        auto *storage = static_cast<Owner *>(ctx);
+        FAIL_IF_NULL(storage, ERR(CoreError, InvalidArgument),
+                     "SecretStorage command context is null");
+        FAIL_IF_ERR_FWD(requireUnsealed(*storage),
+                        "Cannot use the secret root command while sealed");
+
+        _log_i("Use /secret get|set|delete|list|seal|unseal");
         return OK();
     }
 
@@ -25,6 +42,8 @@ template <typename Owner> struct Commands {
         auto *storage = static_cast<Owner *>(ctx);
         FAIL_IF_NULL(storage, ERR(CoreError, InvalidArgument),
                      "SecretStorage command context is null");
+        FAIL_IF_ERR_FWD(requireUnsealed(*storage),
+                        "Cannot read secrets while sealed");
 
         const auto key = args.template get<std::string_view>(0);
         FAIL_IF(!key.ok, ERR(CommandError, BadArgument),
@@ -55,6 +74,8 @@ template <typename Owner> struct Commands {
         auto *storage = static_cast<Owner *>(ctx);
         FAIL_IF_NULL(storage, ERR(CoreError, InvalidArgument),
                      "SecretStorage command context is null");
+        FAIL_IF_ERR_FWD(requireUnsealed(*storage),
+                        "Cannot store secrets while sealed");
 
         const auto key = args.template get<std::string_view>(0);
         const auto value = args.template get<std::string_view>(1);
@@ -87,6 +108,23 @@ template <typename Owner> struct Commands {
         return OK();
     }
 
+    static ReturnCode handleDelete(CommandDesc::ParsedArgs args, void *ctx) {
+        auto *storage = static_cast<Owner *>(ctx);
+        FAIL_IF_NULL(storage, ERR(CoreError, InvalidArgument),
+                     "SecretStorage command context is null");
+        FAIL_IF_ERR_FWD(requireUnsealed(*storage),
+                        "Cannot delete secrets while sealed");
+
+        const auto key = args.template get<std::string_view>(0);
+        FAIL_IF(!key.ok, ERR(CommandError, BadArgument),
+                "Missing or invalid key for /secret delete");
+
+        FAIL_IF_ERR_FWD(storage->erase(key.value),
+                        "Failed to delete secret " SV_FMT, SV_ARG(key.value));
+        _log_i("Deleted secret " SV_FMT, SV_ARG(key.value));
+        return OK();
+    }
+
     static ReturnCode handleList(CommandDesc::ParsedArgs /*unused*/,
                                  void *ctx) {
         auto *storage = static_cast<Owner *>(ctx);
@@ -105,7 +143,67 @@ template <typename Owner> struct Commands {
         return OK();
     }
 
-    static inline constinit std::array<CommandDesc, 3> subcommands{{
+    static ReturnCode handleSeal(CommandDesc::ParsedArgs /*unused*/,
+                                 void *ctx) {
+        auto *storage = static_cast<Owner *>(ctx);
+        FAIL_IF_NULL(storage, ERR(CoreError, InvalidArgument),
+                     "SecretStorage command context is null");
+        FAIL_IF_ERR_FWD(requireUnsealed(*storage),
+                        "Secret commands are already sealed");
+
+        FAIL_IF_UNEXPECTED_FWD(tokenSize, storage->size(sealKey),
+                               "Cannot seal without a " SV_FMT " secret",
+                               SV_ARG(sealKey));
+        FAIL_IF(tokenSize < minSealTokenLength, ERR(CoreError, InvalidSize),
+                "Secret " SV_FMT " must contain at least %zu characters",
+                SV_ARG(sealKey), minSealTokenLength);
+
+        storage->_commandsSealed = true;
+        _log_i("Secret commands sealed");
+        return OK();
+    }
+
+    static ReturnCode handleUnseal(CommandDesc::ParsedArgs args, void *ctx) {
+        auto *storage = static_cast<Owner *>(ctx);
+        FAIL_IF_NULL(storage, ERR(CoreError, InvalidArgument),
+                     "SecretStorage command context is null");
+
+        const auto token = args.template get<std::string_view>(0);
+        FAIL_IF(!token.ok, ERR(CommandError, BadArgument),
+                "Missing or invalid token for /secret unseal");
+
+        FAIL_IF_UNEXPECTED_FWD(tokenSize, storage->size(sealKey),
+                               "Cannot unseal without a " SV_FMT " secret",
+                               SV_ARG(sealKey));
+        FAIL_IF(tokenSize != token.value.size(), ERR(CoreError, Forbidden),
+                "Invalid unseal token");
+
+        std::array<std::byte, CommandConfig::maxLineLen> storedToken{};
+        FAIL_IF(tokenSize > storedToken.size(), ERR(CoreError, InvalidSize),
+                "Secret " SV_FMT " is too large for console input",
+                SV_ARG(sealKey));
+        FAIL_IF_UNEXPECTED_FWD(
+            bytesRead,
+            storage->get(sealKey,
+                         std::span<std::byte>{storedToken}.first(tokenSize)),
+            "Failed to read secret " SV_FMT, SV_ARG(sealKey));
+        FAIL_IF(bytesRead != tokenSize, ERR(CoreError, InvalidSize),
+                "Secret " SV_FMT " changed while being read", SV_ARG(sealKey));
+
+        std::uint8_t difference = 0;
+        for (std::size_t i = 0; i < tokenSize; ++i) {
+            difference |= std::to_integer<std::uint8_t>(storedToken[i]) ^
+                          static_cast<std::uint8_t>(token.value[i]);
+        }
+        FAIL_IF(difference != 0, ERR(CoreError, Forbidden),
+                "Invalid unseal token");
+
+        storage->_commandsSealed = false;
+        _log_i("Secret commands unsealed");
+        return OK();
+    }
+
+    static inline constinit std::array<CommandDesc, 6> subcommands{{
         {
             .name = "get",
             .description = "Read a secret",
@@ -122,10 +220,31 @@ template <typename Owner> struct Commands {
             .subcommands = {},
         },
         {
+            .name = "delete",
+            .description = "Delete a secret",
+            .args = {CommandBackend::arg<std::string_view>("key")},
+            .handler = handleDelete,
+            .subcommands = {},
+        },
+        {
             .name = "list",
             .description = "List secret keys and sizes",
             .args = {},
             .handler = handleList,
+            .subcommands = {},
+        },
+        {
+            .name = "seal",
+            .description = "Seal secret commands",
+            .args = {},
+            .handler = handleSeal,
+            .subcommands = {},
+        },
+        {
+            .name = "unseal",
+            .description = "Unseal secret commands",
+            .args = {CommandBackend::arg<std::string_view>("token")},
+            .handler = handleUnseal,
             .subcommands = {},
         },
     }};

@@ -97,10 +97,12 @@ The initial sinks mirror the source model: they expose an audio-tools
     endpoint and writes the PCM byte stream directly for local diagnostics or
     home-network use.
 - `WebSocketSink` is an outbound WebSocket client. It sends binary frames in
-    configurable packet-sized chunks, supports `Authorization: Bearer ...`, and
-    supports WSS through ESP-IDF's transport/TLS layer. WSS expects a PEM root
-    certificate pointer in config, for example a Let's Encrypt root supplied by
-    the firmware source.
+    configurable packet-sized chunks and supports WSS through ESP-IDF's
+    transport/TLS layer. Its optional `authorizationHeaderSecretName` points to
+    the complete HTTP Authorization header value, including its scheme, so the
+    sink does not assume Bearer authentication. WSS expects a PEM root
+    certificate pointer in config, for example a Let's Encrypt root supplied
+    by the firmware source.
 
 ## AI Speech Front End
 
@@ -118,48 +120,169 @@ The active `env:ai` pipeline is:
 SPH0645 -> PCM16 adapter
 -> NS(WebRTC)
 -> VAD(vadnet1_medium)
--> WakeNet(wn9_alexa)
+-> WakeNet(wn9_alexa, wn9_computer_tts)
 -> AGC(WakeNet)
--> wake/VAD session controller
--> one-second debug delay
--> MAX98357
+-> assistant turn controller
+   | recording: bounded PSRAM ring -> WSS assistant request
+   ` response: decoded 24 kHz PCM -> ESP-DSP 24:32 resampler
+               -> bounded PSRAM playback ring + zero-crossing onset
+               -> continuously clocked I2S playback task -> MAX98357
 ```
 
 ESP-SR 2.4.6 is pinned through the AI-only `audio_afe_esp_sr` component. The AI
 partition table reserves a 6 MiB `model` partition, and the PlatformIO model
-scripts pack and flash the selected Alexa and VADNet assets during an ordinary
-`bin/build -e ai -t upload`. ESP-SR forces its WakeNet AGC mode whenever
-WakeNet is active, so the project config validates that combination explicitly.
-The selected WebRTC noise suppression stage is intentional for the cleanup
-prototype even though ESP-SR logs that NS can reduce recognition accuracy; it
-remains a tuning choice rather than an implicit pipeline change.
+scripts pack and flash the selected Alexa, Computer, and VADNet assets during
+an ordinary `bin/build -e ai -t upload`. ESP-SR forces its WakeNet AGC mode
+whenever WakeNet is active, so the project config validates that combination
+explicitly. The selected WebRTC noise suppression stage is intentional for the
+cleanup prototype even though ESP-SR logs that NS can reduce recognition
+accuracy; it remains a tuning choice rather than an implicit pipeline change.
 
 `AudioAfe::AfeProcessor` continuously feeds and fetches the AFE in complete
 chunks. WakeNet is always evaluated and VAD channel-trigger gating is disabled:
 VAD never qualifies or suppresses a wake detection. A wake opens the AI-local
 `Recording` state and sets the amber status LED immediately. Only VAD speech
 observed after that wake, followed by the configured VAD silence transition,
-can perform the normal close. Separate no-speech and maximum-duration timeouts
-provide bounded fallback exits.
+can perform the normal close. The AI latency profile requires 320 ms of
+post-speech silence, rather than the former 800 ms portal-oriented setting.
+Separate no-speech and maximum-duration timeouts provide bounded fallback
+exits.
 
-Local speaker playback remains a debug-only consumer. Its ring always advances
-with cleaned PCM while recording and zeros while waiting, preserving the proven
-one-second feedback-avoidance delay. Frames already in the ring emerge
-naturally after recording closes; there is no `Draining` production state. The
-fixed delay buffer is allocated once in PSRAM so it does not consume roughly
-32 KiB of internal DRAM. The next phase replaces this consumer with the
-WebSocket request stream and routes response PCM to the speaker.
+`AssistantSession` implements one half-duplex utterance per connection. Its
+four production states are `WaitingForWake`, `Recording`, `AwaitingResponse`,
+and `PlayingResponse`; there is no `Draining` state. The wake frame and every
+subsequent cleaned PCM frame through the post-wake VAD endpoint are copied into
+a bounded PSRAM byte ring without blocking the AFE task. A core-0 network task
+owns all WSS I/O, sends ordered 16 kHz PCM16 mono append events, commits once,
+and stops accepting microphone data before response playback can begin.
+The session latches a statically configured wake profile before recording:
+Alexa selects the `attenborough` voice and Computer selects `bender`. The
+selected voice is included in that turn's `session.update`; the same profile
+boundary can later own endpoint, timeout, or response-policy selection without
+branching on detector indices throughout the session controller.
+
+The assistant client connects to `wss://hal.d-reis.com/v1/realtime`, loads the
+complete `Basic ...` header value from the `hal-auth` secret during boot, and
+validates the current Let's Encrypt chain against the embedded ISRG Root X1.
+Turn-time code reuses that bounded in-memory value so the PSRAM-stack network
+task never reads NVS while the flash cache is disabled; changing the secret
+requires a restart. TLS is not allowed until the current boot has received an
+SNTP synchronization event and the clock passes the configured minimum epoch.
+The generic ESP-IDF WebSocket transport handles framing and masking; mbedTLS
+handles base64, cJSON validates bounded server events, and bulk buffers, the
+network-task stack, and mbedTLS state are allocated in PSRAM.
+The connected assistant socket enables `TCP_NODELAY`; the AI-only lwIP profile
+uses a 1440-byte MSS, 11,520-byte send/receive windows, larger receive
+mailboxes, and WiFi AMPDU in both directions. These settings keep each small
+streaming append out of the portal-oriented minimum-memory TCP regime without
+changing other node network profiles.
+The AI sdkconfig enables mbedTLS PEM parsing for the embedded trust anchor and
+keeps ESP-IDF's dynamically allocated WebSocket upgrade buffer at 4 KiB so the
+forward-auth response headers fit; the buffer is released after the upgrade.
+The assistant uses ESP-IDF's standard WebSocket upgrade and frame path. Because
+ESP-IDF includes `:443` in the `Host` authority, the assistant ingress applies
+an assistant-only Traefik headers middleware before forward-auth to normalize
+both `Host` and the trusted `X-Forwarded-Host` value to `hal.d-reis.com`.
+Each upgrade also reports `X-Request-Id: wake-<monotonic-ms>` and the Unix
+millisecond time of that wake in `X-Request-Timestamp`. The paired values let
+cross-service traces map device monotonic log timestamps onto the server clock
+without using UART arrival time as the device timestamp.
+
+Playback begins only after a valid `response.audio.started` event announcing
+PocketTTS's 24 kHz mono PCM16 stream. The
+[MAX98357 datasheet](https://www.analog.com/media/en/technical-documentation/data-sheets/MAX98357A-MAX98357B.pdf)
+explicitly lists 24 kHz LRCLK as unsupported, so the node does not drive that
+rate directly.
+A stateful 4:3 rational FIR from the existing ESP-DSP component converts the
+response to supported 32 kHz PCM16. Its 128-tap Kaiser-windowed filter retains
+the source bandwidth, has a 10 kHz passband within about 0.002 dB, and rejects
+images from 14 kHz by more than 77 dB. The saturated output enters a bounded
+512 KiB PSRAM playback ring. A separate core-0 playback task starts after a
+configurable 8 KiB/128 ms preroll and owns the optional saturating response gain
+and bounded I2S writes. This separation is required: a blocking I2S write must
+not pause WebSocket reads and feed TCP backpressure into the audio stream.
+The ESP-IDF TX channel is enabled at boot with `auto_clear`, so BCLK/LRCLK
+continue and idle DMA descriptors transmit zero PCM. An explicit-prime
+path writes configurable 512-byte zero blocks from request commit until the
+server announces response audio. It then stops replenishing those blocks so
+the short DMA runway drains while the 8 KiB response preroll accumulates. The
+former version continued priming through the preroll handoff, but that did not
+change the onset transient. The earlier one-second local loopback supplied the
+same stronger control and produced the same transient. These observations
+exclude I2S/MAX98357 startup and identify the zero-to-arbitrary-PCM boundary as
+the common transition. The final PCM path uses audio-tools'
+`PoppingSoundRemover` to hold the beginning at digital zero until the first
+waveform zero crossing. This avoids ramping an initial offset into the audible
+low-frequency `pffff` produced by the rejected linear-fade experiment.
+If streaming TTS later starves the queue, playback waits for the same 8 KiB to
+rebuild, or for producer completion when less audio remains, before resuming.
+Each enqueue wakes the consumer immediately. This recovery policy does not add
+first-response latency and avoids replaying isolated tiny chunks after an
+upstream synthesis gap.
+Purple `Playback` begins only at the queued-audio handoff.
+A purple informational `Playback` status is active while server audio plays.
+Dim-white `Listening` means the AFE, network, and current-boot clock are all
+ready. The LED is explicitly `Off` from the post-wake VAD endpoint until
+playback begins; setup never selects generic green `TargetsReady`. Successful
+response completion requires audio done, response done, and a normal WebSocket
+close before the node returns to `Listening`. A policy-violation close for an
+empty submitted sample is an expected outcome, is counted separately, and also
+returns directly to `Listening`. Wake detections while a turn is busy are logged
+and counted but do not start overlapping capture.
 
 All tuning values live in validated structs assembled in `src/ai/config.hpp`,
 including NS/VAD/WakeNet/AGC selection and thresholds, VAD speech/silence and
 look-back durations, linear gain, AFE memory/ring/task placement, bounded frame
-sizes, fetch wait, session safety timeouts, recording status, and debug delay.
+sizes, fetch wait, session safety timeouts, capture and event capacities,
+socket and response timeouts, playback-ring capacity/preroll/prime-write/waits,
+zero-crossing onset conditioning, exact response/playback formats, response
+gain, SNTP readiness, both assistant-task placements, and
+Listening/Recording/Playback statuses.
 The `audAfe` metric group reports source/feed/fetch health, detector
-transitions, ring headroom, level/peak/RMS/clipping, and failures. `aiSess`
-reports session close reasons, routed/zero-filled bytes, playback samples,
-sink drops, status failures, and current session state. See
-the [AI audio AFE implementation plan](ai-audio-afe-plan.md) for the
-implementation record and hardware measurements.
+transitions, ring headroom, level/peak/RMS/clipping, and failures. `aiAsst`
+reports turn/endpoint outcomes, connection failures, captured/sent/played bytes,
+capture and playback high water, playback queue depth, queue
+underflow/overflow events, maximum producer wait and I2S write duration,
+pre/post-conditioning onset magnitude and suppressed sample count, state, and
+latency measurements; `aiAsOut.empty` counts expected empty samples. The
+per-turn commit logs additionally report exact
+endpoint-to-commit time, final-drain PCM and duration, append count,
+total/maximum append-send time, and commit-write time; the playback task logs
+the first nonzero I2S write relative to the server audio announcement. See the
+[AI audio AFE implementation plan](ai-audio-afe-plan.md) and
+[assistant WebSocket plan](ai-assistant-websocket-plan.md) for implementation
+records and hardware measurements.
+
+The preliminary idle hardware pass after the WebSocket implementation measured
+20,407
+bytes of free internal data memory with a 19,151-byte low water, 7,257,812
+bytes of free PSRAM with a 7,256,080-byte low water, and 0.04% CPU for the idle
+assistant task. Its 12,288-byte PSRAM stack retained 10,288 bytes. The AFE used
+about 31% of core 1 and retained 98% ring headroom. A later spoken trace verified
+ordered capture, one commit, normal WebSocket close, and exact server/device
+byte counts. It also exposed the unsupported 24 kHz speaker clock. Converting
+to 32 kHz improved the result but did not remove mid-word holes. Timestamp
+correlation then showed that synchronous I2S writes paused WebSocket reads even
+though PocketTTS generated at 1.9--2.9 times realtime. The bounded playback ring
+and dedicated consumer remove that backpressure cycle. The zero-crossing build
+uses 124,340 bytes of static RAM and 1,736,591 bytes of application flash; its
+512 KiB queue and 512-byte zero block are allocated from PSRAM at boot.
+The subsequent latency build uses 124,356 bytes of static RAM and 1,738,915
+bytes of application flash. It uploads and reaches Listening cleanly with
+19,967 bytes of free internal data memory. Two person-present responses then
+completed normally. Device timestamps put endpoint-to-commit at 26 ms and the
+first nonzero I2S write 40--52 ms after the server audio announcement. The
+active-turn low-water marks were 17,223 internal bytes and 6,648,080 external
+bytes. A 6.08-second response delivered over 7.122 seconds exposed five
+upstream-starvation intervals with a 1.116-second maximum and a 199,808-byte
+eventual queue high-water; that observation led to the adaptive rebuffer policy
+above. Its recovery behavior still needs a similarly bursty response to recur.
+The dual-WakeNet voice-profile build uses 124,428 bytes of static RAM and
+1,745,039 bytes of application flash. On clean boot it retains a 12,867-byte
+internal-data low water and 6,368,876 external bytes while the AFE consumes
+about 40--42% of core 1 with 98% ring headroom and no failures. Subjective onset
+quality and spoken verification of both profile selections remain
+person-present checks.
 
 Enabling `A2DPSource` requires the ESP-IDF Bluedroid Bluetooth stack. On the
 original 4 MiB ESP32 media board this has a large flash-size cost, so Bluedroid
@@ -305,8 +428,8 @@ Peak events are not tempo beats. They are local accent/transient observations fo
 animation accents, tracker evidence, and diagnostics. The first tempo-tracking
 stage consumes the configured evidence group, currently bass by default, and
 maintains one explicit beat clock. That clock publishes `BeatEvent` outcomes:
-`ExpectedHit`, `ExpectedMiss`, `Reacquired`, and `Lost`. The initial tracker is a
-small deterministic inter-onset/phase tracker, not the final EDM-grade tracker;
+`ExpectedHit`, `ExpectedMiss`, `Reacquired`, and `Lost`. The initial tracker is
+a small deterministic inter-onset/phase tracker, not the final EDM-grade tracker;
 it is intentionally instrumented so WAV fixtures and live input can show whether
 the evidence group, BPM bounds, hit window, and confidence rules are plausible.
 

@@ -82,10 +82,9 @@ class Runner {
 
         auto deregisterResult = _registry.deregisterManagedTaskHandle(
             reinterpret_cast<uintptr_t>(handle));
-        if (!deregisterResult.ok()) {
-            _log_e("Failed to deregister killed runner handle for %s: " ERR_FMT,
-                   _config.name, ERR_ARG(deregisterResult));
-        }
+        REPORT_IF_ERR(deregisterResult,
+                      "Failed to deregister killed runner handle for %s",
+                      _config.name);
         Platform::kill_task(handle);
         _log_w("Killed runner %s", _config.name);
     }
@@ -253,9 +252,10 @@ class Runner {
         if (result.reason == ExitReason::StopRequested) {
             _log_i("Runner %s exited successfully", self->_config.name);
         } else {
-            _log_e("Runner %s exited with error: " ERR_FMT " (reason code %d)",
-                   self->_config.name, ERR_ARG(result.error),
-                   static_cast<uint8_t>(result.reason));
+            REPORT_IF_ERR(result.error,
+                          "Runner %s exited with reason code %d",
+                          self->_config.name,
+                          static_cast<uint8_t>(result.reason));
         }
         // Publish the stopped state only after the task has finished touching
         // Runner storage. Reap may destroy the Runner as soon as hasStopped()
@@ -268,10 +268,9 @@ class Runner {
         if (nativeHandle != 0) {
             auto deregisterResult =
                 self->_registry.deregisterManagedTaskHandle(nativeHandle);
-            if (!deregisterResult.ok()) {
-                _log_e("Failed to deregister runner handle for %s: " ERR_FMT,
-                       self->_config.name, ERR_ARG(deregisterResult));
-            }
+            REPORT_IF_ERR(deregisterResult,
+                          "Failed to deregister runner handle for %s",
+                          self->_config.name);
         }
         self->_stopResult = result;
         self->_hasStopResult.store(true, std::memory_order_release);

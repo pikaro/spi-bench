@@ -170,9 +170,9 @@ class BleWheel : public HasLifecycle<BleWheel, BleWheelConfig>,
 
     void _releaseMessage(PubSubBackend::MessageId messageId,
                          const char *context) {
-        if (!_messagePool.release({.header = {.messageId = messageId}}).ok()) {
-            _log_e("Failed to release wheel state after %s", context);
-        }
+        REPORT_IF_ERR(
+            _messagePool.release({.header = {.messageId = messageId}}),
+            "Failed to release wheel state after %s", context);
     }
 
     static constexpr char _asciiLower(char value) {

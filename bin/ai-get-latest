@@ -1,0 +1,26 @@
+#!/bin/bash
+
+set -eEuo pipefail
+
+_get_pod_name() {
+    local NAMESPACE="$1"
+    local NAME="${2:-${NAMESPACE}}"
+    echo "Looking for ${NAME} in ${NAMESPACE}" >/dev/stderr
+    kubectl get pods \
+        -n "${NAMESPACE}" \
+        -l "app.kubernetes.io/name=${NAME}" \
+        -o jsonpath='{.items[0].metadata.name}'
+}
+
+_get_latest() {
+    local NAMESPACE="$1"
+    local ITEM="$2"
+    local OUT="$3"
+    POD="$(_get_pod_name "${NAMESPACE}")"
+    echo "Copying ${POD}:${ITEM} to ${OUT}" >/dev/stderr
+    kubectl cp -n "${NAMESPACE}" "${POD}:${ITEM}" "${OUT}"
+}
+
+_get_latest nemo-asr /tmp/latest.wav /tmp/stt.wav
+_get_latest pockettts /tmp/latest.wav /tmp/partial-tts.wav
+_get_latest assistant /tmp/latest.wav /tmp/tts.wav

@@ -7,7 +7,7 @@
 #include "Setups/Core.hpp"
 #include "Wifi/Facade.hpp"
 #include "Wifi/detail/Commands.hpp"
-#include "audio_session.hpp"
+#include "assistant_session.hpp"
 #include "config.hpp"
 #include <cstddef>
 #include <cstdint>
@@ -111,7 +111,7 @@ class AfeMicInput {
 };
 
 AfeMicInput afeMicInput{};
-AiAudio::WakeSession wakeSession{};
+AiAudio::AssistantSession assistantSession{};
 
 } // namespace
 
@@ -126,19 +126,17 @@ void setup() {
     ABORT_IF_ERR(Totem::Wifi::Commands::registerCommands(wifi),
                  "Failed to register WiFi commands");
     ABORT_IF_ERR_BEGIN(micSource.begin(i2sAudioSourceConfig));
-    ABORT_IF_ERR_BEGIN(maxSink.begin(max98357LoopbackSinkConfig));
+    ABORT_IF_ERR_BEGIN(maxSink.begin(max98357ResponseSinkConfig));
     ABORT_IF_ERR(afeMicInput.begin(micSource),
                  "Failed to begin AFE microphone input");
+    ABORT_IF_ERR(assistantSession.begin(wifi, maxSink, assistantSessionConfig),
+                 "Failed to begin assistant session");
     ABORT_IF_ERR(
-        wakeSession.begin(maxSink, wakeSessionConfig, delayedPlaybackConfig),
-        "Failed to begin wake session");
-    ABORT_IF_ERR(audioAfe.bind(afeMicInput.binding(), wakeSession.binding()),
-                 "Failed to bind AI audio pipeline");
+        audioAfe.bind(afeMicInput.binding(), assistantSession.binding()),
+        "Failed to bind AI audio pipeline");
     ABORT_IF_ERR_BEGIN(audioAfe.begin(audioAfeConfig));
 
     _log_i("Setup complete");
-    ABORT_IF_ERR(StatusLedService::setTargetsReady(),
-                 "Failed to set status LED targets-ready state");
 }
 
 extern "C" {
@@ -149,7 +147,7 @@ void app_main() {
     setup();
     for (;;) {
         const auto nowMs = ::platform::get_time();
-        (void)core.work(nowMs);
+        REPORT_IF_ERR(core.work(nowMs), "Core work failed");
         ::platform::delay(::platform::ms_to_ticks(1));
     }
 }

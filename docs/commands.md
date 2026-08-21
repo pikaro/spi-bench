@@ -9,7 +9,7 @@ These are the primary project commands currently used in practice.
 - Build the active GPU0 SPI target: `bin/build -e gpu0`
 - Build the active GPU1 SPI target: `bin/build -e gpu1`
 - Build the active IO RS485 target: `bin/build -e io`
-- Build the standalone AI speech prototype: `bin/build -e ai`
+- Build the standalone AI assistant target: `bin/build -e ai`
 - Build, pack the selected ESP-SR models, and upload the complete AI image:
     `bin/build -e ai -t upload`
 - Build and emit a compilation database: `pio run -e master -t compiledb`
@@ -56,6 +56,9 @@ Build output notes:
     `bin/monitor-multi --uploadfs media`
 - Capture a bounded, plain-text sample:
     `bin/monitor-multi --timeout 5s --strip-ansi master media`
+- Prefix each emitted device line with local wall-clock time for cross-service
+    traces:
+    `bin/monitor-multi ai --timestamps --strip-ansi`
 - Capture only high-signal lines:
     `bin/monitor-multi --timeout 10s --strip-ansi --include 'WRN|ERR' master`
 - Print repeated lines instead of the default sequential-identical-line
@@ -143,7 +146,27 @@ Runtime command discovery:
     station mode or `wifi-ap-pass` in access-point mode:
     `!master /secret set wifi-sta-pass example-password`
     `!master /secret get wifi-sta-pass`
+    `!master /secret delete obsolete-key`
     `!master /secret list`
+- `/secret seal` disables every `/secret` console command except `list` and
+    `unseal` until `/secret unseal <token>` receives the exact value stored under
+    the `seal` key. The `seal` value must contain at least eight characters
+    before sealing. This affects only the `/secret` console commands, not
+    firmware access through SecretStorage APIs:
+    `!master /secret set seal example-token`
+    `!master /secret seal`
+    `!master /secret unseal example-token`
+- The AI assistant expects `hal-auth` to contain the complete Authorization
+    header value generated for the Authentik machine account. The command joins
+    value tokens with one space, so this stores `Basic ...` exactly; do not
+    provision only the base64 token and do not add the literal
+    `Authorization:` field name:
+    `!ai /secret set hal-auth Basic <base64-machine-credential>`
+    The Basic payload must use the actual service-account username with its app
+    password. Authentik's reserved `goauthentik.io/token` username selects
+    bearer-token authentication and is not valid for an `app_password` key.
+    Avoid `/secret get hal-auth` in captured logs because it prints the
+    credential.
 
 Useful LED animation commands:
 
@@ -330,16 +353,30 @@ Useful audio-source validation command:
     PubSub path:
     `!master /calibrate-audio`
 - Generate a short media-node WAV fixture:
-    `bin/wavgen.py test.wav beat --sample-rate 16000 --duration-ms 12000 --bpm 100 --freq 100`
+    `bin/wavgen.py test.wav beat --sample-rate 16000 --duration-ms 12000 \`
+    `--bpm 100 --freq 100`
 
 Useful AI AFE validation commands:
 
 - Reset the AI node and capture the AFE/model/session startup path:
-    `bin/monitor-multi ai --reset --timeout 30s --strip-ansi --include 'ESP-SR ready|AFE Pipeline|Audio AFE|Wake session|Setup complete|ERR|watchdog'`
-- Inspect continuous feed/fetch, WakeNet/VAD, delayed playback, and failure
-    counters: `bin/monitor-multi ai --command /metrics --timeout 8s --strip-ansi`
-- Inspect AFE CPU load, static-task stack high water, internal DRAM, and PSRAM:
+    `bin/monitor-multi ai --reset --timeout 30s --strip-ansi \`
+    `--include 'Assistant|ESP-SR ready|AFE Pipeline|Audio AFE|Setup complete|ERR|watchdog'`
+- Inspect continuous feed/fetch, WakeNet/VAD, assistant turns, byte counts,
+    capture/playback high water, explicit I2S priming duration, playback queue
+    underflow/overflow, producer wait, maximum I2S write time, zero-crossing
+    onset magnitudes/sample suppression (`pbEdgeIn`, `pbEdgeOut`, `pbMute`),
+    and failures:
+    `bin/monitor-multi ai --command /metrics --timeout 8s --strip-ansi`
+- Inspect AFE and assistant CPU load, task stack high water, internal DRAM, and
+    PSRAM:
     `bin/monitor-multi ai --command /monitor --timeout 8s --strip-ansi`
+- Render the latest wake-to-playback trace from a combined serial/Kubernetes
+    log. The tool matches the latest device wake to its server request ID,
+    calibrates device monotonic timestamps from the client-reported wake time,
+    bounds matching events to that turn, selects the first TTS segment instead
+    of the last, and reports the first nonzero I2S response write separately
+    from playback startup:
+    `bin/ai-trace ai-trace-log`
 
 A normal AI upload includes `build/ai/srmodels/srmodels.bin` at the offset from
 `partitions/esp32_16mib_ai.csv`; no separate model-flash command is required.
@@ -354,7 +391,8 @@ Useful host PubSub UDP bridge commands:
     error instead of hiding the stale process.
 - Run the host UDP participant and expose a local Unix-domain socket for
     arbitrary local PubSub tools:
-    `bin/pubsub-udp-peer --mcu-ip <master-ip> --bind-ip <host-ip> --local-socket /tmp/totem-pubsub.sock`
+    `bin/pubsub-udp-peer --mcu-ip <master-ip> --bind-ip <host-ip> \`
+    `--local-socket /tmp/totem-pubsub.sock`
 - Render local FFT, peak, and beat events from that socket:
     `bin/pubsub-audio-view --socket /tmp/totem-pubsub.sock`
     Press `c` in the viewer to publish the same calibration button event as the

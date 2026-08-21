@@ -35,6 +35,19 @@
         abort();                                                               \
     } while (0)
 
+// Consume and report an error at an ownership boundary without terminating.
+// Errors that may still be handled or propagated must use the FAIL_* macros.
+#define REPORT_IF_ERR(expr, msg, ...)                                          \
+    do {                                                                       \
+        auto _rc_ = (expr);                                                    \
+        if (!_rc_.ok()) {                                                      \
+            INTERNAL_FAIL_IF_IMPL_ERR(                                         \
+                true, "Unhandled Error",                                      \
+                (void)StatusLedService::recordUnhandledError(), msg, _rc_,     \
+                ##__VA_ARGS__);                                                \
+        }                                                                      \
+    } while (0)
+
 // Fail if active
 #define FAIL_IF_ACTIVE_THEN(action, msg, ...)                                  \
     INTERNAL_FAIL_IF_IMPL(this->_life.active(), "active", action, msg,         \

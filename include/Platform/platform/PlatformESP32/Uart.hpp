@@ -205,6 +205,12 @@ class Uart {
   private:
     static void _eventTaskMain(void *arg) {
         auto *self = static_cast<Uart *>(arg);
+        if (self == nullptr) {
+            REPORT_IF_ERR(ERR(CoreError, InvalidArgument),
+                          "UART event task owner is null");
+            vTaskDelete(nullptr);
+            return;
+        }
         self->_eventTaskLoop();
     }
 
@@ -226,7 +232,10 @@ class Uart {
     void _dispatchEvent(UartEvent event) {
         for (auto &registration : _callbacks) {
             if (registration.callback != nullptr) {
-                (void)registration.callback(registration.owner, event);
+                REPORT_IF_ERR(
+                    registration.callback(registration.owner, event),
+                    "UART event callback failed for event type %u",
+                    static_cast<unsigned>(event.type));
             }
         }
     }

@@ -145,12 +145,11 @@ class Buttons : public HasLifecycle<Buttons, Config>,
         }
 
         auto pubSubEvent = ButtonEvent{
-            .type = pressed ? ButtonEventType::Pressed
-                            : ButtonEventType::Released,
+            .type =
+                pressed ? ButtonEventType::Pressed : ButtonEventType::Released,
             .button = btnCfg.button,
         };
-        _log_i("Button event: button=%u type=%s",
-               pubSubEvent.button,
+        _log_i("Button event: button=%u type=%s", pubSubEvent.button,
                pubSubEvent.type == ButtonEventType::Pressed ? "Pressed"
                                                             : "Released");
         auto publishResult = publishButtonEvent(pubSubEvent);
@@ -195,8 +194,7 @@ class Buttons : public HasLifecycle<Buttons, Config>,
 
             ret.combine(_publishGpioEvent(
                 {.pin = config().buttons[i].pin,
-                 .type = level ? GpioEventType::Rising
-                               : GpioEventType::Falling,
+                 .type = level ? GpioEventType::Rising : GpioEventType::Falling,
                  .level = level,
                  .timestampUs = ::platform::get_time_us()}));
         }
@@ -220,8 +218,7 @@ class Buttons : public HasLifecycle<Buttons, Config>,
             metrics().addIsrEvents(isrEvents);
         }
 
-        const auto isrDrops =
-            _isrDrops.exchange(0, std::memory_order_relaxed);
+        const auto isrDrops = _isrDrops.exchange(0, std::memory_order_relaxed);
         if (isrDrops != 0) {
             metrics().addIsrDrops(isrDrops);
         }

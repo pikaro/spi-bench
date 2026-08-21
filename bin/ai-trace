@@ -1,0 +1,290 @@
+#!/usr/bin/env bash
+
+set -eEuo pipefail
+
+RE_TS_SERIAL="([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3})"
+RE_TS_K8S="([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+Z)"
+RE_TS_DEVICE="[A-Z]{3} \(([0-9]+)\)"
+RE_WAKE="WakeNet detected"
+RE_RECORDING_STARTED="Recording started by WakeNet"
+RE_CONNECTED="Assistant WebSocket connected"
+RE_RECORDING_STOPPED="Recording stopped: reason=VadSilence"
+RE_INPUT_COMMITTED="Assistant input committed"
+RE_ANNOUNCED="Assistant response audio announced"
+RE_PLAYBACK_STARTED="Assistant playback started"
+RE_FIRST_NONZERO_I2S="Assistant first nonzero I2S write started"
+RE_PLAYBACK_COMPLETE="Assistant response audio complete"
+RE_TTS_PIPELINE_STARTED='"event_id":"ID_tts_pipeline_websocket_started"'
+RE_TTS_SEGMENT_COMPLETED='"event_id":"ID_tts_pipeline_segment_completed"'
+RE_DURATION_SECONDS='"duration_seconds":([0-9]+([.][0-9]+)?([eE][-+]?[0-9]+)?)'
+RE_LLM_PROCESSED="stop processing: n_tokens"
+RE_LLM_PROCESSING="processing task, is_child"
+RE_STT_COMPLETED='"event_id":"ID_stt_realtime_session_completed"'
+RE_STT_FIRST_PARTIAL='"event_id":"ID_stt_transcription(_produced)?".*"stage":"partial"'
+RE_STT_FIRST_DELTA='"event_id":"ID_stt_transcription".*"stage":"stable delta"'
+RE_STT_STARTED='"event_id":"ID_stt_realtime_session_started"'
+RE_ASSISTANT_COMPLETED='"event_id":"ID_assistant_realtime_session_completed"'
+RE_ASSISTANT_GENERATED='"event_id":"ID_assistant_response_generated"'
+RE_ASSISTANT_LLM_GENERATED='"event_id":"ID_assistant_llm_request_completed"'
+RE_ASSISTANT_FIRST_TOKEN='"event_id":"ID_assistant_llm_first_token_received"'
+RE_ASSISTANT_LLM_REQUEST='"event_id":"ID_assistant_llm_request_started"'
+RE_ASSISTANT_STT_FIRST_DELTA='"event_id":"ID_assistant_stt_transcription_delta_received"'
+RE_ASSISTANT_STT_COMPLETED='"event_id":"ID_assistant_stt_transcription(_received)?"'
+RE_ASSISTANT_CACHE_WARM='"event_id":"ID_assistant_llm_cache_warm_completed".*"reason":"delta"'
+RE_ASSISTANT_CACHE_BARRIER='"event_id":"ID_assistant_llm_cache_final_barrier_completed"'
+RE_ASSISTANT_STARTED='"event_id":"ID_assistant_realtime_session_started"'
+RE_ASSISTANT_REQUEST_RECEIVED='"event_id":"ID_assistant_request_correlation_received"'
+RE_CLIENT_REQUEST_ID="requestId=(wake-[0-9]+)"
+RE_REQUEST_ID='"request_id":"([^"]+)"'
+RE_REQUEST_TIMESTAMP='"request_timestamp":"([0-9]+)"'
+
+declare -A checkpoints=()
+
+declare -A checkpoint_regexes=()
+
+declare -A checkpoint_selection=()
+
+_register_checkpoint() {
+    local name="$1"
+    local regex="$2"
+    local selection="${3:-first}"
+    checkpoint_regexes["$name"]="$regex"
+    checkpoint_selection["$name"]="$selection"
+}
+
+# Serial
+_register_checkpoint "wake" "$RE_WAKE"
+_register_checkpoint "recording_started" "$RE_RECORDING_STARTED"
+_register_checkpoint "connected" "$RE_CONNECTED"
+_register_checkpoint "recording_stopped" "$RE_RECORDING_STOPPED"
+_register_checkpoint "input_committed" "$RE_INPUT_COMMITTED"
+_register_checkpoint "announced" "$RE_ANNOUNCED"
+_register_checkpoint "playback_started" "$RE_PLAYBACK_STARTED"
+_register_checkpoint "first_nonzero_i2s" "$RE_FIRST_NONZERO_I2S"
+_register_checkpoint "playback_complete" "$RE_PLAYBACK_COMPLETE"
+
+# TTS
+_register_checkpoint "tts_pipeline_started" "$RE_TTS_PIPELINE_STARTED"
+_register_checkpoint "tts_first_requested" "$RE_TTS_SEGMENT_COMPLETED"
+_register_checkpoint "tts_first_synthesised" "$RE_TTS_SEGMENT_COMPLETED"
+
+# LLM
+_register_checkpoint "llm_generation_processing" "$RE_LLM_PROCESSING" last
+_register_checkpoint "llm_generation_processed" "$RE_LLM_PROCESSED" last
+
+# STT
+_register_checkpoint "stt_started" "$RE_STT_STARTED"
+_register_checkpoint "stt_first_partial" "$RE_STT_FIRST_PARTIAL"
+_register_checkpoint "stt_first_delta" "$RE_STT_FIRST_DELTA"
+_register_checkpoint "stt_completed" "$RE_STT_COMPLETED"
+
+# Assistant
+_register_checkpoint "assistant_request_received" "$RE_ASSISTANT_REQUEST_RECEIVED"
+_register_checkpoint "assistant_started" "$RE_ASSISTANT_STARTED"
+_register_checkpoint "assistant_stt_first_delta" "$RE_ASSISTANT_STT_FIRST_DELTA"
+_register_checkpoint "assistant_stt_completed" "$RE_ASSISTANT_STT_COMPLETED"
+_register_checkpoint "assistant_cache_warm_first" "$RE_ASSISTANT_CACHE_WARM"
+_register_checkpoint "assistant_cache_warm_latest" "$RE_ASSISTANT_CACHE_WARM" last
+_register_checkpoint "assistant_cache_barrier" "$RE_ASSISTANT_CACHE_BARRIER"
+_register_checkpoint "assistant_llm_request" "$RE_ASSISTANT_LLM_REQUEST"
+_register_checkpoint "assistant_first_token" "$RE_ASSISTANT_FIRST_TOKEN"
+_register_checkpoint "assistant_llm_generated" "$RE_ASSISTANT_LLM_GENERATED" last
+_register_checkpoint "assistant_generated" "$RE_ASSISTANT_GENERATED"
+_register_checkpoint "assistant_completed" "$RE_ASSISTANT_COMPLETED"
+
+today="$(date +%Y-%m-%d)"
+
+export TZ="Europe/Berlin"
+_ts_to_ms_serial() {
+    _ts_to_ms_k8s "${today}T${1}000"
+}
+
+_ts_to_ms_k8s() {
+    ms=$(date -d "$1" +%s%3N)
+}
+
+_ts_to_ms_device() {
+    local timestamp_ms="$1"
+    local relative_ms=$((timestamp_ms - trace_start_device_ms))
+    # Interpret the uint32_t subtraction as a signed distance so a wake log
+    # emitted just before the request anchor remains a small negative offset,
+    # while a device timestamp rollover during the turn remains positive.
+    if [[ "$relative_ms" -gt 2147483647 ]]; then
+        relative_ms=$((relative_ms - 4294967296))
+    elif [[ "$relative_ms" -lt -2147483648 ]]; then
+        relative_ms=$((relative_ms + 4294967296))
+    fi
+    ms=$((trace_start_ms + relative_ms))
+}
+
+_ts_to_ms_since_start() {
+    local line="$1"
+
+    if [[ "$line" =~ $RE_TS_K8S ]]; then
+        _ts_to_ms_k8s "${BASH_REMATCH[1]}"
+    elif [[ "$line" =~ $RE_TS_DEVICE ]]; then
+        _ts_to_ms_device "${BASH_REMATCH[1]}"
+    elif [[ "$line" =~ $RE_TS_SERIAL ]]; then
+        _ts_to_ms_serial "${BASH_REMATCH[1]}"
+    else
+        echo "No timestamp found in line: $line" >/dev/stderr
+        return 1
+    fi
+}
+
+_find_latest_wake() {
+    request_id=""
+    while IFS= read -r line; do
+        if [[ "$line" =~ $RE_RECORDING_STARTED ]] &&
+            [[ "$line" =~ $RE_CLIENT_REQUEST_ID ]]; then
+            request_id="${BASH_REMATCH[1]}"
+        fi
+    done <"$LOG"
+
+    if [[ -z "$request_id" ]]; then
+        echo "No correlated device wake checkpoint found in $LOG" >/dev/stderr
+        return 1
+    fi
+
+    trace_start_device_ms="${request_id#wake-}"
+}
+
+_calibrate_trace_start() {
+    trace_start_ms=""
+    while IFS= read -r line; do
+        if [[ ! "$line" =~ $RE_ASSISTANT_REQUEST_RECEIVED ]] ||
+            [[ ! "$line" =~ $RE_REQUEST_ID ]]; then
+            continue
+        fi
+        local line_request_id="${BASH_REMATCH[1]}"
+        if [[ "$line_request_id" != "$request_id" ]] ||
+            [[ ! "$line" =~ $RE_REQUEST_TIMESTAMP ]]; then
+            continue
+        fi
+        trace_start_ms="${BASH_REMATCH[1]}"
+    done <"$LOG"
+
+    if [[ -z "$trace_start_ms" ]]; then
+        echo "No server correlation record found for request $request_id in $LOG" \
+            >/dev/stderr
+        return 1
+    fi
+
+    local request_record_regex="$RE_ASSISTANT_REQUEST_RECEIVED"
+    request_record_regex+=".*\"request_id\":\"$request_id\""
+    checkpoint_regexes["assistant_request_received"]="$request_record_regex"
+}
+
+_find_trace_window() {
+    trace_end_ms=""
+
+    while IFS= read -r line; do
+        if [[ "$line" =~ $RE_PLAYBACK_COMPLETE ]]; then
+            _ts_to_ms_since_start "$line"
+            if [[ "$ms" -ge "$trace_start_ms" ]] &&
+                [[ -z "$trace_end_ms" || "$ms" -lt "$trace_end_ms" ]]; then
+                trace_end_ms="$ms"
+            fi
+        fi
+    done <"$LOG"
+
+    trace_min_ms=$((trace_start_ms - 2000))
+    if [[ -n "$trace_end_ms" ]]; then
+        trace_max_ms=$((trace_end_ms + 2000))
+    else
+        trace_max_ms=$((trace_start_ms + 180000))
+    fi
+}
+
+_record_checkpoint() {
+    local checkpoint_name="$1"
+    local checkpoint_ms="$2"
+
+    if [[ "$checkpoint_ms" -lt "$trace_min_ms" || "$checkpoint_ms" -gt "$trace_max_ms" ]]; then
+        return
+    fi
+
+    local current="${checkpoints[$checkpoint_name]:-}"
+    local selection="${checkpoint_selection[$checkpoint_name]}"
+    if [[ -z "$current" ]] ||
+        [[ "$selection" == "first" && "$checkpoint_ms" -lt "$current" ]] ||
+        [[ "$selection" == "last" && "$checkpoint_ms" -gt "$current" ]]; then
+        checkpoints["$checkpoint_name"]="$checkpoint_ms"
+    fi
+}
+
+_checkpoint() {
+    local line="$1"
+    local line_ms=""
+
+    for checkpoint_name in "${!checkpoint_regexes[@]}"; do
+        local regex="${checkpoint_regexes[$checkpoint_name]}"
+        if [[ "$line" =~ $regex ]]; then
+            if [[ -z "$line_ms" ]]; then
+                _ts_to_ms_since_start "$line"
+                line_ms="$ms"
+            fi
+            _record_checkpoint "$checkpoint_name" "$line_ms"
+        fi
+    done
+
+    # Segment completion is now the single TTS segment event. Reconstruct the
+    # corresponding synthesis start from its structured duration so the trace
+    # retains the former request-to-synthesis interval without duplicate logs.
+    if [[ -n "$line_ms" && "$line" =~ $RE_TTS_SEGMENT_COMPLETED ]] &&
+        [[ "$line" =~ $RE_DURATION_SECONDS ]]; then
+        local duration_seconds="${BASH_REMATCH[1]}"
+        local duration_ms
+        duration_ms="$(LC_ALL=C awk -v duration="$duration_seconds" \
+            'BEGIN { printf "%.0f", duration * 1000 }')"
+        _record_checkpoint "tts_first_requested" "$((line_ms - duration_ms))"
+    fi
+}
+
+_dump_checkpoints() {
+    local last=""
+    while read -r checkpoint_ms checkpoint_name; do
+        local relative_ms=$((checkpoint_ms - trace_start_ms))
+        if [[ -z "$last" ]]; then
+            delta=0
+        else
+            delta=$((checkpoint_ms - last))
+        fi
+        echo "$relative_ms $delta $checkpoint_name"
+        last="$checkpoint_ms"
+    done < <(for checkpoint_name in "${!checkpoint_regexes[@]}"; do
+        if [[ -n "${checkpoints[$checkpoint_name]:-}" ]]; then
+            echo "${checkpoints[$checkpoint_name]} $checkpoint_name"
+        fi
+    done | sort -n) | column -t
+}
+
+LOG="/tmp/ai-trace-log"
+
+_k8s_logs() {
+    echo "Fetching Kubernetes logs..." >/dev/stderr
+    kubectl logs -n assistant deployment/assistant --tail=1000 --timestamps
+    kubectl logs -n nemo-asr deployment/nemo-asr --tail=1000 --timestamps
+    kubectl logs -n llama-server deployment/llama-server --tail=1000 --timestamps
+    kubectl logs -n pockettts deployment/pockettts --tail=1000 --timestamps
+}
+
+GIT_ROOT="$(git rev-parse --show-toplevel)"
+
+trap 'echo "Monitor terminated"' SIGINT SIGTERM
+"${GIT_ROOT}/bin/monitor-multi" ai --strip-ansi --timestamps >"${LOG}" || true
+trap - SIGINT SIGTERM
+
+trap 'rm -f "${LOG}"' EXIT
+
+_k8s_logs >>"${LOG}" 2>&1
+
+_find_latest_wake
+_calibrate_trace_start
+_find_trace_window
+
+while IFS= read -r line; do
+    _checkpoint "$line"
+done < <(tee <"${LOG}")
+
+_dump_checkpoints

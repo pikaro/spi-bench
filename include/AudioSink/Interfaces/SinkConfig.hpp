@@ -5,7 +5,6 @@
 #include "Network/Interfaces/Endpoint.hpp"
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 
 namespace Totem::AudioSink {
 
@@ -124,13 +123,25 @@ struct WebSocketSinkConfig {
     NetworkSinkConfig network{};
     const char *path = "/";
     bool secure = true;
-    const char *bearerTokenSecretName = nullptr;
+    const char *authorizationHeaderSecretName = nullptr;
     const char *trustedRootPem = nullptr;
     std::size_t packetBytes = webSocketDefaultPacketBytes;
 
-    [[nodiscard]] bool hasBearerToken() const {
-        return bearerTokenSecretName != nullptr &&
-               bearerTokenSecretName[0] != '\0';
+    [[nodiscard]] bool hasAuthorizationHeader() const {
+        return authorizationHeaderSecretName != nullptr &&
+               authorizationHeaderSecretName[0] != '\0';
+    }
+
+    [[nodiscard]] bool hasValidAuthorizationSecretName() const {
+        if (!hasAuthorizationHeader()) {
+            return true;
+        }
+        std::size_t length = 0;
+        while (length <= webSocketMaxAuthorizationSecretNameBytes &&
+               authorizationHeaderSecretName[length] != '\0') {
+            ++length;
+        }
+        return length <= webSocketMaxAuthorizationSecretNameBytes;
     }
 
     [[nodiscard]] bool hasTrustedRootPem() const {
@@ -138,13 +149,10 @@ struct WebSocketSinkConfig {
     }
 
     [[nodiscard]] bool validate() const {
-        const auto tokenLength =
-            hasBearerToken() ? std::strlen(bearerTokenSecretName) : 0;
         return network.validateEndpointOrHostName() && path != nullptr &&
                path[0] == '/' && packetBytes > 0 &&
                packetBytes <= webSocketMaxPacketBytes &&
-               (!hasBearerToken() ||
-                tokenLength <= webSocketMaxBearerTokenBytes) &&
+               hasValidAuthorizationSecretName() &&
                (!secure || hasTrustedRootPem());
     }
 };

@@ -22,8 +22,10 @@ subscribe to those events and render their own LED segment locally.
     GPU0 and GPU1, and one RS485 link to IO.
 - `env:ai` is an explicit standalone prototype target outside the current
     PubSub network. It runs the SPH0645 microphone through ESP-SR noise
-    suppression, neural VAD, Alexa WakeNet, and WakeNet AGC; wake/VAD session
-    state drives its status LED and a delayed local MAX98357 validation path.
+    suppression, neural VAD, Alexa/Computer WakeNet models, and WakeNet AGC;
+    the detected wake profile selects the assistant voice, wake/VAD session
+    state drives its status LED, cleaned command PCM is uploaded through an
+    authenticated WebSocket turn, and response PCM plays through MAX98357.
 - Production node entrypoints use `include/Setups/PubSubNetwork.hpp`, which
     registers the real transports and exposes `PubSubService` without starting
     synthetic test publishers or subscribers. The synthetic multi-board
@@ -111,6 +113,10 @@ organized as follows:
 - `include/AudioAfe/`: ESP-SR model lifecycle, speech front-end processing,
     detector metadata, and AFE health metrics for the AI node; see
     [audio.md](audio.md)
+- `src/ai/assistant_session.hpp` and `assistant_websocket.hpp`: the AI node's
+    wake/VAD turn controller, bounded PSRAM capture path, authenticated WSS
+    protocol client, and response playback; see the
+    [assistant WebSocket plan](ai-assistant-websocket-plan.md)
 - `include/AudioFft/`: FFT analysis, magnitude scaling, peak extraction,
     first-pass tempo tracking, wire payloads, and the media debug display; see
     [audio.md](audio.md)
@@ -152,13 +158,25 @@ lightweight public types that external code needs to name directly, and
 `include/StatusLed/` provides the global RGB status LED component exposed
 through `include/Services/StatusLed.hpp`. It is initialized from `CoreSetup`
 before the long node setup delay where a node has configured WS2812B hardware,
-shows cyan while booting, blue after core setup, and green after the node target
-setup completes. Consumers register named states through the tiny
-`StatusLed::Directory` handle and flip the returned `StateHandle`; active
-critical, error, warning, then informational states are selected in priority
-order and cycled every 500 ms. The current no-FastLED backend drives one
-WS2812B with ESP-IDF RMT and only writes the retained LED color when the
-selected RGB value changes.
+shows cyan while booting, and blue after core setup. Nodes may select the
+generic green target-ready state or replace blue with a node-local
+informational state; AI uses dim-white `Listening`, explicit black `Off`, and
+purple `Playback` instead of green. `Off` immediately clears the physical LED
+without changing warning/error/critical masks. Consumers register named states
+through the tiny `StatusLed::Directory` handle and flip the returned
+`StateHandle`. Activating
+an informational state replaces the prior informational state; active warning,
+error, and critical conditions retain their masks and cycle at the highest
+severity every 500 ms. The current no-FastLED backend drives one WS2812B with
+ESP-IDF RMT and only writes the retained LED color when the selected RGB value
+changes.
+
+Logging and status indication are intentionally separate. Error-level records
+remain available for failures that are subsequently handled, retried, or
+converted into normal behavior. `REPORT_IF_ERR` consumes a `ReturnCode` only at
+an ownership boundary where it can no longer be handled or propagated and
+latches the red `UnhandledError` state. The `ABORT_*` macros instead select the
+higher-priority critical state immediately before terminating the system.
 
 ### IO Lighting
 
@@ -311,8 +329,8 @@ on hardware, not as automatically safer.
 
 There is currently no unit-test or host-side simulation harness.
 
-`include/Setups/PubSubTest.hpp` provides an on-device PubSub integration harness that
-tracks expected recipients, message-pool release, and transport egress release
+`include/Setups/PubSubTest.hpp` provides an on-device PubSub integration harness
+that tracks expected recipients, message-pool release, and transport egress release
 for the active test topology. The harness waits for a configured warm-up window
 before publishing test traffic so subscription replay and simulated transport
 boot readiness do not pollute steady-state latency measurements.

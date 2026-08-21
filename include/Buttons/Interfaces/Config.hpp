@@ -24,6 +24,21 @@ struct PeripheralButtonConfig {
     }
 };
 
+struct RotaryEncoderConfig {
+    Pin pinA;
+    Pin pinB;
+    GpioPull pullA = GpioPull::None;
+    GpioPull pullB = GpioPull::None;
+
+    bool activeLow = true;
+    bool notifyClockwise = true;
+    bool notifyCounterClockwise = true;
+
+    [[nodiscard]] constexpr bool validate() const {
+        return notifyClockwise || notifyCounterClockwise;
+    }
+};
+
 struct Config {
     Totem::TaskController::Config task{
         .name = "Buttons",

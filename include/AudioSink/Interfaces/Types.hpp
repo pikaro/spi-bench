@@ -14,7 +14,8 @@ using I2SHostClockRole = AudioSource::I2SHostClockRole;
 
 inline constexpr std::size_t webSocketDefaultPacketBytes = 1024;
 inline constexpr std::size_t webSocketMaxPacketBytes = 4096;
-inline constexpr std::size_t webSocketMaxBearerTokenBytes = 256;
+inline constexpr std::size_t webSocketMaxAuthorizationHeaderBytes = 256;
+inline constexpr std::size_t webSocketMaxAuthorizationSecretNameBytes = 15;
 
 struct I2SOutputPins {
     Pin bitClock;

@@ -22,26 +22,27 @@ inline ReturnCode publishButtonEvent(ButtonEvent event) {
                      "Failed to store button event in PubSub pool");
     }
 
-    auto envelopeResult =
-        PubSubBackend::Envelope::make<ButtonEvent>({
-            .owner = static_cast<void *>(&pool),
-            .topic = NodeData::PubSub::Topic::Button,
-            .messageId = *stored,
-            .getPayloadPtr = PubSubBackend::Pool<ButtonEvent, 8>::getPtr,
-            .encodePayload =
-                PubSubBackend::Pool<ButtonEvent, 8>::encodePayload,
-            .release = PubSubBackend::Pool<ButtonEvent, 8>::release,
-            .requireSyncedClock = false,
-        });
+    auto envelopeResult = PubSubBackend::Envelope::make<ButtonEvent>({
+        .owner = static_cast<void *>(&pool),
+        .topic = NodeData::PubSub::Topic::Button,
+        .messageId = *stored,
+        .getPayloadPtr = PubSubBackend::Pool<ButtonEvent, 8>::getPtr,
+        .encodePayload = PubSubBackend::Pool<ButtonEvent, 8>::encodePayload,
+        .release = PubSubBackend::Pool<ButtonEvent, 8>::release,
+        .requireSyncedClock = false,
+    });
     if (!envelopeResult) {
-        (void)pool.release({.header = {.messageId = *stored}});
+        REPORT_IF_ERR(
+            pool.release({.header = {.messageId = *stored}}),
+            "Failed to release button event after envelope creation failure");
         FAIL_ERR_FWD(envelopeResult.error(),
                      "Failed to create PubSub envelope for button event");
     }
 
     auto publishResult = PubSubService::get().publish(*envelopeResult);
     if (!publishResult.ok()) {
-        (void)pool.release(*envelopeResult);
+        REPORT_IF_ERR(pool.release(*envelopeResult),
+                      "Failed to release button event after publish failure");
         FAIL_ERR_FWD(publishResult,
                      "Failed to publish button event envelope to PubSub");
     }

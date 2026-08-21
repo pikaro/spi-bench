@@ -12,7 +12,8 @@ struct IService {
     virtual Totem::StatusLed::Directory directory() = 0;
     virtual ReturnCode setCoreReady() = 0;
     virtual ReturnCode setTargetsReady() = 0;
-    virtual ReturnCode recordLogError() = 0;
+    virtual ReturnCode setOff() = 0;
+    virtual ReturnCode recordUnhandledError() = 0;
     virtual ReturnCode recordCritical() = 0;
     virtual ReturnCode work(uint32_t nowMs) = 0;
 };
@@ -25,7 +26,8 @@ struct NullService : public IService {
     ReturnCode setTargetsReady() override {
         return ReturnCode::from(CoreError::Ok);
     }
-    ReturnCode recordLogError() override {
+    ReturnCode setOff() override { return ReturnCode::from(CoreError::Ok); }
+    ReturnCode recordUnhandledError() override {
         return ReturnCode::from(CoreError::Ok);
     }
     ReturnCode recordCritical() override {
@@ -54,7 +56,10 @@ class StatusLedService {
 
     static ReturnCode setCoreReady() { return get().setCoreReady(); }
     static ReturnCode setTargetsReady() { return get().setTargetsReady(); }
-    static ReturnCode recordLogError() { return get().recordLogError(); }
+    static ReturnCode setOff() { return get().setOff(); }
+    static ReturnCode recordUnhandledError() {
+        return get().recordUnhandledError();
+    }
     static ReturnCode recordCritical() { return get().recordCritical(); }
     static ReturnCode work(uint32_t nowMs) { return get().work(nowMs); }
 

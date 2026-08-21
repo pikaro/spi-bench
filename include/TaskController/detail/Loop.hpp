@@ -44,10 +44,10 @@ class Loop {
                 return Result{.reason = ExitReason::StopHookFailed,
                               .error = stopResult};
             }
-            _log_e("Runner %s: onStop hook failed with error " ERR_FMT
-                   " while already exiting with error " ERR_FMT,
-                   _config.name, ERR_ARG(stopResult),
-                   ERR_ARG(loopResult.error));
+            REPORT_IF_ERR(stopResult,
+                          "Runner %s: onStop hook failed while already exiting "
+                          "with error " ERR_FMT,
+                          _config.name, ERR_ARG(loopResult.error));
         }
 
         return loopResult;
@@ -72,7 +72,10 @@ class Loop {
 
         if (auto result = _hooks.onStart(); !result.ok()) {
             _log_e("Runner %s: onStart hook failed", _config.name);
-            (void)_shutdown();
+            REPORT_IF_ERR(
+                _shutdown(),
+                "Runner %s: onStop hook failed while handling onStart failure",
+                _config.name);
             return std::unexpected(
                 Result{.reason = ExitReason::StartHookFailed, .error = result});
         }

@@ -43,8 +43,8 @@ void app_main() {
     setup();
     for (;;) {
         const auto nowMs = ::platform::get_time();
-        (void)core.work(nowMs);
-        (void)clockSync.work(nowMs);
+        REPORT_IF_ERR(core.work(nowMs), "Core work failed");
+        REPORT_IF_ERR(clockSync.work(nowMs), "Clock sync work failed");
 
         ::platform::delay(::platform::ms_to_ticks(1));
     }

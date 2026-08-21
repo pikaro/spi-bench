@@ -58,6 +58,7 @@ class Config:
     max_lines: int | None
     log_file: Path | None
     command: str | None
+    timestamps: bool
 
     @property
     def single_env(self) -> bool:

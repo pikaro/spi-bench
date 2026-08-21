@@ -241,7 +241,10 @@ struct Console {
     static void dispatchEvent(UartEvent event) {
         for (auto &registration : callbacks) {
             if (registration.callback != nullptr) {
-                (void)registration.callback(registration.owner, event);
+                REPORT_IF_ERR(
+                    registration.callback(registration.owner, event),
+                    "USB console event callback failed for event type %u",
+                    static_cast<unsigned>(event.type));
             }
         }
     }

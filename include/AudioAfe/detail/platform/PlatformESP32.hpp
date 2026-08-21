@@ -10,6 +10,7 @@
 #include "esp_vadn_models.h"
 #include "esp_wn_models.h"
 #include "model_path.h"
+#include <array>
 #include <cstddef>
 #include <cstdint>
 
@@ -43,10 +44,21 @@ class PlatformESP32 {
                                  "Failed to allocate ESP-SR AFE config");
         }
 
-        _wakeModel = _resolveModel(config.wakeNet.modelName, ESP_WN_PREFIX);
-        if (_wakeModel == nullptr) {
+        _wakeModels[0] =
+            _resolveModel(config.wakeNet.primary.modelName, ESP_WN_PREFIX);
+        if (_wakeModels[0] == nullptr) {
             return _beginFailure(ERR(CoreError, NotFound),
-                                 "Configured WakeNet model is unavailable");
+                                 "Configured primary WakeNet model is unavailable");
+        }
+        if (config.wakeNet.secondary.has_value()) {
+            _wakeModels[1] = _resolveModel(
+                config.wakeNet.secondary->modelName, ESP_WN_PREFIX);
+        }
+        if (config.wakeNet.secondary.has_value() &&
+            _wakeModels[1] == nullptr) {
+            return _beginFailure(
+                ERR(CoreError, NotFound),
+                "Configured secondary WakeNet model is unavailable");
         }
 
         _vadModel = config.vad.implementation == VadImplementation::Neural
@@ -97,11 +109,23 @@ class PlatformESP32 {
                                  "Failed to create ESP-SR AFE");
         }
 
-        if (config.wakeNet.threshold != 0.0F &&
-            _iface->set_wakenet_threshold(_afe, config.wakeNet.modelIndex,
-                                          config.wakeNet.threshold) != 1) {
-            return _beginFailure(ERR(CoreError, OperationFailed),
-                                 "Failed to set WakeNet threshold");
+        const std::array<const WakeNetModelConfig *, 2> wakeModels{
+            &config.wakeNet.primary,
+            config.wakeNet.secondary.has_value()
+                ? &config.wakeNet.secondary.value()
+                : nullptr,
+        };
+        for (std::size_t index = 0; index < wakeModels.size(); ++index) {
+            const auto *model = wakeModels[index];
+            if (model == nullptr || model->threshold == 0.0F) {
+                continue;
+            }
+            if (_iface->set_wakenet_threshold(
+                    _afe, static_cast<int>(index + 1U), model->threshold) !=
+                1) {
+                return _beginFailure(ERR(CoreError, OperationFailed),
+                                     "Failed to set WakeNet threshold");
+            }
         }
 
         const auto feedChunk = _iface->get_feed_chunksize(_afe);
@@ -125,9 +149,10 @@ class PlatformESP32 {
                                  "ESP-SR frame exceeds configured capacity");
         }
 
-        _log_i("ESP-SR ready: models=%d wake=%s vad=%s ns=%s feed=%u "
-               "fetch=%u rate=%dHz",
-               _models->num, _wakeModel,
+        _log_i("ESP-SR ready: models=%d wake1=%s wake2=%s vad=%s ns=%s "
+               "feed=%u fetch=%u rate=%dHz",
+               _models->num, _wakeModels[0],
+               _wakeModels[1] == nullptr ? "none" : _wakeModels[1],
                _vadModel == nullptr ? "webrtc" : _vadModel,
                _nsModel == nullptr ? "webrtc" : _nsModel,
                static_cast<unsigned>(_feedSamples),
@@ -150,7 +175,7 @@ class PlatformESP32 {
             esp_srmodel_deinit(_models);
         }
         _models = nullptr;
-        _wakeModel = nullptr;
+        _wakeModels.fill(nullptr);
         _vadModel = nullptr;
         _nsModel = nullptr;
         _feedSamples = 0;
@@ -218,8 +243,8 @@ class PlatformESP32 {
         _config->vad_enable_channel_trigger = config.vad.enableChannelTrigger;
 
         _config->wakenet_init = config.wakeNet.enabled;
-        _config->wakenet_model_name = _wakeModel;
-        _config->wakenet_model_name_2 = nullptr;
+        _config->wakenet_model_name = _wakeModels[0];
+        _config->wakenet_model_name_2 = _wakeModels[1];
         _config->wakenet_mode = config.wakeNet.mode == WakeNetMode::Normal
                                     ? DET_MODE_90
                                     : DET_MODE_95;
@@ -251,7 +276,7 @@ class PlatformESP32 {
     afe_config_t *_config = nullptr;
     const esp_afe_sr_iface_t *_iface = nullptr;
     esp_afe_sr_data_t *_afe = nullptr;
-    char *_wakeModel = nullptr;
+    std::array<char *, 2> _wakeModels{};
     char *_vadModel = nullptr;
     char *_nsModel = nullptr;
     std::size_t _feedSamples = 0;

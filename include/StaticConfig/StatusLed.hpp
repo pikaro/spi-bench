@@ -9,6 +9,6 @@ struct StatusLedConfig {
 
     static_assert(maxStates > 0 && maxStates <= 32,
                   "StatusLed active masks support 1..32 states");
-    static_assert(maxStates >= 5,
-                  "StatusLed needs five slots for predefined states");
+    static_assert(maxStates >= 6,
+                  "StatusLed needs six slots for predefined states");
 };

@@ -15,6 +15,8 @@ elseif(environment_base STREQUAL "io")
     set(src_root "io")
 elseif(environment_base STREQUAL "ai")
     set(src_root "ai")
+elseif(environment_base STREQUAL "scratch")
+    set(src_root "scratch")
 else()
     message(FATAL_ERROR "Unknown build environment: '${BUILD_DIR}'")
 endif()
@@ -38,7 +40,15 @@ if(ENABLE_BTSTACK OR environment STREQUAL "media-btstack")
     list(APPEND app_requires btstack)
 endif()
 if(src_root STREQUAL "ai")
-    list(APPEND app_requires tcp_transport audio_afe_esp_sr)
+    list(APPEND app_requires
+        audio_afe_esp_sr
+        espressif__esp-dsp
+        esp_netif
+        esp_ringbuf
+        json
+        mbedtls
+        tcp_transport
+    )
 endif()
 
 idf_component_register(

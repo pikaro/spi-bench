@@ -5,6 +5,8 @@
 #include "TaskController/Interfaces/Config.hpp"
 #include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <string_view>
 
 namespace Totem::AudioAfe {
 
@@ -54,18 +56,34 @@ struct VadConfig {
     }
 };
 
-struct WakeNetConfig {
-    bool enabled = true;
+struct WakeNetModelConfig {
     const char *modelName = nullptr;
-    WakeNetMode mode = WakeNetMode::Normal;
     float threshold = 0.0F;
-    uint8_t modelIndex = 1;
 
     [[nodiscard]] bool validate() const {
         const bool thresholdValid =
             threshold == 0.0F || (threshold >= 0.4F && threshold < 1.0F);
-        return enabled && (modelName == nullptr || modelName[0] != '\0') &&
-               thresholdValid && modelIndex >= 1 && modelIndex <= 2;
+        return (modelName == nullptr || modelName[0] != '\0') &&
+               thresholdValid;
+    }
+};
+
+struct WakeNetConfig {
+    bool enabled = true;
+    WakeNetMode mode = WakeNetMode::Normal;
+    WakeNetModelConfig primary{};
+    std::optional<WakeNetModelConfig> secondary{};
+
+    [[nodiscard]] bool validate() const {
+        const bool distinctExplicitModels =
+            !secondary.has_value() ||
+            (primary.modelName != nullptr &&
+             secondary->modelName != nullptr &&
+             std::string_view{primary.modelName} !=
+                 std::string_view{secondary->modelName});
+        return enabled && primary.validate() &&
+               (!secondary.has_value() || secondary->validate()) &&
+               distinctExplicitModels;
     }
 };
 

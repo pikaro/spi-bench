@@ -40,6 +40,24 @@ class I2SSink : public HasLifecycle<I2SSink, I2SSinkConfig>,
 
     Platform::AudioStream &stream() override { return _output.stream(); }
 
+    ReturnCode setAudioInfo(AudioInfo info) {
+        FAIL_IF_INACTIVE_ERR("%s", name);
+        FAIL_IF(info.channels != _linkConfig.audio.channels ||
+                    info.bitsPerSample != _linkConfig.audio.bitsPerSample,
+                ERR(CoreError, InvalidArgument),
+                "I2S output only supports changing sample rate while active");
+        FAIL_IF_ERR_FWD(_output.setAudioInfo(info),
+                        "Failed to reconfigure I2S output");
+        _audioInfo = info;
+        _linkConfig.audio = info;
+        return OK();
+    }
+
+    ReturnCode setWriteTimeoutMs(uint32_t timeoutMs) {
+        FAIL_IF_INACTIVE_ERR("%s", name);
+        return _output.setWriteTimeoutMs(timeoutMs);
+    }
+
   private:
     ReturnCode _onBegin() {
         _linkConfig = this->config().resolvedLink();

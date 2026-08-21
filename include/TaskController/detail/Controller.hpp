@@ -302,9 +302,7 @@ class Controller : public HasLifecycle<Controller>,
         _log_i("Beginning shutdown of task controller for %s", _ownerName);
         auto retTerminate = terminate();
         if (!retTerminate) {
-            _log_e(
-                "Error while requesting termination during shutdown: " ERR_FMT,
-                ERR_ARG(retTerminate.error()));
+            return retTerminate.error();
         }
         if (retTerminate.value() == 0) {
             _log_i("Task controller for %s closed successfully", _ownerName);
@@ -362,9 +360,10 @@ class Controller : public HasLifecycle<Controller>,
                 auto restartResult =
                     _restartTaskInPlace(self, key, entry, hooks, config);
                 if (!restartResult.ok()) {
-                    _log_e(
-                        "Failed to auto-restart task runner %s->%s: " ERR_FMT,
-                        self._ownerName, config.name, ERR_ARG(restartResult));
+                    REPORT_IF_ERR(
+                        restartResult,
+                        "Failed to auto-restart task runner %s->%s",
+                        self._ownerName, config.name);
                 } else {
                     removeEntry = false;
                 }

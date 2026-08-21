@@ -192,10 +192,13 @@ void app_main() {
 
     for (;;) {
         const auto nowMs = ::platform::get_time();
-        (void)core.work(nowMs);
-        (void)MasterLedBringup::work(nowMs);
-        (void)MasterOrchestration::work(
-            nowMs, MasterLedBringup::normalOperationAllowed(nowMs));
+        REPORT_IF_ERR(core.work(nowMs), "Core work failed");
+        REPORT_IF_ERR(MasterLedBringup::work(nowMs),
+                      "Master LED bringup work failed");
+        REPORT_IF_ERR(
+            MasterOrchestration::work(
+                nowMs, MasterLedBringup::normalOperationAllowed(nowMs)),
+            "Master orchestration work failed");
 
         ::platform::delay(::platform::ms_to_ticks(1));
     }

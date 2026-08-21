@@ -122,6 +122,10 @@ class NimbleCentral {
     static void _hostTask(void * /*param*/) {
         _log_i("NimBLE host task started");
         nimble_port_run();
+        if (_active != nullptr && !_active->_stopping) {
+            REPORT_IF_ERR(ERR(CoreError, Unexpected),
+                          "NimBLE host task exited unexpectedly");
+        }
         nimble_port_freertos_deinit();
     }
 
@@ -141,7 +145,8 @@ class NimbleCentral {
         }
         const auto rc = ble_hs_util_ensure_addr(0);
         if (rc != 0) {
-            _log_e("Failed to ensure BLE address: rc=%d", rc);
+            REPORT_IF_ERR(ERR(CoreError, OperationFailed),
+                          "Failed to ensure BLE address: rc=%d", rc);
             metrics().addFail();
             return;
         }
@@ -745,7 +750,9 @@ class NimbleCentral {
         uint8_t ownAddrType{};
         const auto addrRet = ble_hs_id_infer_auto(0, &ownAddrType);
         if (addrRet != 0) {
-            _log_e("BLE own address infer failed before scan: rc=%d", addrRet);
+            REPORT_IF_ERR(ERR(CoreError, OperationFailed),
+                          "BLE own address infer failed before scan: rc=%d",
+                          addrRet);
             metrics().addFail();
             return;
         }
@@ -761,7 +768,8 @@ class NimbleCentral {
         const auto ret = ble_gap_disc(ownAddrType, _config.scanDurationMs,
                                       &params, _gapEvent, this);
         if (ret != 0) {
-            _log_e("BLE scan failed to start: rc=%d", ret);
+            REPORT_IF_ERR(ERR(CoreError, OperationFailed),
+                          "BLE scan failed to start: rc=%d", ret);
             metrics().addFail();
             return;
         }

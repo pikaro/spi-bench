@@ -92,6 +92,19 @@ class PlatformESP32 {
         return mapError(nvs_commit(_handle));
     }
 
+    ReturnCode erase(std::string_view key) {
+        auto nvsKey = makeKey(key);
+        if (!nvsKey) {
+            return nvsKey.error();
+        }
+
+        const auto err = nvs_erase_key(_handle, nvsKey->data());
+        if (err != ESP_OK) {
+            return mapError(err);
+        }
+        return mapError(nvs_commit(_handle));
+    }
+
     template <typename Visitor> ReturnCode list(Visitor &&visitor) const {
         nvs_iterator_t iterator = nullptr;
         auto err = nvs_entry_find_in_handle(_handle, NVS_TYPE_BLOB, &iterator);

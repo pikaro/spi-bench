@@ -167,11 +167,10 @@ struct Platform {
                                "Failed to find or allocate LEDC timer");
         auto channelResult = ChannelProvider::allocateChannel();
         if (!channelResult) {
-            if (!TimerProvider::freeTimer(timer).ok()) {
-                _log_e("Failed to free LEDC timer %d after channel allocation "
-                       "failure",
-                       timer);
-            }
+            REPORT_IF_ERR(
+                TimerProvider::freeTimer(timer),
+                "Failed to free LEDC timer %d after channel allocation failure",
+                timer);
             FAIL(channelResult.error(), "Failed to allocate LEDC channel");
         }
         auto channel = *channelResult;
@@ -188,16 +187,14 @@ struct Platform {
         auto err = ledc_channel_config(&channelConfig);
         if (err != ESP_OK) {
             // Roll back channel allocation.
-            if (!ChannelProvider::freeChannel(channel).ok()) {
-                _log_e("Failed to free LEDC channel %d after channel config "
-                       "failure",
-                       channel);
-            }
-            if (!TimerProvider::freeTimer(timer).ok()) {
-                _log_e("Failed to free LEDC timer %d after channel config "
-                       "failure",
-                       timer);
-            }
+            REPORT_IF_ERR(
+                ChannelProvider::freeChannel(channel),
+                "Failed to free LEDC channel %d after channel config failure",
+                channel);
+            REPORT_IF_ERR(
+                TimerProvider::freeTimer(timer),
+                "Failed to free LEDC timer %d after channel config failure",
+                timer);
             FAIL_IF_PLATFORM_FWD(err, "Failed to configure LEDC channel");
         }
 
@@ -206,11 +203,14 @@ struct Platform {
         _channel = channel;
         _active = true;
 
-        if (!ChannelProvider::setupChannel(channel,
-                                           static_cast<gpio_num_t>(pin),
-                                           channelConfig.timer_sel)) {
-            _log_e("Failed to setup LEDC channel %d in provider", channel);
-            return deinit();
+        auto setupRet = ChannelProvider::setupChannel(
+            channel, static_cast<gpio_num_t>(pin), channelConfig.timer_sel);
+        if (!setupRet.ok()) {
+            REPORT_IF_ERR(deinit(),
+                          "Failed to clean up LEDC channel %d after provider "
+                          "setup failure",
+                          channel);
+            return setupRet;
         }
 
         return OK();
@@ -220,21 +220,13 @@ struct Platform {
         FAIL_IF(!_active, ERR(LifecycleError, NotActive),
                 "LEDC channel not active");
 
-        auto err = ledc_stop(LEDC_LOW_SPEED_MODE, _channel, 0);
-        if (err != ESP_OK) {
-            _log_e("Failed to stop LEDC channel %d", _channel);
-        }
-
-        if (!ChannelProvider::freeChannel(_channel).ok()) {
-            _log_e("Failed to free LEDC channel %d", _channel);
-        }
-
-        if (!TimerProvider::freeTimer(_timer).ok()) {
-            _log_e("Failed to free LEDC timer %d", _timer);
-        }
+        auto ret = ::platform::map_platform_error(
+            ledc_stop(LEDC_LOW_SPEED_MODE, _channel, 0));
+        ret.combine(ChannelProvider::freeChannel(_channel));
+        ret.combine(TimerProvider::freeTimer(_timer));
 
         _active = false;
-        return OK();
+        return ret;
     }
 
     ReturnCode setDutyScaled(uint32_t duty) {

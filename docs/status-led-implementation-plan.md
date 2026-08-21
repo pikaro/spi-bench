@@ -12,10 +12,12 @@ the highest active severity wins:
 - `Warning`: cycle active warning states only
 - `Informational`: show the current informational state
 
-Active states should cycle at a 500 ms interval. Consumers register named states
-with a unique color and a severity kind, then hold a tiny handle that can set or
-reset the condition without queueing work. The LED should only be written when
-the displayed color changes because WS2812B LEDs retain their last color.
+Active warning, error, and critical states should cycle at a 500 ms interval.
+Consumers register named states with a unique color and a severity kind, then
+hold a tiny handle that can set or reset the condition without queueing work.
+Activating an informational state replaces the prior informational state. The
+LED should only be written when the displayed color changes because WS2812B
+LEDs retain their last color.
 
 ## Assumptions
 
@@ -162,7 +164,8 @@ Registration:
 
 Activation:
 
-1. Atomically set or clear the bit for the state id.
+1. For informational states, atomically replace the current informational bit;
+   for higher severities, atomically set or clear the state bit.
 2. Mark the service dirty.
 3. Return without queueing or scanning the directory.
 
@@ -191,10 +194,12 @@ The predefined informational states are:
 - `Booting`: cyan
 - `CoreReady`: blue
 - `TargetsReady`: green
+- `Off`: black; an explicit immediate clear used between AI recording and
+  response playback
 
-The predefined test states are:
+The predefined fault states are:
 
-- `LogError`: error, red
+- `UnhandledError`: error, red
 - `Abort`: critical, white or bright magenta
 
 Startup should be:
@@ -208,7 +213,10 @@ Startup should be:
 3. `beginStatusLedEarly()` initializes the output, registers global predefined
    states, binds the service, and shows `Booting` cyan.
 4. At the end of `CoreSetup::setup()`, set `CoreReady` blue.
-5. At the end of each node-specific `setup()`, set `TargetsReady` green.
+5. A node may set `TargetsReady` green at the end of its setup. It may instead
+   activate a registered node-local informational state, which replaces
+   `CoreReady`; AI uses dim-white `Listening`, black `Off`, and purple
+   `Playback` and therefore never selects `TargetsReady`.
 6. Normal operation uses the active-state selection rules above from
    `CoreSetup::work()`.
 
@@ -254,23 +262,23 @@ LEDC can be added as a separate single-color backend if a node intentionally
 wants a plain PWM status LED. It cannot represent the required unique RGB state
 colors on WS2812B hardware, so it is not the default backend for this feature.
 
-## Logging And Abort Integration
+## Error And Abort Integration
 
-Error test condition:
+Error logs describe failed operations, including failures that a caller later
+handles or converts into normal retry behavior. Logging therefore must not
+change global status. `REPORT_IF_ERR` is the explicit ownership-boundary
+operation: it logs a non-OK `ReturnCode` and records the latched red
+`UnhandledError` state without returning or terminating. Errors that can still
+be handled or propagated continue to use the existing `FAIL_*` macros.
 
-- Prefer recording this in `LoggingService::vlogfSite()` when
-  `level == LogLevel::Error` and formatting succeeds. That catches `_log_e`,
-  `LOG_LOC`, and runtime error logs once per actual record.
-- `Services/StatusLed.hpp` must be lightweight and not include the `StatusLed`
-  implementation, so `Services/Logging.hpp` can call it without an include
-  cycle.
+Managed task exits, standalone task entry points, platform callback dispatch,
+and node main loops are the primary ownership boundaries. Component-owned
+degraded conditions should use registered, clearable warning or error handles
+instead of `REPORT_IF_ERR`.
 
-Critical test condition:
-
-- Add `StatusLedService::recordCritical()` to `INTERNAL_ABORT_DELAYED` in
-  [include/Macros/internal/Fail.hpp](/Users/david.reis/src/dre/uc/spi/include/Macros/internal/Fail.hpp)
-  before the existing 100 ms delay and `abort()`.
-- This is temporary test behavior, not the final critical-state model.
+Terminal failures remain separate. `INTERNAL_ABORT_DELAYED` calls
+`StatusLedService::recordCritical()` before its delay and `abort()`, selecting
+the higher-priority critical state immediately.
 
 ## Candidate Warning Conditions
 
@@ -310,8 +318,12 @@ compile-time plus careful code review. Hardware validation should confirm:
 
 - booting cyan appears before long setup work
 - core-ready blue appears after `CoreSetup::setup()`
-- target-ready green appears after node-specific setup
-- one `_log_e` changes to the error color
+- target-ready green appears on nodes that select it; AI enters dim-white
+  `Listening` instead
+- `setOff()` clears the LED immediately while leaving active severity masks
+  intact
+- one `_log_e` leaves the current status unchanged
+- one failing `REPORT_IF_ERR` changes to the error color
 - an abort path changes to critical before abort
 - multiple active warnings/errors cycle at 500 ms
 - duplicate color registration fails
@@ -322,9 +334,13 @@ compile-time plus careful code review. Hardware validation should confirm:
   backend.
 - Done: tiny directory handles and active-mask state engine.
 - Done: direct ESP-IDF RMT WS2812B output backend.
-- Done: `CoreSetup` binding, early node startup calls, core-ready and
-  target-ready boot transitions.
-- Done: temporary logging-error and abort-critical hooks.
+- Done: `CoreSetup` binding, early node startup calls, core-ready transition,
+  optional target-ready transition, and exclusive node-local informational
+  states.
+- Done: explicit unhandled-error boundary reporting and abort-critical hook;
+  ordinary error logs do not change status.
+- Done: built-in `Off`, facade/null-service `setOff()`, black-state validation,
+  and the sixth reserved predefined-state slot.
 - Done: documentation update in `docs/overview.md`.
 - Deferred: optional FastLED backend. The RMT backend is sufficient for the
   configured one-pixel status LEDs and keeps dependencies isolated.

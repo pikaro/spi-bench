@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 import sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from .state import BufferedLine, Monitor, Runtime, SummaryEntry, plain_label_for
 
@@ -11,7 +13,7 @@ ESP_LOG_TIME_RE = re.compile(r'\b((?:[A-Z]{3}|[A-Z]) )\(\d+\)(?: \(\d+\))?')
 def strip_ansi(text: str) -> str:
     from .state import ANSI_RE
 
-    return ANSI_RE.sub("", text)
+    return ANSI_RE.sub('', text)
 
 
 def format_line(line: str, runtime: Runtime) -> str:
@@ -20,29 +22,28 @@ def format_line(line: str, runtime: Runtime) -> str:
     return line
 
 
-def prefixed_line(label: str, line: str) -> str:
-    return f"{label} | {line}"
+def prefix_line(runtime: Runtime, label: str, line: str) -> str:
+    if runtime.config.prefix_output:
+        line = f'{label} | {line}'
+    if runtime.config.timestamps:
+        now = datetime.now(ZoneInfo('Europe/Berlin'))
+        line = f'[{now.strftime("%H:%M:%S.%f")[:-3]}] {line}'
+    return line
 
 
 def display_line(monitor: Monitor, line: str, runtime: Runtime) -> str:
     line = format_line(line, runtime)
-    if runtime.config.prefix_output:
-        return prefixed_line(monitor.label, line)
-    return line
+    return prefix_line(runtime, monitor.label, line)
 
 
 def plain_display_line(monitor: Monitor, line: str, runtime: Runtime) -> str:
     line = format_line(line, runtime)
-    if runtime.config.prefix_output:
-        return prefixed_line(monitor.plain_label, line)
-    return line
+    return prefix_line(runtime, monitor.plain_label, line)
 
 
 def filter_text(monitor: Monitor, line: str, runtime: Runtime) -> str:
     text = strip_ansi(line)
-    if runtime.config.prefix_output:
-        return prefixed_line(monitor.plain_label, text)
-    return text
+    return prefix_line(runtime, monitor.plain_label, text)
 
 
 def is_excluded(monitor: Monitor, line: str, runtime: Runtime) -> bool:
@@ -62,7 +63,7 @@ def matches_filters(monitor: Monitor, line: str, runtime: Runtime) -> bool:
 
 def summary_key(monitor: Monitor, line: str) -> tuple[str, str]:
     text = strip_ansi(line)
-    text = re.sub(r"\b\d+(?:\.\d+)?\b", "n", text)
+    text = re.sub(r'\b\d+(?:\.\d+)?\b', 'n', text)
     return (monitor.env, text)
 
 
@@ -77,11 +78,8 @@ def print_output_line(monitor: Monitor, line: str, runtime: Runtime) -> None:
     runtime.last_printed_repeat_key = repeat_key(monitor, line, runtime)
     runtime.printed_lines += 1
 
-    if (
-        runtime.config.max_lines is not None
-        and runtime.printed_lines >= runtime.config.max_lines
-    ):
-        runtime.stop_reason = "max line limit reached"
+    if runtime.config.max_lines is not None and runtime.printed_lines >= runtime.config.max_lines:
+        runtime.stop_reason = 'max line limit reached'
 
 
 def write_log(monitor: Monitor, line: str, runtime: Runtime) -> None:
@@ -200,8 +198,8 @@ def emit_buffered_lines(
     runtime: Runtime,
     final: bool = False,
 ) -> None:
-    while "\n" in monitor.buffer:
-        line, monitor.buffer = monitor.buffer.split("\n", 1)
+    while '\n' in monitor.buffer:
+        line, monitor.buffer = monitor.buffer.split('\n', 1)
         if line:
             emit_line(monitor, line, runtime)
             if runtime.stop_reason:
@@ -210,7 +208,7 @@ def emit_buffered_lines(
 
     if final and monitor.buffer:
         emit_line(monitor, monitor.buffer, runtime)
-        monitor.buffer = ""
+        monitor.buffer = ''
 
     sys.stdout.flush()
 
@@ -219,19 +217,17 @@ def print_summary(runtime: Runtime) -> None:
     if not runtime.config.summary:
         return
 
-    repeated = [
-        (env, entry) for (env, _), entry in runtime.summary.items() if entry.count > 1
-    ]
+    repeated = [(env, entry) for (env, _), entry in runtime.summary.items() if entry.count > 1]
     if not repeated:
         return
 
     width = max(len(env) for env in runtime.config.envs)
-    print("monitor-multi summary:", file=sys.stderr)
+    print('monitor-multi summary:', file=sys.stderr)
     for env, entry in repeated:
         label = plain_label_for(env, width)
-        lines = [f"repeated {entry.count}x", f"first: {entry.first}"]
+        lines = [f'repeated {entry.count}x', f'first: {entry.first}']
         if entry.last != entry.first:
-            lines.append(f"last:  {entry.last}")
+            lines.append(f'last:  {entry.last}')
 
         for line in lines:
             if runtime.config.prefix_output:

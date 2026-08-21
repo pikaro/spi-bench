@@ -69,8 +69,9 @@ class HasLogLevel : public IHasLogLevel {
             return level >= _logLevel;
         }
         if (static_cast<uint8_t>(*component) >= _componentLogLevels.size()) {
-            _log_e("Invalid log component %u in %s",
-                   static_cast<uint8_t>(*component), _ownerName);
+            REPORT_IF_ERR(ERR(CoreError, InvalidArgument),
+                          "Invalid log component %u in %s",
+                          static_cast<uint8_t>(*component), _ownerName);
             return true;
         }
         auto levelNum = static_cast<uint8_t>(level);

@@ -41,13 +41,18 @@ inline ReturnCode publishCommandEvent(CommandEvent event) {
             .requireSyncedClock = false,
         });
     if (!envelopeResult) {
-        (void)pool.release({.header = {.messageId = messageId}});
+        REPORT_IF_ERR(
+            pool.release({.header = {.messageId = messageId}}),
+            "Failed to release LED PWM command after envelope creation "
+            "failure");
         return envelopeResult.error();
     }
 
     auto publishResult = pubSub.publish(*envelopeResult);
     if (!publishResult.ok()) {
-        (void)pool.release(*envelopeResult);
+        REPORT_IF_ERR(
+            pool.release(*envelopeResult),
+            "Failed to release LED PWM command after publish failure");
         return publishResult;
     }
 

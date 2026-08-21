@@ -205,13 +205,13 @@ class BtstackA2DPSource
         return OK();
     }
 
-    void _run() {
+    ReturnCode _run() {
         _taskRunning.store(true, std::memory_order_release);
         const auto initStatus = btstack_init();
         if (initStatus != ERROR_CODE_SUCCESS) {
             _log_e("BTstack init failed: status=0x%02x", initStatus);
             _taskRunning.store(false, std::memory_order_release);
-            return;
+            return ERR(CoreError, OperationFailed);
         }
 
         auto setupRet = _setupBtstack();
@@ -219,7 +219,7 @@ class BtstackA2DPSource
             _log_e("BTstack A2DP setup failed: " ERR_FMT,
                    ERR_ARG(setupRet));
             _taskRunning.store(false, std::memory_order_release);
-            return;
+            return setupRet;
         }
 
         _log_i("BTstack A2DP source started: name=%s, localSeid=%u",
@@ -231,6 +231,7 @@ class BtstackA2DPSource
         _connected.store(false, std::memory_order_release);
         _streaming.store(false, std::memory_order_release);
         _taskRunning.store(false, std::memory_order_release);
+        return OK();
     }
 
     void _configureDecoder() {
@@ -408,8 +409,11 @@ class BtstackA2DPSource
 
     static void _taskEntry(void *arg) {
         auto *self = static_cast<BtstackA2DPSource *>(arg);
-        if (self != nullptr) {
-            self->_run();
+        if (self == nullptr) {
+            REPORT_IF_ERR(ERR(CoreError, InvalidArgument),
+                          "BTstack A2DP task owner is null");
+        } else {
+            REPORT_IF_ERR(self->_run(), "BTstack A2DP task failed");
         }
         vTaskDelete(nullptr);
     }

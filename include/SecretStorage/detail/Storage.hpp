@@ -23,6 +23,7 @@ class Storage : public IStorage,
                 public HasLifecycle<Storage, Config>,
                 public HasCommands<Storage, Commands<Storage>> {
     friend class HasLifecycle<Storage, Config>;
+    friend struct Commands<Storage>;
     friend struct LifecycleContract<Storage, Config>;
 
   public:
@@ -80,6 +81,11 @@ class Storage : public IStorage,
         return set(key, std::as_bytes(std::span{&value, std::size_t{1}}));
     }
 
+    ReturnCode erase(std::string_view key) {
+        FAIL_IF_INACTIVE_ERR("Cannot delete a secret before begin");
+        return _platform.erase(key);
+    }
+
     template <typename Visitor> ReturnCode list(Visitor &&visitor) const {
         FAIL_IF_INACTIVE_ERR("Cannot list secrets before begin");
         return _platform.list(std::forward<Visitor>(visitor));
@@ -87,6 +93,7 @@ class Storage : public IStorage,
 
   private:
     ReturnCode _onBegin() {
+        _commandsSealed = false;
         FAIL_IF_ERR_FWD(_platform.begin(config()),
                         "Failed to open secret NVS partition %s",
                         config().partitionName);
@@ -106,6 +113,8 @@ class Storage : public IStorage,
     }
 
     Platform _platform{};
+    // Runtime command gate only; storage APIs intentionally ignore this state.
+    bool _commandsSealed = false;
 };
 
 inline constexpr CommandsContract<Storage, Commands<Storage>> commandsContract;

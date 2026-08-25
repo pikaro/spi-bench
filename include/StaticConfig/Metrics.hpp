@@ -29,7 +29,7 @@ struct MetricCollection {
 #endif
     static constexpr std::optional<MetricLevel> i2c = MetricLevel::Diagnostic;
     static constexpr std::optional<MetricLevel> ledPwm = std::nullopt;
-    static constexpr std::optional<MetricLevel> buttons = std::nullopt;
+    static constexpr std::optional<MetricLevel> input = std::nullopt;
     static constexpr std::optional<MetricLevel> bluetooth = std::nullopt;
     static constexpr std::optional<MetricLevel> wheel = std::nullopt;
     static constexpr std::optional<MetricLevel> ledDisplay = std::nullopt;

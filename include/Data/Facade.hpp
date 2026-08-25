@@ -2,6 +2,7 @@
 
 // IWYU pragma: begin_exports
 
+#include "Data/ButtonEvent.hpp"
 #include "Data/Nodes.hpp"
 #include "Data/Peripherals.hpp"
 #include "Data/PubSub.hpp"

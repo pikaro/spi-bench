@@ -1,341 +1,460 @@
 #!/usr/bin/env python3
+# ruff: noqa: CPY001, PLR0913, PLR0917
 
-from skidl import (
-    ERC,
-    POWER,
-    Circuit,
-    Net,
-    Part,
-    generate_dot,
-    generate_schematic,
-    lib_search_paths,
-    set_default_tool,
+"""Generate the perfboard-v2 logic-board reference schematic and netlists.
+
+The KiCad schematic is split into small functional sheets so it remains useful
+as a wiring reference. Two netlists are emitted from the same SKiDL circuit:
+
+* ``perfboard-v2.net`` is the standard KiCad netlist.
+* ``perfboard-v2.config-netlist.json`` maps logical signals to named module
+  pins and is intended for deriving node firmware configuration.
+
+The code below is intentionally limited to the electrical description. Library
+setup, output normalization, and the pin-for-pin regression contract live in
+``schematic/lib``.
+"""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+from lib.kicad_output import generate_outputs
+from lib.skidl_helpers import (
+    SignalCatalog,
+    configure_skidl,
+    custom_part,
+    make_net,
+    mark_no_connect,
+    resistor,
 )
-from skidl.skidl import KICAD10
+from skidl import POWER, Circuit, Net, Part, subcircuit
 
-set_default_tool(KICAD10)
-lib_search_paths[KICAD10] = [
-    '.',
-    '/Applications/KiCad/KiCad.app/Contents/SharedSupport/symbols',
-    '/Users/david.reis/src/dre/kicad/symbols',
-]
+OUTPUT_BASENAME = 'perfboard-v2'
+DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / 'build'
 
-# pyright: reportOperatorIssue=false, reportUnusedExpression=false
 
-with Circuit() as circuit:
-    NC = circuit.NC
-    Vin = Net('Vin')
-    Vcc = Net('Vcc')
-    Vusb = Net('Vusb')
-    GND = Net('GND')
+@subcircuit
+def master_controller(vcc: Net, gnd: Net, master_3v3: Net) -> Part:
+    """Master ESP32-S3 module and its local power domain."""
 
-    Vin.drive = POWER
-    Vcc.drive = POWER
-    Vusb.drive = POWER
-    GND.drive = POWER
+    master = custom_part('Module_ESP32S3_Zero', 'U1')
+    master.configuration_node = 'master'
+    vcc.connect(master['5V'])
+    gnd.connect(master['GND'])
+    master_3v3.connect(master['3V3'])
+    mark_no_connect(
+        master,
+        'GPIO17',
+        'GPIO18',
+        'GPIO38',
+        'GPIO39',
+        'GPIO40',
+        'GPIO41',
+        'GPIO42',
+        'GPIO45',
+    )
+    return master
 
-    master = Part(
-        'Custom.kicad_sym',
-        'Module_ESP32S3_Zero',
-        ref='U1',
+
+@subcircuit
+def media_controller(vcc: Net, gnd: Net, media_3v3: Net) -> Part:
+    """Media ESP32-S3 module and its local power domain."""
+
+    media = custom_part('Module_ESP32S3_Zero', 'U2')
+    media.configuration_node = 'media'
+    vcc.connect(media['5V'])
+    gnd.connect(media['GND'])
+    media_3v3.connect(media['3V3'])
+    mark_no_connect(
+        media,
+        'TX',
+        'GPIO2',
+        'GPIO3',
+        'GPIO4',
+        'GPIO14',
+        'GPIO15',
+        'GPIO16',
+        'GPIO17',
+        'GPIO18',
+        'GPIO38',
+        'GPIO39',
+        'GPIO40',
+        'GPIO41',
+        'GPIO42',
+        'GPIO45',
+    )
+    return media
+
+
+@subcircuit
+def gpu_controllers(
+    vcc: Net,
+    gnd: Net,
+    gpu1_3v3: Net,
+) -> tuple[Part, Part]:
+    """The two ESP32-S3 LED-rendering modules."""
+
+    gpu0 = custom_part('Module_ESP32S3_Zero', 'U3')
+    gpu0.configuration_node = 'gpu0'
+    vcc.connect(gpu0['5V'])
+    gnd.connect(gpu0['GND'])
+    mark_no_connect(
+        gpu0,
+        '3V3',
+        'GPIO3',
+        'GPIO4',
+        'GPIO5',
+        'GPIO6',
+        'GPIO9',
+        'RX',
+        'TX',
+        'GPIO14',
+        'GPIO15',
+        'GPIO16',
+        'GPIO17',
+        'GPIO18',
+        'GPIO38',
+        'GPIO39',
+        'GPIO40',
+        'GPIO41',
+        'GPIO42',
+        'GPIO45',
     )
 
-    media = Part(
-        'Custom.kicad_sym',
-        'Module_ESP32S3_Zero',
-        ref='U2',
+    gpu1 = custom_part('Module_ESP32S3_Zero', 'U4')
+    gpu1.configuration_node = 'gpu1'
+    vcc.connect(gpu1['5V'])
+    gnd.connect(gpu1['GND'])
+    gpu1_3v3.connect(gpu1['3V3'])
+    mark_no_connect(
+        gpu1,
+        'GPIO7',
+        'GPIO8',
+        'GPIO11',
+        'GPIO12',
+        'RX',
+        'TX',
+        'GPIO14',
+        'GPIO15',
+        'GPIO16',
+        'GPIO17',
+        'GPIO18',
+        'GPIO38',
+        'GPIO39',
+        'GPIO40',
+        'GPIO41',
+        'GPIO42',
+        'GPIO45',
+    )
+    return gpu0, gpu1
+
+
+@subcircuit
+def power_controller(vcc: Net, gnd: Net, power_3v3: Net) -> Part:
+    """ESP32-C3 power-monitoring module."""
+
+    power = custom_part('Module_ESP32C3_Supermini', 'U5')
+    power.configuration_node = 'power'
+    vcc.connect(power['5V'])
+    gnd.connect(power['GND'])
+    power_3v3.connect(power['3V3'])
+    mark_no_connect(power, 'GPIO2', 'GPIO5', 'GPIO6', 'GPIO9', 'RX', 'TX')
+    return power
+
+
+@subcircuit
+def low_speed_spi(
+    catalog: SignalCatalog,
+    master: Part,
+    media: Part,
+    power: Part,
+) -> None:
+    """Low-speed SPI bus from master to the media and power nodes."""
+
+    catalog.series('SPI0_MISO', 'R1', '33', master['GPIO1'], media['GPIO11'], power['GPIO4'])
+    catalog.series('SPI0_CLK', 'R2', '33', master['GPIO2'], media['GPIO10'], power['GPIO3'])
+    catalog.series('SPI0_MOSI', 'R3', '33', master['GPIO3'], media['GPIO9'], power['GPIO1'])
+    catalog.series('SPI0_CS_MEDIA', 'R4', '33', master['GPIO4'], media['GPIO8'])
+    catalog.series('SPI0_ATTN_MEDIA', 'R5', '1k', master['GPIO5'], media['GPIO7'])
+    catalog.series('SPI0_CS_POWER', 'R6', '33', master['GPIO6'], power['GPIO0'])
+    catalog.series('SPI0_ATTN_POWER', 'R7', '1k', master['GPIO9'], power['GPIO10'])
+
+
+@subcircuit
+def high_speed_spi(
+    catalog: SignalCatalog,
+    master: Part,
+    gpu0: Part,
+    gpu1: Part,
+) -> None:
+    """High-speed SPI bus and frame-present strobe for the GPU nodes."""
+
+    catalog.series('SPI1_ATTN_GPU0', 'R8', '1k', master['GPIO7'], gpu0['GPIO2'])
+    catalog.series('SPI1_CS_GPU0', 'R9', '33', master['GPIO8'], gpu0['GPIO1'])
+    catalog.series('STROBE', 'R10', '1k', master['GPIO10'], gpu0['GPIO10'], gpu1['GPIO4'])
+    catalog.series('SPI1_MOSI', 'R11', '33', master['GPIO11'], gpu0['GPIO11'], gpu1['GPIO3'])
+    catalog.series('SPI1_CLK', 'R12', '33', master['GPIO12'], gpu0['GPIO12'], gpu1['GPIO2'])
+    catalog.series('SPI1_MISO', 'R13', '33', master['GPIO13'], gpu0['GPIO13'], gpu1['GPIO1'])
+    catalog.series('SPI1_CS_GPU1', 'R14', '33', master['RX'], gpu1['GPIO5'])
+    catalog.series('SPI1_ATTN_GPU1', 'R15', '1k', master['TX'], gpu1['GPIO6'])
+
+
+@subcircuit
+def power_distribution(
+    catalog: SignalCatalog,
+    power: Part,
+    vin: Net,
+    vcc: Net,
+    vusb: Net,
+    gnd: Net,
+    master_3v3: Net,
+    power_3v3: Net,
+) -> None:
+    """24 V input, 5 V conversion/selection, and rail monitoring."""
+
+    buck = custom_part('Module_Buck_LM2596', 'U7')
+    sense_24v = custom_part('Module_INA226', 'U8')
+    sense_5v = custom_part('Module_INA226', 'U9')
+    conn_power_in = Part('Connector', 'Conn_01x03_Socket', ref='J5', tag='J5')
+    conn_power_out = Part('Connector', 'Conn_01x03_Socket', ref='J6', tag='J6')
+    conn_usb = Part('Connector', 'Conn_01x04_Pin', ref='J8', tag='J8')
+    switch_power = Part('Switch', 'SW_SPDT', ref='SW1', tag='SW1')
+    vin_power_flag = Part('power', 'PWR_FLAG', ref='#FLG01', tag='VIN_24V source')
+    vcc_power_flag = Part('power', 'PWR_FLAG', ref='#FLG02', tag='VCC_5V source')
+
+    vin.connect(conn_power_in[1], sense_24v['IN+'], sense_24v['V+'], vin_power_flag[1])
+    make_net('VIN_24V_SENSED', sense_24v['IN-'], buck['IN+'], conn_power_out[1])
+    make_net('VCC_5V_RAW', buck['OUT+'], sense_5v['IN+'], sense_5v['V+'])
+    make_net('VCC_5V_SENSED', sense_5v['IN-'], switch_power[1])
+
+    gnd.connect(
+        conn_power_in[3],
+        conn_power_out[3],
+        conn_usb[1],
+        buck['IN-'],
+        buck['OUT-'],
+        sense_24v['V-'],
+        sense_24v['GND'],
+        sense_5v['V-'],
+        sense_5v['GND'],
+    )
+    master_3v3.connect(sense_24v['VCC'], sense_5v['VCC'])
+    vusb.connect(conn_usb[4], switch_power[3])
+    vcc.connect(switch_power[2], vcc_power_flag[1])
+
+    i2c_sda = catalog.direct('I2C_POWER_SDA', power['GPIO7'], sense_24v['SDA'], sense_5v['SDA'])
+    i2c_scl = catalog.direct('I2C_POWER_SCL', power['GPIO8'], sense_24v['SCL'], sense_5v['SCL'])
+    pullup_sda = resistor('R20', '10k')
+    pullup_scl = resistor('R21', '10k')
+    i2c_sda.connect(pullup_sda[1])
+    i2c_scl.connect(pullup_scl[1])
+    power_3v3.connect(pullup_sda[2], pullup_scl[2])
+
+    power.circuit.NC.connect(
+        conn_power_in[2],
+        conn_power_out[2],
+        conn_usb[2],
+        conn_usb[3],
+        sense_24v['C-'],
+        sense_24v['C+'],
+        sense_5v['C-'],
+        sense_5v['C+'],
     )
 
-    gpu0 = Part(
-        'Custom.kicad_sym',
-        'Module_ESP32S3_Zero',
-        ref='U3',
+
+@subcircuit
+def rs485_interface(
+    catalog: SignalCatalog,
+    master: Part,
+    master_3v3: Net,
+    gnd: Net,
+) -> None:
+    """Master-side RS485 HAT and the off-board connector."""
+
+    hat_rs485 = custom_part('Module_Hat_RS485', 'U10')
+    conn_rs485 = Part('Connector', 'Conn_01x05_Socket', ref='J2', tag='J2')
+
+    catalog.direct('RS485_RX', master['GPIO14'], hat_rs485['RX'])
+    catalog.direct('RS485_TX', master['GPIO15'], hat_rs485['TX'])
+    catalog.series('RS485_ATTN', 'R16', '1k', master['GPIO16'], conn_rs485[2])
+    catalog.direct('RS485_A', hat_rs485['A+'], conn_rs485[3], stub=False)
+    catalog.direct('RS485_B', hat_rs485['B-'], conn_rs485[4], stub=False)
+    master_3v3.connect(hat_rs485['VCC'])
+    gnd.connect(hat_rs485['GND'], conn_rs485[1])
+    master.circuit.NC.connect(hat_rs485['S'], conn_rs485[5])
+
+
+@subcircuit
+def media_io(
+    catalog: SignalCatalog,
+    media: Part,
+    media_3v3: Net,
+    master_3v3: Net,
+    gnd: Net,
+) -> None:
+    """Media-node display, I2S microphone, and beat indicator."""
+
+    conn_i2s = Part('Connector', 'Conn_01x05_Socket', ref='J1', tag='J1')
+    conn_display = Part('Connector', 'Conn_01x04_Pin', ref='J7', tag='J7')
+    beat_led = Part('Device', 'LED', ref='LED1', tag='LED1', value='Blue')
+
+    display_scl = catalog.direct('I2C_DISP_SCL', media['GPIO5'], conn_display[3])
+    display_sda = catalog.direct('I2C_DISP_SDA', media['GPIO6'], conn_display[4])
+    pullup_scl = resistor('R17', '10k')
+    pullup_sda = resistor('R18', '10k')
+    display_scl.connect(pullup_scl[1])
+    display_sda.connect(pullup_sda[1])
+    media_3v3.connect(pullup_scl[2], pullup_sda[2], conn_display[2], conn_i2s[1])
+    gnd.connect(conn_display[1], conn_i2s[2])
+
+    catalog.series(
+        'LED_BEAT',
+        'R19',
+        '1k',
+        media['RX'],
+        beat_led[1],
+        side_a_name='LED_BEAT_MCU',
+        side_b_name='LED_BEAT_LED_K',
     )
+    master_3v3.connect(beat_led[2])
 
-    gpu1 = Part(
-        'Custom.kicad_sym',
-        'Module_ESP32S3_Zero',
-        ref='U4',
+    catalog.direct('I2S_LRCK', media['GPIO1'], conn_i2s[5])
+    catalog.direct('I2S_DAT', media['GPIO12'], conn_i2s[4])
+    catalog.direct('I2S_BCLK', media['GPIO13'], conn_i2s[3])
+
+
+@subcircuit
+def led_outputs(
+    catalog: SignalCatalog,
+    gpu0: Part,
+    gpu1: Part,
+    gpu1_3v3: Net,
+    vcc: Net,
+    gnd: Net,
+) -> None:
+    """3.3 V to 5 V LED clock/data level shifting and connectors."""
+
+    shifter = Part('74xx', '74AHCT125', ref='U6', tag='U6')
+    conn_led0 = Part('Connector', 'Conn_01x03_Pin', ref='J3', tag='J3')
+    conn_led1 = Part('Connector', 'Conn_01x03_Socket', ref='J4', tag='J4')
+
+    vcc.connect(shifter['VCC'])
+    gnd.connect(shifter['GND'], conn_led0[2], conn_led1[2])
+
+    catalog.direct('LED0_3V3_CLK', gpu0['GPIO7'], shifter[2])
+    catalog.direct('LED0_3V3_DAT', gpu0['GPIO8'], shifter[5])
+    catalog.direct('LED1_3V3_CLK', gpu1['GPIO13'], shifter[9])
+    catalog.direct('LED1_3V3_DAT', gpu1['GPIO10'], shifter[12])
+
+    led_enable = catalog.direct(
+        'LED_EN',
+        gpu1['GPIO9'],
+        shifter[1],
+        shifter[4],
+        shifter[10],
+        shifter[13],
     )
+    enable_pullup = resistor('R22', '10k')
+    led_enable.connect(enable_pullup[1])
+    gpu1_3v3.connect(enable_pullup[2])
 
-    power = Part(
-        'Custom.kicad_sym',
-        'Module_ESP32C3_Supermini',
-        ref='U5',
+    catalog.direct('LED0_5V_CLK', shifter[3], conn_led0[1], stub=False)
+    catalog.direct('LED0_5V_DAT', shifter[6], conn_led0[3], stub=False)
+    catalog.direct('LED1_5V_CLK', shifter[8], conn_led1[1], stub=False)
+    catalog.direct('LED1_5V_DAT', shifter[11], conn_led1[3], stub=False)
+
+
+def build_circuit() -> tuple[Circuit, SignalCatalog]:
+    """Build the complete circuit once for every generated artifact."""
+
+    circuit = Circuit(name=OUTPUT_BASENAME)
+    catalog = SignalCatalog()
+
+    with circuit:
+        vin = make_net('VIN_24V', drive=POWER)
+        vcc = make_net('VCC_5V', drive=POWER, stub=True)
+        vusb = make_net('VUSB_5V', drive=POWER)
+        gnd = make_net('GND', drive=POWER, stub=True)
+        master_3v3 = make_net('MASTER_3V3', stub=True)
+        media_3v3 = make_net('MEDIA_3V3', stub=True)
+        gpu1_3v3 = make_net('GPU1_3V3', stub=True)
+        power_3v3 = make_net('POWER_3V3', stub=True)
+
+        master = master_controller(vcc, gnd, master_3v3, tag='master_controller')
+        media = media_controller(vcc, gnd, media_3v3, tag='media_controller')
+        gpu0, gpu1 = gpu_controllers(vcc, gnd, gpu1_3v3, tag='gpu_controllers')
+        power = power_controller(vcc, gnd, power_3v3, tag='power_controller')
+
+        low_speed_spi(catalog, master, media, power, tag='low_speed_spi')
+        high_speed_spi(catalog, master, gpu0, gpu1, tag='high_speed_spi')
+        power_distribution(
+            catalog,
+            power,
+            vin,
+            vcc,
+            vusb,
+            gnd,
+            master_3v3,
+            power_3v3,
+            tag='power_distribution',
+        )
+        rs485_interface(catalog, master, master_3v3, gnd, tag='rs485_interface')
+        media_io(
+            catalog,
+            media,
+            media_3v3,
+            master_3v3,
+            gnd,
+            tag='media_io',
+        )
+        led_outputs(
+            catalog,
+            gpu0,
+            gpu1,
+            gpu1_3v3,
+            vcc,
+            gnd,
+            tag='led_outputs',
+        )
+
+        circuit.NC.stub = True
+
+    for part in circuit.parts:
+        if not part.footprint:
+            part.footprint = ':'
+
+    return circuit, catalog
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        '-o',
+        '--output-dir',
+        type=Path,
+        default=DEFAULT_OUTPUT_DIR,
+        help='directory for generated artifacts (default: schematic/build)',
     )
+    parser.add_argument('--no-pdf', action='store_true', help='skip the optional PDF export')
+    return parser.parse_args()
 
-    buck = Part(
-        'Custom.kicad_sym',
-        'Module_Buck_LM2596',
-        ref='U7',
+
+def main() -> None:
+    configure_skidl()
+    args = parse_args()
+    circuit, catalog = build_circuit()
+    outputs = generate_outputs(
+        circuit,
+        catalog,
+        args.output_dir.resolve(),
+        source_name=Path(__file__).name,
+        generate_pdf=not args.no_pdf,
     )
+    for output in outputs:
+        print(output)
 
-    sense_24v = Part(
-        'Custom.kicad_sym',
-        'Module_INA226',
-        ref='U8',
-    )
 
-    sense_5v = Part(
-        'Custom.kicad_sym',
-        'Module_INA226',
-        ref='U9',
-    )
-
-    hat_rs485 = Part(
-        'Custom.kicad_sym',
-        'Module_Hat_RS485',
-        ref='U10',
-    )
-
-    shifter = Part(
-        '74xx',
-        '74AHCT125',
-        ref='U6',
-    )
-
-    conn_i2s = Part(
-        'Connector',
-        'Conn_01x05_Socket',
-        ref='J1',
-    )
-
-    conn_rs485 = Part(
-        'Connector',
-        'Conn_01x05_Socket',
-        ref='J2',
-    )
-
-    conn_led0 = Part(
-        'Connector',
-        'Conn_01x03_Pin',
-        ref='J3',
-    )
-
-    conn_led1 = Part(
-        'Connector',
-        'Conn_01x03_Socket',
-        ref='J4',
-    )
-
-    conn_power_in = Part(
-        'Connector',
-        'Conn_01x03_Socket',
-        ref='J5',
-    )
-
-    conn_power_out = Part(
-        'Connector',
-        'Conn_01x03_Socket',
-        ref='J6',
-    )
-
-    conn_display = Part(
-        'Connector',
-        'Conn_01x04_Pin',
-        ref='J7',
-    )
-
-    conn_usb = Part(
-        'Connector',
-        'Conn_01x04_Pin',
-        ref='J8',
-    )
-
-    switch_power = Part(
-        'Switch',
-        'SW_SPDT',
-        ref='SW1',
-    )
-
-    class SimpleComponents:
-        r_counter: int
-        led_counter: int
-        nets: dict[str, Net]
-
-        def __init__(self) -> None:
-            self.r_counter = 0
-            self.led_counter = 0
-            self.nets = {}
-
-        def r(self, value: str) -> Part:
-            self.r_counter += 1
-            return Part('Device', 'R', value=value, ref=f'R{self.r_counter}')
-
-        def net(self, name: str) -> Net:
-            if name not in self.nets:
-                self.nets[name] = Net(name)
-            return self.nets[name]
-
-        def led(self, color: str) -> Part:
-            self.led_counter += 1
-            return Part('Device', 'LED', color=color, ref=f'LED{self.led_counter}')
-
-    components = SimpleComponents()
-    R = components.r
-    N = components.net
-    LED = components.led
-
-    conn_power_in[1] & Vin & sense_24v['IN+']
-    conn_power_in[3] & GND
-
-    sense_24v['IN+'] & sense_24v['V+']
-    sense_24v['V-'] & sense_24v['GND']
-    sense_24v['GND'] & GND
-    sense_24v['IN-'] & buck['IN+']
-    master['3V3'] & sense_24v['VCC']
-
-    sense_24v['IN-'] & conn_power_out[1]
-    GND & conn_power_out[3]
-
-    buck['IN-'] & GND
-    buck['OUT+'] & sense_5v['IN+']
-    buck['OUT-'] & GND
-
-    sense_5v['IN+'] & sense_5v['V+']
-    sense_5v['V-'] & sense_5v['GND']
-    sense_5v['GND'] & GND
-    sense_5v['IN-'] & switch_power['1']
-    master['3V3'] & sense_5v['VCC']
-
-    conn_usb[4] & switch_power['3'] & Vusb
-    conn_usb[1] & GND
-    switch_power['2'] & Vcc
-
-    Vcc & master['5V']
-    Vcc & media['5V']
-    Vcc & gpu0['5V']
-    Vcc & gpu1['5V']
-    Vcc & power['5V']
-    Vcc & shifter['VCC']
-
-    GND & master['GND']
-    GND & media['GND']
-    GND & gpu0['GND']
-    GND & gpu1['GND']
-    GND & power['GND']
-    GND & shifter['GND']
-    GND & hat_rs485['GND']
-
-    master['GPIO1'] & N('SPI0_MISO') & R('33') & media['GPIO11'] & power['GPIO4']
-    master['GPIO2'] & N('SPI0_CLK') & R('33') & media['GPIO10'] & power['GPIO3']
-    master['GPIO3'] & N('SPI0_MOSI') & R('33') & media['GPIO9'] & power['GPIO1']
-    master['GPIO4'] & N('SPI0_CS_MEDIA') & R('33') & media['GPIO8']
-    master['GPIO5'] & N('SPI0_ATTN_MEDIA') & R('1k') & media['GPIO7']
-    master['GPIO6'] & N('SPI0_CS_POWER') & R('33') & power['GPIO0']
-    master['GPIO9'] & N('SPI0_ATTN_POWER') & R('1k') & power['GPIO10']
-
-    master['GPIO7'] & N('SPI1_ATTN_GPU0') & R('1k') & gpu0['GPIO2']
-    master['GPIO8'] & N('SPI1_CS_GPU0') & R('33') & gpu0['GPIO1']
-    master['GPIO10'] & N('STROBE') & R('1k') & gpu0['GPIO10'] & gpu1['GPIO4']
-    master['GPIO11'] & N('SPI1_MOSI') & R('33') & gpu0['GPIO11'] & gpu1['GPIO3']
-    master['GPIO12'] & N('SPI1_CLK') & R('33') & gpu0['GPIO12'] & gpu1['GPIO2']
-    master['GPIO13'] & N('SPI1_MISO') & R('33') & gpu0['GPIO13'] & gpu1['GPIO1']
-    master['RX'] & N('SPI1_CS_GPU1') & R('33') & gpu1['GPIO5']
-    master['TX'] & N('SPI1_ATTN_GPU1') & R('1k') & gpu1['GPIO6']
-
-    master['GPIO14'] & N('RS485_RX') & hat_rs485['RX']
-    master['GPIO15'] & N('RS485_TX') & hat_rs485['TX']
-
-    master['GPIO16'] & N('RS485_ATTN') & R('1k') & conn_rs485[2]
-    hat_rs485['A+'] & conn_rs485[3]
-    hat_rs485['B-'] & conn_rs485[4]
-    GND & conn_rs485[1]
-    master['3V3'] & hat_rs485['VCC']
-
-    media['GPIO5'] & N('I2C_DISP_SCL') & conn_display[3]
-    media['GPIO6'] & N('I2C_DISP_SDA') & conn_display[4]
-    conn_display[3] & R('10k') & media['3V3']
-    conn_display[4] & R('10k') & media['3V3']
-    GND & conn_display[1]
-    media['3V3'] & conn_display[2]
-
-    media['RX'] & N('LED_BEAT') & R('1k') & LED('blue') & master['3V3']
-
-    media['GPIO1'] & N('I2S_LRCK') & conn_i2s[5]
-    media['GPIO12'] & N('I2S_DAT') & conn_i2s[4]
-    media['GPIO13'] & N('I2S_BCLK') & conn_i2s[3]
-    GND & conn_i2s[2]
-    media['3V3'] & conn_i2s[1]
-
-    power['GPIO7'] & N('I2C_POWER_SDA') & sense_24v['SDA'] & sense_5v['SDA']
-    power['GPIO8'] & N('I2C_POWER_SCL') & sense_24v['SCL'] & sense_5v['SCL']
-    power['GPIO7'] & R('10k') & power['3V3']
-    power['GPIO8'] & R('10k') & power['3V3']
-
-    gpu0['GPIO7'] & N('LED0_3V3_CLK') & shifter[2]
-    gpu0['GPIO8'] & N('LED0_3V3_DAT') & shifter[5]
-
-    gpu1['GPIO13'] & N('LED1_3V3_CLK') & shifter[9]
-    gpu1['GPIO10'] & N('LED1_3V3_DAT') & shifter[12]
-    gpu1['GPIO9'] & N('LED_EN') & shifter[1] & shifter[4] & shifter[10] & shifter[13]
-    gpu1['GPIO9'] & R('10k') & gpu1['3V3']
-
-    shifter[3] & conn_led0[1]
-    shifter[6] & conn_led0[3]
-    GND & conn_led0[2]
-
-    shifter[8] & conn_led1[1]
-    shifter[11] & conn_led1[3]
-    GND & conn_led1[2]
-
-    master['GPIO17'] & NC
-    master['GPIO18'] & NC
-    master['GPIO38'] & NC
-    master['GPIO39'] & NC
-    master['GPIO40'] & NC
-    master['GPIO41'] & NC
-    master['GPIO42'] & NC
-    master['GPIO45'] & NC
-
-    media['TX'] & NC
-    media['GPIO14'] & NC
-    media['GPIO15'] & NC
-    media['GPIO16'] & NC
-    media['GPIO17'] & NC
-    media['GPIO18'] & NC
-    media['GPIO38'] & NC
-    media['GPIO39'] & NC
-    media['GPIO40'] & NC
-    media['GPIO41'] & NC
-    media['GPIO42'] & NC
-    media['GPIO45'] & NC
-
-    gpu0['GPIO3'] & NC
-    gpu0['GPIO4'] & NC
-    gpu0['GPIO5'] & NC
-    gpu0['GPIO6'] & NC
-    gpu0['RX'] & NC
-    gpu0['TX'] & NC
-    gpu0['GPIO14'] & NC
-    gpu0['GPIO15'] & NC
-    gpu0['GPIO16'] & NC
-    gpu0['GPIO17'] & NC
-    gpu0['GPIO18'] & NC
-    gpu0['GPIO38'] & NC
-    gpu0['GPIO39'] & NC
-    gpu0['GPIO40'] & NC
-    gpu0['GPIO41'] & NC
-    gpu0['GPIO42'] & NC
-    gpu0['GPIO45'] & NC
-
-    gpu1['GPIO7'] & NC
-    gpu1['GPIO8'] & NC
-    gpu1['GPIO11'] & NC
-    gpu1['GPIO12'] & NC
-    gpu1['RX'] & NC
-    gpu1['TX'] & NC
-    gpu1['GPIO14'] & NC
-    gpu1['GPIO15'] & NC
-    gpu1['GPIO16'] & NC
-    gpu1['GPIO17'] & NC
-    gpu1['GPIO18'] & NC
-    gpu1['GPIO38'] & NC
-    gpu1['GPIO39'] & NC
-    gpu1['GPIO40'] & NC
-    gpu1['GPIO41'] & NC
-    gpu1['GPIO42'] & NC
-    gpu1['GPIO45'] & NC
-
-    circuit.ERC()
-    circuit.generate_schematic()
+if __name__ == '__main__':
+    main()

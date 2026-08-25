@@ -11,9 +11,9 @@ namespace Totem::AudioAfe::detail {
 class AfeProcessor;
 } // namespace Totem::AudioAfe::detail
 
-namespace Totem::Buttons::detail {
-class Buttons;
-} // namespace Totem::Buttons::detail
+namespace Totem::PubSubEventProducer::detail {
+class Producer;
+} // namespace Totem::PubSubEventProducer::detail
 
 namespace Totem::Bluetooth::detail {
 class Central;
@@ -65,7 +65,7 @@ inline constexpr uint32_t loggingErrorJournal = 4096;
 inline constexpr uint32_t command = 10240;
 inline constexpr uint32_t ledPwm = 4096;
 inline constexpr uint32_t ledDisplay = 8192;
-inline constexpr uint32_t buttons = 4096;
+inline constexpr uint32_t pubSubEventProducer = 4096;
 inline constexpr uint32_t bluetooth = 4096;
 inline constexpr uint32_t pubSubNode = 8192;
 inline constexpr uint32_t spiMaster = 8192;
@@ -101,8 +101,10 @@ template <> struct StaticStackSize<Totem::AudioAfe::detail::AfeProcessor> {
     static constexpr uint32_t value = Totem::StaticConfig::TaskStacks::audioAfe;
 };
 
-template <> struct StaticStackSize<Totem::Buttons::detail::Buttons> {
-    static constexpr uint32_t value = Totem::StaticConfig::TaskStacks::buttons;
+template <>
+struct StaticStackSize<Totem::PubSubEventProducer::detail::Producer> {
+    static constexpr uint32_t value =
+        Totem::StaticConfig::TaskStacks::pubSubEventProducer;
 };
 
 template <> struct StaticStackSize<Totem::Bluetooth::detail::Central> {

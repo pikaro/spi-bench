@@ -16,6 +16,7 @@ struct Metrics {
     using GroupHandle = MetricsBackend::GroupHandle;
     using CounterHandle = MetricsBackend::CounterHandle;
     using GaugeHandle = MetricsBackend::GaugeHandle;
+    using SignedGaugeHandle = MetricsBackend::SignedGaugeHandle;
     using MetricGroupDesc = MetricsBackend::MetricGroupDesc;
     using MetricDesc = MetricsBackend::MetricDesc;
     using MetricType = MetricsBackend::MetricType;
@@ -48,10 +49,11 @@ struct Metrics {
     static constexpr MetricDesc ringFreeDef{.name = "ringPct",
                                             .type = MetricType::Gauge,
                                             .unit = MetricUnit::Percent};
-    static constexpr MetricDesc inputAttenuationDef{.name = "inAtten",
-                                                    .type = MetricType::Gauge,
-                                                    .unit =
-                                                        MetricUnit::Decibels};
+    static constexpr MetricDesc inputVolumeDbDef{
+        .name = "inVolDb",
+        .type = MetricType::SignedGauge,
+        .unit = MetricUnit::Decibels,
+    };
     static constexpr MetricDesc peakDef{.name = "peak",
                                         .type = MetricType::Gauge};
     static constexpr MetricDesc rmsDef{.name = "rms",
@@ -72,7 +74,7 @@ struct Metrics {
         REGISTER_METRIC("AudioAfe", vadSpeech, Counter, group);
         REGISTER_METRIC("AudioAfe", vadSilence, Counter, group);
         REGISTER_METRIC("AudioAfe", ringFree, Gauge, group);
-        REGISTER_METRIC("AudioAfe", inputAttenuation, Gauge, group);
+        REGISTER_METRIC("AudioAfe", inputVolumeDb, SignedGauge, group);
         REGISTER_METRIC("AudioAfe", peak, Gauge, group);
         REGISTER_METRIC("AudioAfe", rms, Gauge, group);
         REGISTER_METRIC("AudioAfe", clipped, Counter, group);
@@ -88,7 +90,7 @@ struct Metrics {
                        .vadSpeech = vadSpeech,
                        .vadSilence = vadSilence,
                        .ringFree = ringFree,
-                       .inputAttenuation = inputAttenuation,
+                       .inputVolumeDb = inputVolumeDb,
                        .peak = peak,
                        .rms = rms,
                        .clipped = clipped};
@@ -117,14 +119,14 @@ struct Metrics {
         }
     }
     void recordAfe(float volumeDb, float ringFreeFraction) const {
-        const auto attenuation = static_cast<uint32_t>(
-            std::lround(std::abs(static_cast<double>(volumeDb))));
+        const auto roundedVolumeDb =
+            static_cast<int32_t>(std::lround(static_cast<double>(volumeDb)));
         const auto normalized = ringFreeFraction <= 1.0F
                                     ? ringFreeFraction * 100.0F
                                     : ringFreeFraction;
         const auto percent = static_cast<uint32_t>(
             std::lround(std::clamp(normalized, 0.0F, 100.0F)));
-        METRIC_SET(group, inputAttenuation, attenuation);
+        METRIC_SET(group, inputVolumeDb, roundedVolumeDb);
         METRIC_SET(group, ringFree, percent);
     }
     void recordSignal(std::span<const int16_t> samples) const {
@@ -166,7 +168,7 @@ struct Metrics {
     CounterHandle vadSpeech;
     CounterHandle vadSilence;
     GaugeHandle ringFree;
-    GaugeHandle inputAttenuation;
+    SignedGaugeHandle inputVolumeDb;
     GaugeHandle peak;
     GaugeHandle rms;
     CounterHandle clipped;

@@ -3,6 +3,7 @@
 #include "Macros/Facade.hpp"
 #include "Types/Collection.hpp"
 #include "Types/Error.hpp"
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
@@ -26,7 +27,7 @@ enum class MetricComponent : uint8_t {
     Audio,
     I2C,
     LedPwm,
-    Buttons,
+    Input,
     Bluetooth,
     Wheel,
     LedDisplay,
@@ -39,11 +40,12 @@ enum class MetricLevel : uint8_t {
     Diagnostic,
     // Cheap steady-state health metrics suitable for normal runs.
     Baseline,
-    // Rare loss, recovery, and failure counters worth keeping even in lean runs.
+    // Rare loss, recovery, and failure counters worth keeping even in lean
+    // runs.
     Core,
 };
 
-enum class MetricType : uint8_t { Counter, Gauge };
+enum class MetricType : uint8_t { Counter, Gauge, SignedGauge };
 
 enum class MetricUnit : uint8_t {
     None = 0,
@@ -110,6 +112,14 @@ struct MetricDesc {
     bool gaugeIsMin = false;
     bool gaugeIsMax = false;
 
+    [[nodiscard]] constexpr bool isGauge() const {
+        return type == MetricType::Gauge || type == MetricType::SignedGauge;
+    }
+
+    [[nodiscard]] constexpr bool isSigned() const {
+        return type == MetricType::SignedGauge;
+    }
+
     [[nodiscard]] std::string_view unitString() const {
         return metric_unit_to_string(unit);
     }
@@ -118,7 +128,7 @@ struct MetricDesc {
         if (name == nullptr || name[0] == '\0') {
             return ERR(InvalidArgument);
         }
-        if (type == MetricType::Gauge) {
+        if (isGauge()) {
             if (gaugeDiscardIfUnder >= gaugeDiscardIfOver) {
                 return ERR(InvalidArgument);
             }
@@ -136,20 +146,28 @@ struct MetricGroup {
 
 struct Metric {
     const MetricDesc *desc{};
+    // Signed gauges retain their int32_t bit pattern in the shared uint32_t
+    // storage. Consult desc->isSigned() before interpreting this raw value.
     uint32_t value = 0;
 
     [[nodiscard]] std::string_view displayName() const { return desc->name; }
     [[nodiscard]] std::string_view unit() const { return desc->unitString(); }
+    [[nodiscard]] int32_t signedValue() const {
+        return std::bit_cast<int32_t>(value);
+    }
 };
 
 struct GroupTag {};
 struct CounterTag {};
 struct GaugeTag {};
+struct SignedGaugeTag {};
 
 using MetricGroupKey = uintptr_t;
 using MetricKey = uintptr_t;
 using GroupHandle = StrongHandle<GroupTag, uintptr_t, detail::Registrar>;
 using CounterHandle = StrongHandle<CounterTag, uintptr_t, detail::Registrar>;
 using GaugeHandle = StrongHandle<GaugeTag, uintptr_t, detail::Registrar>;
+using SignedGaugeHandle =
+    StrongHandle<SignedGaugeTag, uintptr_t, detail::Registrar>;
 
 } // namespace Totem::MetricsBackend

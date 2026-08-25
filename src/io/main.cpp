@@ -1,6 +1,7 @@
-#include "Buttons/Facade.hpp"
 #include "Bluetooth/Facade.hpp"
+#include "Button/Facade.hpp"
 #include "Clock/Facade.hpp"
+#include "Data/ButtonEvent.hpp"
 #include "Data/Peripherals.hpp"
 #include "LedPwm/Facade.hpp"
 #include "LedPwm/Interfaces/CommandEvent.hpp"
@@ -8,6 +9,7 @@
 #include "Macros/Facade.hpp"
 #include "Platform/PlatformSelect.hpp"
 #include "PubSubBackend/Interfaces/Envelope.hpp"
+#include "PubSubEventProducer/Facade.hpp"
 #include "Services/PubSub.hpp"
 #include "Setups/ClockSync.hpp"
 #include "Setups/Core.hpp"
@@ -26,7 +28,22 @@ ClockSyncSetup<Totem::Wire::Rs485::Slave> clockSync{clockSlave, rs485Slave};
 PubSubNetworkRs485EdgeSetup<Totem::Wire::Rs485::Slave> pubSubNetwork{
     core.taskRegistry, rs485Slave};
 
-Totem::Buttons::Buttons buttons{core.taskRegistry};
+Totem::PubSubEventProducer::Producer eventProducer{core.taskRegistry};
+
+static auto makeButtonEventCallback(PeripheralButton button) {
+    return eventProducer.makeCallback<Totem::Button::Event>(
+        PubSubService::Topic::Button, [button](Totem::Button::Event event) {
+            return Totem::Data::ButtonEvent{
+                .event = event,
+                .button = button,
+            };
+        });
+}
+
+Totem::Button::Button bellButton{
+    makeButtonEventCallback(PeripheralButton::Bell)};
+Totem::Button::Button calibrationButton{
+    makeButtonEventCallback(PeripheralButton::Calibration)};
 Totem::LedPwm::LedPwm ledPwm{core.taskRegistry};
 Totem::Wheel::BleWheel wheel{};
 Totem::Bluetooth::Central bluetooth{core.taskRegistry};
@@ -58,7 +75,9 @@ void setup() {
         "Failed to subscribe to LED PWM command events");
     ABORT_IF_ERR_BEGIN(wheel.begin(wheelConfig));
     ABORT_IF_ERR_BEGIN(bluetooth.begin(makeBluetoothConfig(wheel)));
-    ABORT_IF_ERR_BEGIN(buttons.begin(buttonsConfig));
+    ABORT_IF_ERR_BEGIN(eventProducer.begin());
+    ABORT_IF_ERR_BEGIN(bellButton.begin(bellButtonConfig));
+    ABORT_IF_ERR_BEGIN(calibrationButton.begin(calibrationButtonConfig));
 
     _log_i("Setup complete");
     ABORT_IF_ERR(StatusLedService::setTargetsReady(),
@@ -111,6 +130,9 @@ void app_main() {
         const auto nowMs = ::platform::get_time();
         REPORT_IF_ERR(core.work(nowMs), "Core work failed");
         REPORT_IF_ERR(clockSync.work(nowMs), "Clock sync work failed");
+        REPORT_IF_ERR(bellButton.work(nowMs), "Bell button work failed");
+        REPORT_IF_ERR(calibrationButton.work(nowMs),
+                      "Calibration button work failed");
 
         ::platform::delay(::platform::ms_to_ticks(1));
     }

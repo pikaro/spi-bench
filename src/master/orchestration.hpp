@@ -2,9 +2,9 @@
 
 #include "AudioFft/Interfaces/Types.hpp"
 #include "AudioFft/Interfaces/Wire.hpp"
-#include "Buttons/Interfaces/EventFactory.hpp"
-#include "Buttons/Interfaces/Wire.hpp"
+#include "Button/Interfaces/Types.hpp"
 #include "CommandBackend/Interfaces/CommandDesc.hpp"
+#include "Data/ButtonEvent.hpp"
 #include "Data/Peripherals.hpp"
 #include "LedDisplay/Animations/Bolt/Command.hpp"
 #include "LedDisplay/Animations/Bolt/Config.hpp"
@@ -335,7 +335,7 @@ inline Totem::Queue::Platform::Storage<Totem::AudioFft::FftFrame,
 inline Totem::Queue::Platform::Storage<Totem::AudioFft::PeakEvent,
                                        peakEventQueueSize>
     peakEventQueueStorage{};
-inline Totem::Queue::Platform::Storage<Totem::Buttons::ButtonEvent,
+inline Totem::Queue::Platform::Storage<Totem::Data::ButtonEvent,
                                        buttonEventQueueSize>
     buttonEventQueueStorage{};
 inline Totem::Queue::Handle wheelEventQueue = nullptr;
@@ -940,7 +940,7 @@ inline ReturnCode
 onButtonEnvelope(void * /*unused*/,
                  const Totem::PubSubBackend::Envelope &envelope) {
     FAIL_IF_UNEXPECTED_FWD(event,
-                           envelope.getPayloadAs<Totem::Buttons::ButtonEvent>(),
+                           envelope.getPayloadAs<Totem::Data::ButtonEvent>(),
                            "Failed to decode orchestrated button event");
 
     if (buttonEventQueue == nullptr) {
@@ -983,7 +983,11 @@ onAnimationStopEnvelope(void * /*unused*/,
 inline ReturnCode handleCalibrateAudioCommand(CommandDesc::ParsedArgs /*args*/,
                                               void * /*ctx*/) {
     _log_i("Publishing calibration button press from console command");
-    return Totem::Buttons::publishPressed(PeripheralButton::Calibration);
+    return PubSubService::publish(PubSubService::Topic::Button,
+                                  Totem::Data::ButtonEvent{
+                                      .event = Totem::Button::Event::Pressed,
+                                      .button = PeripheralButton::Calibration,
+                                  });
 }
 
 inline CommandDesc calibrateAudioCmd = {
@@ -1326,9 +1330,9 @@ inline ReturnCode handlePeak(const Totem::AudioFft::PeakEvent &event,
     return ret;
 }
 
-inline ReturnCode handleButton(const Totem::Buttons::ButtonEvent &event,
+inline ReturnCode handleButton(const Totem::Data::ButtonEvent &event,
                                uint32_t nowMs) {
-    if (event.type != Totem::Buttons::ButtonEventType::Pressed) {
+    if (event.event != Totem::Button::Event::Pressed) {
         return OK();
     }
 
@@ -1390,7 +1394,7 @@ inline ReturnCode work(uint32_t nowMs, bool allowNormalOperation = true) {
     }
 
     if (detail::buttonEventQueue != nullptr) {
-        Totem::Buttons::ButtonEvent button{};
+        Totem::Data::ButtonEvent button{};
         while (Totem::Queue::Platform::receive(detail::buttonEventQueue,
                                                &button, 0)
                    .ok()) {

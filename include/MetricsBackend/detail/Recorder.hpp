@@ -7,6 +7,7 @@
 #include "Services/Metrics.hpp"
 #include "Store.hpp"
 #include "Types/Error.hpp"
+#include <bit>
 #include <cstdint>
 
 namespace Totem::MetricsBackend::detail {
@@ -31,6 +32,12 @@ class Recorder : public IRecorder {
         FAIL_IF(handle == GaugeHandle::null(), ERR(InvalidArgument),
                 "Cannot set null gauge handle");
         return _store.setMetric(handle.key(), value);
+    }
+
+    ReturnCode set(SignedGaugeHandle handle, int32_t value) override {
+        FAIL_IF(handle == SignedGaugeHandle::null(), ERR(InvalidArgument),
+                "Cannot set null signed gauge handle");
+        return _store.setMetric(handle.key(), std::bit_cast<uint32_t>(value));
     }
 
   private:

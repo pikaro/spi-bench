@@ -176,10 +176,10 @@ def _animation_control_events() -> list[EventDefinition]:
 
 
 DIRECT_MODEL_TOPICS = {
-    '::Totem::Audio::BeatEvent': 'Beat',
-    '::Totem::Audio::FftFrame': 'FftFrame',
-    '::Totem::Audio::PeakEvent': 'Peak',
-    '::Totem::Buttons::ButtonEvent': 'Button',
+    '::Totem::AudioFft::BeatEvent': 'Beat',
+    '::Totem::AudioFft::FftFrame': 'FftFrame',
+    '::Totem::AudioFft::PeakEvent': 'Peak',
+    '::Totem::Data::ButtonEvent': 'Button',
     '::Totem::LedPwm::CommandEvent': 'LedPwm',
     '::Totem::PubSubBackend::detail::PubSubEvent': 'PubSub',
     '::Totem::Wheel::WheelState': 'Wheel',

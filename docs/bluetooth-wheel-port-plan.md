@@ -150,8 +150,8 @@ The `io` setup order should become:
 5. `pubSubNetwork.setup()`
 6. local PubSub subscribers
 7. wheel publisher and Bluetooth central
-8. local PubSub subscribers
-9. `buttons.begin()`
+8. shared PubSub event producer
+9. independent button instances
 
 The wheel publisher can create envelopes with `requireSyncedClock = false`,
 matching buttons. This keeps early wheel events from being dropped before clock
@@ -320,7 +320,8 @@ domain should convert values greater than or equal to 180 degrees by subtracting
 Publish `WheelState` on `NodeData::PubSub::Topic::Wheel`. The topic already
 exists in `include/Data/PubSub.hpp`.
 
-Publishing should follow the `Buttons` pattern:
+The wheel publishes directly from Bluetooth task context and should retain the
+fixed-pool pattern:
 
 - store the event in a fixed `PubSubBackend::Pool`
 - create `Envelope::make<WheelState>()`

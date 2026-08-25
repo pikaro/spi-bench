@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Bluetooth/Interfaces/Config.hpp"
-#include "Buttons/Interfaces/Config.hpp"
+#include "Button/Interfaces/Config.hpp"
 #include "Data/Facade.hpp"
 #include "LedPwm/Interfaces/Config.hpp"
 #include "Platform/Hardware.hpp"
@@ -47,31 +47,35 @@ constexpr Totem::LedPwm::Config ledPwmConfig{
     }},
 };
 
-constexpr Totem::Buttons::Config buttonsConfig{
-    .buttons = {{
+constexpr Totem::Button::Config bellButtonConfig{
+    .input =
         {
+            .name = "Bell",
             .pin = Pin::GPIO4,
-            .button = PeripheralButton::Bell,
             .pull = GpioPull::None,
-            .activeLow = false,
         },
-        {
-            .pin = Pin::StrappingGPIO9,
-            .button = PeripheralButton::Calibration,
-            .pull = GpioPull::Down,
-            .activeLow = false,
-            .notifyReleased = false,
-        },
-    }},
+    .activeLow = false,
 };
 
-static_assert(buttonsConfig.buttons[1].pin !=
+constexpr Totem::Button::Config calibrationButtonConfig{
+    .input =
+        {
+            .name = "Calibration",
+            .pin = Pin::StrappingGPIO9,
+            .pull = GpioPull::Down,
+        },
+    .activeLow = false,
+    .notifyReleased = false,
+};
+
+static_assert(calibrationButtonConfig.input.pin !=
                   rs485SlaveConfig.uartConfig.pins.rxPin,
               "Calibration button must not share the IO RS485 RX pin");
-static_assert(buttonsConfig.buttons[1].pin !=
+static_assert(calibrationButtonConfig.input.pin !=
                   rs485SlaveConfig.uartConfig.pins.txPin,
               "Calibration button must not share the IO RS485 TX pin");
-static_assert(buttonsConfig.buttons[1].pin != rs485SlaveConfig.attentionPin,
+static_assert(calibrationButtonConfig.input.pin !=
+                  rs485SlaveConfig.attentionPin,
               "Calibration button must not share the IO RS485 attention pin");
 
 inline constexpr Totem::StatusLed::Config statusLedConfig{

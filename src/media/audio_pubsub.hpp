@@ -2,7 +2,8 @@
 
 #include "AudioFft/Interfaces/Types.hpp"
 #include "AudioFft/Interfaces/Wire.hpp"
-#include "Buttons/Interfaces/Wire.hpp"
+#include "Button/Interfaces/Types.hpp"
+#include "Data/ButtonEvent.hpp"
 #include "Macros/Facade.hpp"
 #include "PubSubBackend/Interfaces/Envelope.hpp"
 #include "Queue/Facade.hpp"
@@ -193,16 +194,16 @@ inline ReturnCode onBeat(void * /*unused*/,
 }
 
 template <typename Analyzer>
-inline ReturnCode onButtonEnvelope(void *owner,
-                                   const Totem::PubSubBackend::Envelope &envelope) {
+inline ReturnCode
+onButtonEnvelope(void *owner, const Totem::PubSubBackend::Envelope &envelope) {
     auto *analyzer = static_cast<Analyzer *>(owner);
     FAIL_IF_NULL(analyzer, ERR(CoreError, InvalidArgument),
                  "Media audio button subscriber has no analyzer owner");
     FAIL_IF_UNEXPECTED_FWD(event,
-                           envelope.getPayloadAs<Totem::Buttons::ButtonEvent>(),
+                           envelope.getPayloadAs<Totem::Data::ButtonEvent>(),
                            "Failed to decode media audio button event");
 
-    if (event.type != Totem::Buttons::ButtonEventType::Pressed ||
+    if (event.event != Totem::Button::Event::Pressed ||
         event.button != PeripheralButton::Calibration) {
         return OK();
     }

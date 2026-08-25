@@ -10,6 +10,7 @@ These are the primary project commands currently used in practice.
 - Build the active GPU1 SPI target: `bin/build -e gpu1`
 - Build the active IO RS485 target: `bin/build -e io`
 - Build the standalone AI assistant target: `bin/build -e ai`
+- Build the ESP32-C3 input test board: `bin/build -e scratch`
 - Build, pack the selected ESP-SR models, and upload the complete AI image:
     `bin/build -e ai -t upload`
 - Build and emit a compilation database: `pio run -e master -t compiledb`

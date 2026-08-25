@@ -73,6 +73,27 @@ class Registrar : public IRegistrar {
         return GaugeHandle::make(metricKey);
     }
 
+    std::expected<SignedGaugeHandle, ReturnCode>
+    addSignedGauge(MetricGroupKey groupKey,
+                   std::reference_wrapper<const MetricDesc> desc,
+                   bool enabled) override {
+        if (!enabled) {
+            return SignedGaugeHandle::null();
+        }
+        const auto &descRef = desc.get();
+        FAIL_IF(descRef.type != MetricType::SignedGauge,
+                std::unexpected(ERR(InvalidArgument)),
+                "Metric type must be SignedGauge for signed gauge metrics");
+        FAIL_IF_ERR_FWD_UNEXPECTED(
+            descRef.validate(),
+            "Invalid metric description for signed gauge metric %s:",
+            descRef.name);
+        FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
+            metricKey, _store.addMetric(descRef.name, groupKey, desc),
+            "Failed to add signed gauge metric %s:", descRef.name);
+        return SignedGaugeHandle::make(metricKey);
+    }
+
   private:
     Store &_store;
 };

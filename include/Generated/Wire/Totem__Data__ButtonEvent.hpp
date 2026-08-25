@@ -1,15 +1,15 @@
 #pragma once
 
 #include "Generated/Wire/Support.hpp"
-#include "Buttons/Interfaces/Wire.hpp"
+#include "Data/ButtonEvent.hpp"
 #include <tuple>
 
 namespace Totem::Generated::Wire {
 
-template <> struct FieldList<::Totem::Buttons::ButtonEvent> {
-    using Type = ::Totem::Buttons::ButtonEvent;
+template <> struct FieldList<::Totem::Data::ButtonEvent> {
+    using Type = ::Totem::Data::ButtonEvent;
     static constexpr auto fields = std::make_tuple(
-        Field<&Type::type>{"type"},
+        Field<&Type::event>{"event"},
         Field<&Type::button>{"button"}
     );
 };

@@ -5,11 +5,11 @@
 #include "MetricsBackend/Interfaces/Types.hpp"
 #include "StaticConfig/Metrics.hpp"
 #include "Types/Error.hpp"
-#include <magic_enum/magic_enum.hpp>
 #include <array>
 #include <cstdint>
 #include <expected>
 #include <functional>
+#include <magic_enum/magic_enum.hpp>
 #include <optional>
 #include <utility>
 
@@ -31,6 +31,11 @@ struct IRegistrar {
     addGauge(MetricGroupKey groupKey,
              std::reference_wrapper<const MetricDesc> metricDesc,
              bool enabled) = 0;
+
+    virtual std::expected<SignedGaugeHandle, ReturnCode>
+    addSignedGauge(MetricGroupKey groupKey,
+                   std::reference_wrapper<const MetricDesc> metricDesc,
+                   bool enabled) = 0;
 };
 
 struct IRecorder {
@@ -39,6 +44,7 @@ struct IRecorder {
     virtual ReturnCode increment(CounterHandle handle, uint32_t value = 1) = 0;
     virtual ReturnCode decrement(CounterHandle handle, uint32_t value = 1) = 0;
     virtual ReturnCode set(GaugeHandle handle, uint32_t value) = 0;
+    virtual ReturnCode set(SignedGaugeHandle handle, int32_t value) = 0;
 };
 
 struct IMetrics {
@@ -54,7 +60,8 @@ consteval auto make_metric_collection_levels(Levels... levels) {
     using MetricLevel = Totem::MetricsBackend::MetricLevel;
     using MetricComponent = Totem::MetricsBackend::MetricComponent;
 
-    static_assert(sizeof...(levels) == magic_enum::enum_count<MetricComponent>(),
+    static_assert(sizeof...(levels) ==
+                      magic_enum::enum_count<MetricComponent>(),
                   "MetricComponent changed; update metric collection mapping");
     return std::array<std::optional<MetricLevel>, sizeof...(levels)>{
         std::optional<MetricLevel>{levels}...};
@@ -79,7 +86,7 @@ inline constexpr auto metricCollectionLevels = make_metric_collection_levels(
     MetricCollection::taskController, MetricCollection::rs485,
     MetricCollection::spi, MetricCollection::mutex, MetricCollection::logging,
     MetricCollection::audio, MetricCollection::i2c, MetricCollection::ledPwm,
-    MetricCollection::buttons, MetricCollection::bluetooth,
+    MetricCollection::input, MetricCollection::bluetooth,
     MetricCollection::wheel, MetricCollection::ledDisplay);
 
 constexpr std::optional<Totem::MetricsBackend::MetricLevel>

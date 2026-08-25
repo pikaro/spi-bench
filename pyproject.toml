@@ -9,4 +9,5 @@ dependencies = [
     "platformio>=6.1.19",
     "pydantic>=2.13.0",
     "pyserial>=3.5",
+    "skidl>=2.3.0",
 ]

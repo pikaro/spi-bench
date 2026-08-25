@@ -26,6 +26,12 @@ subscribe to those events and render their own LED segment locally.
     the detected wake profile selects the assistant voice, wake/VAD session
     state drives its status LED, cleaned command PCM is uploaded through an
     authenticated WebSocket turn, and response PCM plays through MAX98357.
+- `env:scratch` is the ESP32-C3 SuperMini test board. It exercises the reusable
+    input components with a GPIO1/GPIO0 CLK/DT rotary encoder, its active-low
+    GPIO3 switch, and a separate active-low GPIO21 gesture button. It also
+    verifies and samples an INA226 at I2C address `0x40`, with SDA on GPIO10
+    and SCL on GPIO20. Its 100 ms samples publish bus-voltage/current metrics
+    and evaluate separate practical/absolute operating windows.
 - Production node entrypoints use `include/Setups/PubSubNetwork.hpp`, which
     registers the real transports and exposes `PubSubService` without starting
     synthetic test publishers or subscribers. The synthetic multi-board
@@ -78,6 +84,13 @@ Use the prewarmed accessor pattern from `include/Macros/internal/Metrics.hpp`
 instead; `metrics()` should abort if a caller reaches it before the component
 has explicitly prewarmed registration.
 
+Metric counters and ordinary gauges use unsigned 32-bit values. Measurements
+whose domain includes negative values use `SignedGauge` and
+`SignedGaugeHandle`; they retain an `int32_t` bit pattern in the same four-byte
+atomic storage used by unsigned metrics. Counters remain unsigned. Snapshot
+sinks must inspect the metric descriptor before interpreting the raw value, or
+use `Metric::signedValue()` for a signed gauge.
+
 ## Architectural Shape
 
 Use MCP/LSP for symbol-level exploration. At a high level, the codebase is
@@ -104,6 +117,19 @@ organized as follows:
     for one-shot network probes
 - `include/Bluetooth/`: fixed-capacity BLE central abstraction with an ESP-IDF
     NimBLE backend for node-local device profiles
+- `include/DigitalInput/`: one-GPIO physical inputs with ISR edge handling,
+    atomic ISR/poll reconciliation, optional stable-state debouncing, and rich
+    edge callbacks suitable for semantic adapters and state machines
+- `include/Button/`: the thin active-polarity and pressed/released semantic
+    adapter over `DigitalInput`; the concrete class owns a bounded inline
+    callback instead of exposing its callback type in the class API, while
+    optional `Behavior` classes add reusable gesture semantics
+- `include/PubSubEventProducer/`: the shared ISR-safe event queue and task;
+    producer-created callbacks enqueue compact factories/arguments and the task
+    constructs and publishes the complete typed PubSub payload
+- `include/RotaryEncoder/`: two-`DigitalInput` quadrature decoding with a
+    compact transition table, plus an optional held-button menu behavior
+    kept separate from the physical decoder
 - `include/Wheel/`: BLE wheel device-profile driver and wire payload used by
     `io` to publish wheel rotation events
 - `include/AudioSource/`: media-node compile-time selected I2S, LittleFS WAV,
@@ -128,11 +154,13 @@ organized as follows:
 - `include/Wire/Rs485/`: point-to-point RS485 wire layer; see
     [wire-rs485.md](wire-rs485.md)
 - `include/Wire/I2C/`: ESP32 I2C master bus, fixed-capacity device registry,
-    and low-speed peripheral drivers; see [wire-i2c.md](wire-i2c.md)
+    and low-speed peripheral drivers including model-selected INA219/INA226
+    power monitors; see [wire-i2c.md](wire-i2c.md)
 - `include/Wire/Spi/`: in-progress DMA-oriented SPI wire layer with a
     component-owned ESP32 platform abstraction; see
     [spi-transport-plan.md](spi-transport-plan.md)
-- `src/master/`, `src/media/`, `src/gpu/`, `src/io/`, and `src/ai/`:
+- `src/master/`, `src/media/`, `src/gpu/`, `src/io/`, `src/ai/`, and
+    `src/scratch/`:
     environment-specific execution roots selected by build configuration.
     Both GPU PlatformIO environments currently map to `src/gpu/`.
 - `src/master/orchestration.hpp`: master-local show orchestration. It
@@ -190,12 +218,51 @@ slots are ignored so nodes can own fewer LEDs than `LedPwmConfig::maxLeds`
 without creating dummy GPIO outputs. The media node uses the same `LedPwm`
 component for the active-high GPIO26 FFT peak indicator.
 The same node owns the ship's bell input as an active-high GPIO button with an
-external pulldown. Button ISR events are queued and published locally through
-PubSub before higher-level lighting code reacts to them; the button task also
-polls configured GPIO levels and deduplicates transitions so missed ISR wakeups
-do not leave a changed level invisible. Button metrics are split between
-`btnCore` for ISR drops and publish failures, `buttons` for published events,
-and `btnDiag` for ISR/poll/deduplication diagnostics.
+external pulldown, plus a separate calibration button. Each `Button` composes a
+`DigitalInput` and only maps its electrical level to pressed/released semantics.
+`DigitalInput` owns GPIO lifecycle, any-edge ISR registration, atomic ISR/poll
+reconciliation, and optional trailing-edge debounce. The ESP32 platform installs
+the process-global GPIO ISR service once, then registers one handler for each
+configured input pin. Its callback retains pin, edge, level, source, and
+timestamp metadata; with debounce disabled it runs directly in ISR or polling
+context, while an enabled debounce emits the settled transition from `work()`.
+`DigitalInput` and `Button` are concrete classes with
+small allocation-free callback storage; only their constructors are templated
+to validate and capture caller lambdas. IO button callbacks come from the
+shared `PubSubEventProducer`: they queue the pressed/released event and a small
+factory capture, after which the producer task attaches application button
+identity and constructs `Data::ButtonEvent`. `inputs` and `inpDiag` report
+physical transitions and ISR/poll/debounce activity; `buttons` and `btnDiag`
+report semantic button callbacks and filtering. `evtCore`, `events`, and
+`evtDiag` report producer queue drops/publish failures, successful production,
+and ISR/task enqueue activity for every event source using the producer.
+
+`Button::Event` distinguishes raw semantic transitions (`Pressed`, `Released`)
+from complete gestures (`Press`, `LongPress`, `DoublePress`), and the wire
+schema carries that enum without a duplicate application-specific event type.
+`Button::Behavior::PressClassifier` consumes timestamped pressed/released
+callbacks and owns no task or platform timer. Optional `longPressMs` and
+`doublePressMs` timeouts are evaluated by `work(nowMs)` against a packed atomic
+state, allowing button transitions to arrive from ISR while timeouts run in
+task context. A long press suppresses the release-time press. When a second
+press becomes long, the classifier preserves the pending first `Press` and
+then emits `LongPress` for the second gesture.
+
+`RotaryEncoder` composes two non-debounced, non-polled `DigitalInput` channels
+because quadrature decoding depends on raw edge order. Its 16-entry Gray-code
+transition table lets contact bounce cancel naturally, rejects skipped diagonal
+states, and calls its owner with only `Clockwise` or `Counterclockwise` once per
+configured detent. `PositionConfig` optionally bounds its counter and selects
+its initial value; an increment at a bound is discarded without invoking the
+callback. With no bounds the counter starts at zero. The hardware class has no
+PubSub, brightness, or menu vocabulary.
+`RotaryEncoder::Behavior::ButtonMenu` separately combines those direction
+callbacks with a button's pressed/released callbacks. Rotation is forwarded
+normally when the button is not held; while held it updates an atomic signed
+menu position, and release always forwards the resulting position, including
+zero. It accepts its own `PositionConfig`; leave the physical encoder unbounded
+when the menu must receive every detent. Caller-supplied producer callbacks
+decide which concrete brightness or menu event to construct and publish.
 
 `LedPwm` separates direct electrical duty from human-oriented brightness:
 `setDuty()` writes linear PWM duty and clears any active brightness animation

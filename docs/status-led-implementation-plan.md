@@ -295,7 +295,7 @@ first code pass:
 | Media | AudioSourceOffline | Warning | pink | active audio source |
 | GPU | LedFrameLate | Warning | violet | `LedDisplay` |
 | GPU | FftFrameStale | Warning | lime | `LedDisplay` FFT input |
-| IO | ButtonIsrDrop | Warning | gold | `Buttons` |
+| IO | InputEventDrop | Warning | gold | `PubSubEventProducer` |
 | IO | Rs485Backpressure | Warning | cyan-green | RS485 slave |
 
 Actual integration should start with low-risk examples that already have

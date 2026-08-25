@@ -8,6 +8,7 @@
 #include "Types/Error.hpp"
 #include <array>
 #include <cinttypes>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <magic_enum/magic_enum.hpp>
@@ -15,7 +16,20 @@
 
 namespace Totem::MetricsBackend::detail {
 
-constexpr uint8_t metricsPerLine = 4;
+constexpr size_t metricGroupWidth = MetricConfig::maxMetricGroupNameLength +
+                                    10   // max uint32_t digits
+                                    + 3  // max uint8_t digits
+                                    + 8; // overhead
+constexpr size_t metricWidth = MetricConfig::maxMetricNameLength +
+                               11   // max int32_t characters
+                               + 2  // unit
+                               + 4; // overhead
+static_assert(logMaxLength > metricGroupWidth + 1);
+constexpr size_t metricsPerLine =
+    (logMaxLength - metricGroupWidth - 1) / metricWidth;
+static_assert(metricsPerLine > 0);
+static_assert(metricGroupWidth + metricsPerLine * metricWidth + 1 <=
+              logMaxLength);
 
 inline static ReturnCode
 dump_metric_snapshot(const MetricsBackend::MetricFrame &snap) {
@@ -24,33 +38,33 @@ dump_metric_snapshot(const MetricsBackend::MetricFrame &snap) {
     while (printedMetrics < snap.group.metricCount) {
         std::array<char, logMaxLength> buf;
 
-        constexpr size_t groupWidth = MetricConfig::maxMetricGroupNameLength +
-                                      10   // max uint32_t digits
-                                      + 3  // max uint8_t digits
-                                      + 8; // overhead
-
-        snprintf(buf.data(), groupWidth + 1, // +1 for null terminator
+        snprintf(buf.data(), metricGroupWidth + 1, // +1 for null terminator
                  "@%10" PRIu32 " [%3" PRIu8 " " SV_FMT "] | ", snap.timestampMs,
                  snap.group.metricCount,
                  SV_ARG(snap.group.displayName(),
                         MetricConfig::maxMetricGroupNameLength));
 
-        constexpr size_t metricWidth = MetricConfig::maxMetricNameLength +
-                                       10   // max uint32_t digits
-                                       + 2  // unit
-                                       + 4; // overhead
-
-        auto *start = buf.data() + groupWidth;
+        auto *start = buf.data() + metricGroupWidth;
         for (size_t i = 0;
              i < metricsPerLine && printedMetrics < snap.group.metricCount;
              ++i) {
             const auto &metric = snap.metrics[printedMetrics];
 
-            snprintf(
-                start, metricWidth + 1, SV_FMT " %10" PRIu32 SV_FMT "%s",
-                SV_ARG(metric.displayName(), MetricConfig::maxMetricNameLength),
-                metric.value, SV_ARG(metric.unit(), 2),
-                (i < snap.group.metricCount - 1) ? " | " : "");
+            const auto *separator =
+                (printedMetrics + 1 < snap.group.metricCount) ? " | " : "";
+            if (metric.desc->isSigned()) {
+                snprintf(
+                    start, metricWidth + 1, SV_FMT " %11" PRIi32 SV_FMT "%s",
+                    SV_ARG(metric.displayName(),
+                           MetricConfig::maxMetricNameLength),
+                    metric.signedValue(), SV_ARG(metric.unit(), 2), separator);
+            } else {
+                snprintf(start, metricWidth + 1,
+                         SV_FMT " %11" PRIu32 SV_FMT "%s",
+                         SV_ARG(metric.displayName(),
+                                MetricConfig::maxMetricNameLength),
+                         metric.value, SV_ARG(metric.unit(), 2), separator);
+            }
 
             start += metricWidth;
             FAIL_IF(start >= buf.data() + buf.size(), ERR(OutOfMemory),

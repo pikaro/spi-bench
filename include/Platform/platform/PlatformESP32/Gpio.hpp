@@ -9,8 +9,10 @@
 #include "Types/Gpio.hpp"
 #include "driver/gpio.h"
 #include "esp_err.h"
+#include "freertos/task.h"
 #include "hal/gpio_types.h"
 #include "soc/gpio_num.h"
+#include <atomic>
 #include <cstdint>
 #include <expected>
 #include <optional>
@@ -89,10 +91,8 @@ class Gpio {
         _owner = owner;
         _isrCallback = callback;
 
-        const auto installRet = gpio_install_isr_service(0);
-        FAIL_IF(installRet != ESP_OK && installRet != ESP_ERR_INVALID_STATE,
-                ERR(CoreError, OperationFailed),
-                "Failed to install GPIO ISR service");
+        FAIL_IF_ERR_FWD(_ensureIsrService(),
+                        "Failed to install GPIO ISR service");
         FAIL_IF_PLATFORM_FWD(gpio_isr_handler_add(_gpio(), _isr, this),
                              "Failed to register GPIO ISR handler");
         _isrRegistered = true;
@@ -117,6 +117,43 @@ class Gpio {
     [[nodiscard]] bool configured() const { return _pin.has_value(); }
 
   private:
+    enum class IsrServiceState : uint8_t {
+        Uninitialized,
+        Installing,
+        Ready,
+    };
+
+    static ReturnCode _ensureIsrService() {
+        for (;;) {
+            auto state = _isrServiceState.load(std::memory_order_acquire);
+            if (state == IsrServiceState::Ready) {
+                return OK();
+            }
+            if (state == IsrServiceState::Installing) {
+                taskYIELD();
+                continue;
+            }
+
+            if (!_isrServiceState.compare_exchange_weak(
+                    state, IsrServiceState::Installing,
+                    std::memory_order_acq_rel, std::memory_order_acquire)) {
+                continue;
+            }
+
+            const auto installRet = gpio_install_isr_service(0);
+            if (installRet == ESP_OK || installRet == ESP_ERR_INVALID_STATE) {
+                _isrServiceState.store(IsrServiceState::Ready,
+                                       std::memory_order_release);
+                return OK();
+            }
+
+            _isrServiceState.store(IsrServiceState::Uninitialized,
+                                   std::memory_order_release);
+            FAIL(ERR(CoreError, OperationFailed),
+                 "Failed to install GPIO ISR service");
+        }
+    }
+
     static void _isr(void *arg) {
         auto *self = static_cast<Gpio *>(arg);
         if (self == nullptr || self->_isrCallback == nullptr ||
@@ -161,6 +198,9 @@ class Gpio {
     void *_owner = nullptr;
     GpioIsrCallback _isrCallback = nullptr;
     bool _isrRegistered = false;
+
+    static inline std::atomic<IsrServiceState> _isrServiceState{
+        IsrServiceState::Uninitialized};
 };
 
 } // namespace platform

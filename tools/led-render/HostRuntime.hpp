@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Audio/Interfaces/Wire.hpp"
+#include "AudioFft/Interfaces/Wire.hpp"
 #include "Json.hpp"
 #include "LedDisplay/Interfaces/Color.hpp"
 #include "LedDisplay/Interfaces/Layer.hpp"
@@ -104,11 +104,13 @@ struct RenderRequest {
              ++radial) {
             const auto logical = Canvas::logicalIndex(spoke, radial);
             const auto physical =
-                Totem::LedTopology::Umbrella::physicalFor(rotatedSpoke, radial);
-            const auto rotated =
-                Totem::LedTopology::OwnedPixels::localIndex(physical);
-            map[logical] =
-                static_cast<Totem::LedTopology::LocalPixelIndex>(rotated);
+                Totem::LedTopology::Surface::physicalFor(rotatedSpoke, radial);
+            if (Totem::LedTopology::OwnedPixels::owns(physical)) {
+                map[logical] =
+                    Totem::LedTopology::OwnedPixels::localIndex(physical);
+            } else {
+                map[logical] = Canvas::invalidLocalPixel;
+            }
         }
     }
     return map;
@@ -246,7 +248,8 @@ inline void hsvToRgb(std::span<const HsvColor> hsv, std::span<RgbColor> rgb) {
                     return false;
                 }
                 const auto parsed =
-                    magic_enum::enum_cast<Totem::Audio::PeakGroup>(groupName);
+                    magic_enum::enum_cast<Totem::AudioFft::PeakGroup>(
+                        groupName);
                 if (!parsed.has_value()) {
                     error = "Unknown peak group '" + groupName + "'";
                     return false;
@@ -259,7 +262,7 @@ inline void hsvToRgb(std::span<const HsvColor> hsv, std::span<RgbColor> rgb) {
                     return false;
                 }
                 inputs.peakEvent.group =
-                    static_cast<Totem::Audio::PeakGroup>(rawGroup);
+                    static_cast<Totem::AudioFft::PeakGroup>(rawGroup);
             }
         }
         if (!readOptionalUint8(*peak, "energy", inputs.peakEvent.energy,
@@ -278,9 +281,10 @@ inline void hsvToRgb(std::span<const HsvColor> hsv, std::span<RgbColor> rgb) {
     return true;
 }
 
-[[nodiscard]] inline bool readSyntheticAudioChannel(
-    const JsonValue &object, std::string_view key, SyntheticAudioChannel &out,
-    std::string &error) {
+[[nodiscard]] inline bool readSyntheticAudioChannel(const JsonValue &object,
+                                                    std::string_view key,
+                                                    SyntheticAudioChannel &out,
+                                                    std::string &error) {
     const auto *value = object.find(key);
     if (value == nullptr) {
         return true;

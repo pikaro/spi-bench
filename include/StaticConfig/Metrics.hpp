@@ -1,6 +1,7 @@
 #pragma once
 
 #include "MetricsBackend/Interfaces/Types.hpp"
+#include "StaticConfig/MetricsLimits.hpp"
 #include <cstddef>
 #include <optional>
 
@@ -33,14 +34,9 @@ struct MetricCollection {
     static constexpr std::optional<MetricLevel> bluetooth = std::nullopt;
     static constexpr std::optional<MetricLevel> wheel = std::nullopt;
     static constexpr std::optional<MetricLevel> ledDisplay = std::nullopt;
+    static constexpr std::optional<MetricLevel> battery = std::nullopt;
 };
 
-struct MetricConfig {
-    static constexpr size_t maxMetrics = 255;
-    static constexpr size_t maxMetricGroups = 32;
-    static constexpr size_t maxMetricNameLength = 8;
-    static constexpr size_t maxMetricGroupNameLength = 8;
-    static constexpr size_t maxMetricsPerGroup = 32;
-
+struct MetricConfig : MetricLimits {
     [[nodiscard]] static bool validate() { return true; }
 };

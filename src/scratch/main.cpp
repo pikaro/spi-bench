@@ -1,170 +1,99 @@
-#include "Button/Behavior/PressClassifier.hpp"
-#include "Button/Facade.hpp"
-#include "Macros/Facade.hpp"
-#include "Platform/PlatformSelect.hpp"
-#include "Queue/Facade.hpp"
-#include "RotaryEncoder/Behavior/ButtonMenu.hpp"
-#include "RotaryEncoder/Facade.hpp"
-#include "Services/StatusLed.hpp"
-#include "Setups/Core.hpp"
-#include "Wire/I2C/Facade.hpp"
-#include "config.hpp"
-#include <atomic>
-#include <cinttypes>
+#include "LedDisplay/Outputs/detail/platform/Sk9822SpiESP32.hpp"
+#include "Platform/Hardware.hpp"
+#include "Types/Error.hpp"
+#include "driver/gpio.h"
+#include "esp_err.h"
+#include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 
 namespace {
 
-using ButtonEvent = Totem::Button::Event;
-using Direction = Totem::RotaryEncoder::Direction;
+using Sk9822Transport =
+    Totem::LedDisplay::Outputs::detail::platform::Sk9822SpiESP32;
 
-struct RotationLog {
-    Direction direction;
-    int32_t position;
-    uint32_t sequence;
-};
+constexpr char logTag[] = "led_scratch";
+constexpr size_t pixelCount = 960;
+constexpr size_t startFrameBytes = 4;
+constexpr size_t bytesPerPixel = 4;
+constexpr size_t endFrameBytes = 4U * ((pixelCount / 32U) + 1U);
+constexpr size_t frameBytes =
+    startFrameBytes + (pixelCount * bytesPerPixel) + endFrameBytes;
+constexpr std::byte pixelHeader{0xE1}; // Lowest nonzero hardware brightness.
+constexpr std::byte red{0xFF};
+constexpr gpio_num_t outputGatePin = GPIO_NUM_9;
+constexpr uint32_t refreshIntervalMs = 1000;
 
-constexpr size_t rotationLogQueueDepth = 32;
-Totem::Queue::Platform::Storage<RotationLog, rotationLogQueueDepth>
-    rotationLogQueueStorage{};
-Totem::Queue::Handle rotationLogQueue = nullptr;
-std::atomic<uint32_t> rotationSequence{0};
-std::atomic<uint32_t> droppedRotationLogs{0};
-uint32_t menuReportSequence = 0;
-uint32_t gestureSequence = 0;
+alignas(4) std::array<std::byte, frameBytes> frame{};
+Sk9822Transport transport{};
 
-int32_t currentRotaryPosition();
+[[noreturn]] void abortOnError(const char *operation, ReturnCode error) {
+    const auto view = error.format();
+    ESP_LOGE(logTag, "transport_failure operation=%s error=%s/%s code=%u",
+             operation, view.domain, view.name,
+             static_cast<unsigned>(view.code));
+    std::abort();
+}
 
-void enqueueRotationLog(Direction direction) {
-    const RotationLog event{
-        .direction = direction,
-        .position = currentRotaryPosition(),
-        .sequence =
-            rotationSequence.fetch_add(1, std::memory_order_relaxed) + 1,
+void requireOk(const char *operation, ReturnCode result) {
+    if (!result.ok()) {
+        abortOnError(operation, result);
+    }
+}
+
+void prepareSolidRedFrame() {
+    frame.fill(std::byte{0});
+    size_t offset = startFrameBytes;
+    for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
+        frame[offset++] = pixelHeader;
+        frame[offset++] = std::byte{0}; // Blue
+        frame[offset++] = std::byte{0}; // Green
+        frame[offset++] = red;
+    }
+}
+
+void configureOutputGateDisabled() {
+    ESP_ERROR_CHECK(gpio_set_level(outputGatePin, 1));
+    const gpio_config_t config{
+        .pin_bit_mask = 1ULL << outputGatePin,
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
     };
-    const bool queued =
-        rotationLogQueue != nullptr &&
-        (::platform::in_isr()
-             ? Totem::Queue::Platform::sendFromIsr(rotationLogQueue, &event)
-             : Totem::Queue::Platform::send(rotationLogQueue, &event, 0).ok());
-    if (!queued) {
-        droppedRotationLogs.fetch_add(1, std::memory_order_relaxed);
-    }
-}
-
-void logMenuPosition(int32_t position) {
-    ++menuReportSequence;
-    _log_i("Rotary menu report #%" PRIu32 ": position=%" PRId32,
-           menuReportSequence, position);
-}
-
-void logButtonGesture(ButtonEvent event) {
-    switch (event) {
-    case ButtonEvent::Press:
-        ++gestureSequence;
-        _log_i("Gesture button #%" PRIu32 ": press", gestureSequence);
-        return;
-    case ButtonEvent::LongPress:
-        ++gestureSequence;
-        _log_i("Gesture button #%" PRIu32 ": long press", gestureSequence);
-        return;
-    case ButtonEvent::DoublePress:
-        ++gestureSequence;
-        _log_i("Gesture button #%" PRIu32 ": double press", gestureSequence);
-        return;
-    case ButtonEvent::Pressed:
-    case ButtonEvent::Released:
-        return;
-    }
-}
-
-Totem::RotaryEncoder::Behavior::ButtonMenu buttonMenu{
-    [](Direction /*unused*/) {}, logMenuPosition, menuPositionConfig};
-
-Totem::RotaryEncoder::RotaryEncoder rotaryEncoder{[](Direction direction) {
-    enqueueRotationLog(direction);
-    buttonMenu.onRotation(direction);
-}};
-
-int32_t currentRotaryPosition() { return rotaryEncoder.position(); }
-
-Totem::Button::Button rotarySwitch{
-    [](ButtonEvent event) { buttonMenu.onButton(event); }};
-
-Totem::Button::Behavior::PressClassifier gestureBehavior{logButtonGesture,
-                                                         gestureConfig};
-
-Totem::Button::Button gestureButton{[](ButtonEvent event) {
-    gestureBehavior.onButton(event, ::platform::get_time());
-}};
-
-void workRotationLogs() {
-    RotationLog event{};
-    while (rotationLogQueue != nullptr &&
-           Totem::Queue::Platform::receive(rotationLogQueue, &event, 0).ok()) {
-        _log_i("Rotary detent #%" PRIu32 ": position=%" PRId32 ", %s",
-               event.sequence, event.position,
-               event.direction == Direction::Clockwise ? "clockwise"
-                                                       : "counterclockwise");
-    }
-
-    const auto dropped =
-        droppedRotationLogs.exchange(0, std::memory_order_relaxed);
-    if (dropped != 0) {
-        _log_w("Dropped %" PRIu32 " rotary increment logs", dropped);
-    }
+    ESP_ERROR_CHECK(gpio_config(&config));
+    ESP_ERROR_CHECK(gpio_set_level(outputGatePin, 1));
 }
 
 } // namespace
 
-CoreSetup core{};
-Totem::Wire::I2C::Master i2cMaster{};
-Totem::Wire::I2C::Ina2xx ina226{i2cMaster,
-                                Totem::Wire::I2C::Ina2xxModel::Ina226};
+extern "C" void app_main() {
+    configureOutputGateDisabled();
+    prepareSolidRedFrame();
 
-void setup() {
-    ABORT_IF_ERR_BEGIN(core.beginStatusLedEarly(statusLedConfig));
-    ::platform::delay(::platform::ms_to_ticks(3000));
+    const Totem::LedDisplay::Sk9822OutputConfig outputConfig{
+        .host = Totem::LedDisplay::Sk9822SpiHost::Spi3,
+        .dataPin = Pin::GPIO13,
+        .clockPin = Pin::GPIO10,
+        .clockHz = 4'000'000,
+        .transferTimeoutMs = 10,
+        .colorOrder = Totem::LedDisplay::Sk9822WireColorOrder::Bgr,
+    };
+    requireOk("begin", transport.begin(outputConfig, frame));
 
-    core.setup();
-    _log_i("Core setup complete");
-
-    ABORT_IF_ERR_BEGIN(i2cMaster.begin(i2cMasterConfig));
-    ABORT_IF_ERR_BEGIN(ina226.begin(ina226Config));
-    _log_i("INA226 detected at I2C address 0x%02X",
-           static_cast<unsigned>(ina226Config.device.address));
-
-    ABORT_IF_UNEXPECTED(queue,
-                        Totem::Queue::Platform::create(rotationLogQueueStorage),
-                        "Failed to create the rotary log queue");
-    rotationLogQueue = queue;
-
-    ABORT_IF_ERR_BEGIN(rotaryEncoder.begin(rotaryEncoderConfig));
-    ABORT_IF_ERR_BEGIN(rotarySwitch.begin(rotarySwitchConfig));
-    ABORT_IF_ERR_BEGIN(gestureButton.begin(gestureButtonConfig));
-
-    _log_i("Setup complete");
-    ABORT_IF_ERR(StatusLedService::setTargetsReady(),
-                 "Failed to set status LED targets-ready state");
-}
-
-extern "C" {
-void app_main(void);
-}
-
-void app_main() {
-    setup();
+    ESP_ERROR_CHECK(gpio_set_level(outputGatePin, 0));
+    ESP_LOGI(logTag,
+             "solid_frame_active pixels=%u bytes=%u color=red level=1 "
+             "data_gpio=13 clock_gpio=10 gate_gpio=9 clock_hz=4000000",
+             static_cast<unsigned>(pixelCount),
+             static_cast<unsigned>(frameBytes));
 
     for (;;) {
-        const auto nowMs = ::platform::get_time();
-        REPORT_IF_ERR(core.work(nowMs), "Core work failed");
-        REPORT_IF_ERR(ina226.work(nowMs), "INA226 work failed");
-        REPORT_IF_ERR(rotaryEncoder.work(nowMs), "Rotary encoder work failed");
-        REPORT_IF_ERR(rotarySwitch.work(nowMs), "Rotary switch work failed");
-        REPORT_IF_ERR(gestureButton.work(nowMs), "Gesture button work failed");
-        gestureBehavior.work(nowMs);
-        workRotationLogs();
-        ::platform::delay(::platform::ms_to_ticks(1));
+        requireOk("transmit", transport.transmit(frame));
+        vTaskDelay(pdMS_TO_TICKS(refreshIntervalMs));
     }
 }

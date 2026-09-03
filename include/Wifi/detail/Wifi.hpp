@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Base/HasCommands.hpp"
 #include "Base/HasLifecycle.hpp"
 #include "LoggingBackend/Interfaces/Types.hpp"
 #include "Macros/Facade.hpp"
@@ -7,12 +8,14 @@
 #include "Types/Error.hpp"
 #include "Wifi/Interfaces/Config.hpp"
 #include "Wifi/Interfaces/Types.hpp"
+#include "Wifi/detail/Commands.hpp"
 #include "Wifi/detail/PlatformSelect.hpp"
 #include <string_view>
 
 namespace Totem::Wifi::detail {
 
-class Wifi : public HasLifecycle<Wifi, Config> {
+class Wifi : public HasLifecycle<Wifi, Config>,
+             public HasCommands<Wifi, Commands<Wifi>> {
     friend class HasLifecycle<Wifi, Config>;
     friend struct LifecycleContract<Wifi, Config>;
 
@@ -28,6 +31,20 @@ class Wifi : public HasLifecycle<Wifi, Config> {
 
   private:
     ReturnCode _onBegin() {
+        auto platformResult = _beginPlatform();
+        if (!platformResult.ok()) {
+            return platformResult;
+        }
+
+        const auto commandResult = _registerCommands();
+        if (!commandResult.ok()) {
+            (void)_platform.end();
+            return commandResult;
+        }
+        return OK();
+    }
+
+    ReturnCode _beginPlatform() {
         if (config().mode == Mode::Disabled) {
             return _platform.begin(config(), {});
         }
@@ -48,7 +65,12 @@ class Wifi : public HasLifecycle<Wifi, Config> {
             passwordSecret.size()};
         return _platform.begin(config(), passwordView);
     }
-    ReturnCode _onEnd() { return _platform.end(); }
+
+    ReturnCode _onEnd() {
+        auto result = _deregisterCommands();
+        result.combine(_platform.end());
+        return result;
+    }
 
     SelectedPlatform _platform;
 
@@ -56,5 +78,7 @@ class Wifi : public HasLifecycle<Wifi, Config> {
 };
 
 inline constexpr LifecycleContract<Wifi, Config> _wifi_lifecycle;
+inline constexpr CommandsContract<Wifi, Commands<Wifi>>
+    _wifi_commands_contract;
 
 } // namespace Totem::Wifi::detail

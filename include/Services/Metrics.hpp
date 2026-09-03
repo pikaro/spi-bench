@@ -87,7 +87,8 @@ inline constexpr auto metricCollectionLevels = make_metric_collection_levels(
     MetricCollection::spi, MetricCollection::mutex, MetricCollection::logging,
     MetricCollection::audio, MetricCollection::i2c, MetricCollection::ledPwm,
     MetricCollection::input, MetricCollection::bluetooth,
-    MetricCollection::wheel, MetricCollection::ledDisplay);
+    MetricCollection::wheel, MetricCollection::ledDisplay,
+    MetricCollection::battery);
 
 constexpr std::optional<Totem::MetricsBackend::MetricLevel>
 level_for_metric_component_opt(

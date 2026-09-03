@@ -181,19 +181,21 @@ class SubscriptionManager {
     }
 
     ReturnCode replaySubscriptions() {
-        auto ret = OK();
+        auto topicMask = TopicMask{0};
         for (const auto &slot : _subscriptionSlots) {
             if (slot.subscriberCount.load(std::memory_order_relaxed) == 0) {
                 continue;
             }
-            auto event = PubSubEvent{
-                .topic = slot.topic,
-                .type = SubscribeEventType::Register,
-            };
-            ret.combine(
-                _sendPubSubEvent(event, EventSendMode::BestEffortReplay));
+            topicMask |= slot.topic;
         }
-        return ret;
+        if (topicMask == 0) {
+            return OK();
+        }
+        return _sendPubSubEvent(PubSubEvent{
+                                    .topic = topicMask,
+                                    .type = SubscribeEventType::Register,
+                                },
+                                EventSendMode::BestEffortReplay);
     }
 
   private:

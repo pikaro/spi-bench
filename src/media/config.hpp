@@ -2,8 +2,8 @@
 
 #include "AudioFft/Interfaces/AnalyzerConfig.hpp"
 #include "AudioFft/Interfaces/DisplayConfig.hpp"
-#include "AudioSource/Interfaces/SourceConfig.hpp"
 #include "AudioFft/Interfaces/Types.hpp"
+#include "AudioSource/Interfaces/SourceConfig.hpp"
 #include "AudioSource/detail/Sources/I2SSource.hpp"
 #include "AudioSource/detail/Sources/WavSource.hpp"
 #include "Data/Peripherals.hpp"
@@ -12,12 +12,12 @@
 #include "StaticConfig/Stacks.hpp"
 #include "StatusLed/Interfaces/Config.hpp"
 #include "TaskController/Interfaces/Config.hpp"
+#include "Types/Error.hpp"
 #include "Wire/I2C/Interfaces/DisplayConfig.hpp"
 #include "Wire/I2C/Interfaces/MasterConfig.hpp"
 #include "Wire/I2C/Interfaces/Types.hpp"
 #include "Wire/Spi/Interfaces/SlaveConfig.hpp"
 #include "Wire/Spi/Interfaces/Types.hpp"
-#include "Types/Error.hpp"
 
 namespace Totem::AudioSource::detail {
 class A2DPSource;
@@ -36,10 +36,14 @@ inline Totem::LedPwm::Config ledPwmConfig{
             .intervalMs = 5,
             .noCatchup = true,
         },
+    .platform =
+        {
+            .outputInverted = true,
+        },
     .leds = {{
         {
             .led = PeripheralLed::PeakIndicator,
-            .pin = Pin::GPIO26,
+            .pin = Pin::RX,
             .configured = true,
         },
     }},
@@ -49,11 +53,12 @@ inline Totem::Wire::I2C::MasterConfig i2cMasterConfig{
     .busId = Totem::Wire::I2C::BusId::Bus0,
     .pins =
         {
-            .sda = Pin::GPIO22,
-            .scl = Pin::GPIO21,
+            .sda = Pin::GPIO6,
+            .scl = Pin::GPIO5,
         },
-    .clockHz = 1'000'000,
-    .enableInternalPullups = true,
+    // .clockHz = 1'000'000,
+    .clockHz = 400'000,
+    .enableInternalPullups = false,
     .transactionTimeoutMs = 50,
 };
 
@@ -61,7 +66,8 @@ inline Totem::Wire::I2C::Ssd1306Config fftDisplayConfig{
     .device =
         {
             .address = 0x3C,
-            .clockHz = 1'000'000,
+            // .clockHz = 1'000'000,
+            .clockHz = 400'000,
         },
     .width = 128,
     .height = 32,
@@ -96,9 +102,9 @@ inline constexpr Totem::AudioSource::I2SSourceConfig i2sAudioSourceConfig{
         },
     .pins =
         {
-            .bitClock = Pin::GPIO25,
-            .wordSelect = Pin::GPIO32,
-            .dataIn = Pin::GPIO33,
+            .bitClock = Pin::GPIO13,
+            .wordSelect = Pin::GPIO1,
+            .dataIn = Pin::GPIO12,
         },
 };
 
@@ -117,7 +123,7 @@ inline constexpr Totem::AudioSource::BtstackA2DPSourceConfig
         .bufferStartThresholdBytes = 256,
         .taskPriority = 1,
         .cooperativeYieldIntervalMs = 4,
-};
+    };
 
 template <Totem::AudioSource::AudioSourceKind Kind>
 struct MediaAudioSourceBinding;
@@ -138,7 +144,8 @@ struct MediaAudioSourceBinding<Totem::AudioSource::AudioSourceKind::A2DP> {
 };
 
 template <>
-struct MediaAudioSourceBinding<Totem::AudioSource::AudioSourceKind::BtstackA2DP> {
+struct MediaAudioSourceBinding<
+    Totem::AudioSource::AudioSourceKind::BtstackA2DP> {
     using Source = Totem::AudioSource::detail::BtstackA2DPSource;
 };
 
@@ -146,8 +153,8 @@ using MediaAudioSourceType =
     typename MediaAudioSourceBinding<mediaAudioSourceKind>::Source;
 
 template <Totem::AudioSource::AudioSourceKind Kind>
-inline ReturnCode beginMediaAudioSource(
-    typename MediaAudioSourceBinding<Kind>::Source &source) {
+inline ReturnCode
+beginMediaAudioSource(typename MediaAudioSourceBinding<Kind>::Source &source) {
     if constexpr (Kind == Totem::AudioSource::AudioSourceKind::I2S) {
         return source.begin(i2sAudioSourceConfig);
     } else if constexpr (Kind == Totem::AudioSource::AudioSourceKind::WavFile) {
@@ -187,11 +194,11 @@ inline Totem::Wire::Spi::SlaveConfig spiSlaveConfig{
     .busId = Totem::Wire::Spi::BusId::Bus3,
     .pins =
         {
-            .mosiPin = Pin::VSPI_MOSI,
-            .misoPin = Pin::VSPI_MISO,
-            .sclkPin = Pin::VSPI_SCLK,
+            .mosiPin = Pin::GPIO9,
+            .misoPin = Pin::GPIO11,
+            .sclkPin = Pin::GPIO10,
         },
-    .csPin = Pin::VSPI_CS,
+    .csPin = Pin::GPIO8,
     .maxTransferSize = 4096,
     .transferWindowBytes = 256,
     .maxOutboundSlotBytes = 256,
@@ -209,10 +216,10 @@ inline Totem::Wire::Spi::SlaveConfig spiSlaveConfig{
             .notifyExpectTimeout = false,
             .notifyTimeoutMs = 10,
         },
-    .attentionPin = Pin::GPIO17,
+    .attentionPin = Pin::GPIO7,
 };
 
 inline constexpr Totem::StatusLed::Config statusLedConfig{
     .configured = true,
-    .pin = Pin::GPIO16,
+    .pin = Pin::StatusLed,
 };

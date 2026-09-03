@@ -424,6 +424,12 @@ class Node : public HasLifecycle<Derived, ConfT>,
         if (self == nullptr || event != AttentionLineEvent::Asserted) {
             return;
         }
+        if constexpr (Derived::sendsHeartbeat) {
+            if (self->_state.load(std::memory_order_acquire) !=
+                NodeState::Synced) {
+                return;
+            }
+        }
         self->_attentionRequested.store(true, std::memory_order_release);
         self->_wakeFromIsr(Signal::Rs485Attention);
     }
@@ -909,6 +915,10 @@ class Node : public HasLifecycle<Derived, ConfT>,
         if constexpr (!Derived::sendsHeartbeat) {
             return false;
         } else {
+            if (_state.load(std::memory_order_acquire) != NodeState::Synced) {
+                _attentionRequested.store(false, std::memory_order_release);
+                return false;
+            }
             const bool edgeRequested =
                 _attentionRequested.exchange(false, std::memory_order_acq_rel);
             if (edgeRequested) {

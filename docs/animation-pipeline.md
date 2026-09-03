@@ -27,8 +27,15 @@ The embedded pipeline is feature-complete for current animation development:
   separate config, command, command-description, and render headers
 - reusable drawing access lives under `include/LedDisplay/Primitives/`
 - rendering uses scratch -> layer -> composed frame
+- the topmost `UI` layer retains its last frame and decays it over roughly two
+  seconds, so stopping a UI animation produces the shared fade-out behavior
 - present buffering supports `None`, `Double`, `Triple`, and `Quadruple`;
   the current default is `Triple`
+- production GPU builds select the 32×60 `DenseUmbrella` topology and own one
+  contiguous 16-spoke/960-pixel half each
+- `Display` uses a compile-time-selected output backend: legacy WS2812B remains
+  FastLED-controlled, while v2 SK9822 output uses a pure encoder and ESP-IDF
+  SPI3 transport with 5-bit hardware brightness
 - FFT, peak, and wheel data are latest-value input streams for animations, not
   display-level rendering special cases
 - the engine derives a small per-frame audio-control snapshot from FFT bands
@@ -37,16 +44,18 @@ The embedded pipeline is feature-complete for current animation development:
 - the persistent wheel indicator starts through the same generic command path
   as all other animations
 
-Remaining pipeline work is validation and visual tuning, not another structural
-replacement:
+Remaining pipeline work is physical validation, performance acceptance, and
+later visual tuning, not another structural replacement:
 
 - keep using the host-side render tooling under `tools/led-render/` for local
   animation inspection and regression traces
-- extend the host renderer with optional FastLED-backed color conversion and
-  temporal dithering when higher hardware-parity traces are needed
+- optionally extend the host renderer with stricter FastLED color/dither parity
+  if a future legacy-output investigation needs it
+- validate SK9822 waveform, RGB order, low-light brightness, startup behavior,
+  and sustained 100 fps timing on the production-code 2×120 physical bench
 - tune layer decay, opacity, and blend choices with hardware and offline traces
-- revisit parallel per-layer rendering only when larger LED counts prove the
-  sequential renderer is the bottleneck
+- revisit parallel per-layer rendering only if production dense metrics prove
+  the sequential renderer is the bottleneck
 
 ## Responsibilities
 
@@ -54,8 +63,10 @@ replacement:
 subscribes to animation play, update, and specific control PubSub topics,
 delegates input subscriptions to the engine, handles the present-strobe ISR,
 records present timing, and calls
-`FastLedOutput::show()` with complete frames. It must not know about concrete
-animations such as waves, FFT visuals, or the wheel indicator.
+`SelectedOutput::show()` with complete frames. The selected backend owns
+protocol conversion, brightness policy, framing, and transport. `Display` must
+remain unaware of concrete animations such as waves, FFT visuals, or the wheel
+indicator.
 
 `AnimationEngine` is the animation backend. It validates and queues commands,
 drains them at frame boundaries, owns active slots, captures latest FFT, peak,
@@ -95,59 +106,72 @@ ready.
 `src/master/orchestration.hpp` maps system events into generic LED requests. It
 does not own animation policy. For example, master can publish wheel indicator
 updates, but the wheel indicator animation decides whether and how those
-updates affect pixels. Master also starts the managed FFT visual sequence after
-startup, periodically refreshes the active persistent request, and crossfades
-between `Fft` and `FftAlt` layers using stable request IDs. A stop-all command
-or a stop for either managed FFT request suppresses further FFT visual
-sequencing until the master restarts, so manual diagnostics can actually
-silence the field. Master uses peak events for lightweight orchestration:
+updates affect pixels. The main IO dial's normalized value is forwarded as the
+GPU global-brightness command, while its exact 0..31 position starts the
+short-lived brightness indicator on the UI layer. Master also starts the
+managed FFT visual sequence after startup, periodically refreshes the active
+persistent request, and crossfades between `Fft` and `FftAlt` layers using
+stable request IDs. A stop-all command or a stop for either managed FFT request
+suppresses further FFT visual sequencing until the master restarts, so manual
+diagnostics can actually silence the field. Master uses peak events for
+lightweight orchestration:
 ordinary peak events are not center-wave requests, but the first peak after a
 two-second quiet window publishes one short center wave as a primitive drop
 marker.
 
-`src/master/led_bringup.hpp` owns the master-triggered LED bring-up probes. It
-publishes animation playback commands after boot so GPU mapping and long-running
-indicator startup use the same command path as runtime orchestration.
-Automatic master runtime orchestration is held until the spoke probe's publish
-delay plus lifetime has elapsed. The bring-up sweep must run against an
-untransformed logical-to-physical map; otherwise normal effects such as wheel
-rotation, beat waves, or future brightness modulation can obscure topology
-diagnostics. Manual `/anim` commands remain direct diagnostics.
-The spoke probe is intentionally delayed long enough for the high-speed
-SPI/PubSub links to recover after a full-system reset; publishing it too early
-can race subscriber availability and make the diagnostic disappear.
+`src/master/led_bringup.hpp` owns the master-triggered LED startup sequence.
+Each GPU initializes its local SK9822 output and periodically publishes an
+output-ready event. Master waits for readiness from both GPU0 and GPU1, then
+publishes the shared output-enable command followed by the spoke-sweep boot
+animation. Automatic runtime orchestration remains held until that animation
+finishes. The sweep runs against an untransformed logical-to-physical map;
+otherwise normal effects such as wheel rotation, beat waves, or brightness
+modulation can obscure topology diagnostics. Manual `/anim` commands remain
+direct diagnostics.
 
-The umbrella topology maps logical spokes in four-spoke quadrants. Within each
-quadrant, logical spoke order is mirrored onto the physical wire segment order:
-logical segment `0` maps to physical segment `3`, `1` to `2`, `2` to `1`, and
-`3` to `0`. Radial serpentine direction is still derived from the physical
-segment because that follows the actual LED strip wiring.
+The selected production `DenseUmbrella` topology has 32 spokes and 60 radial
+LEDs per spoke. Physical order is monotonic by spoke and serpentine radially:
+
+```text
+physical = spoke * 60 + (odd(spoke) ? 59 - radial : radial)
+```
+
+GPU0 owns spokes 0..15 (physical 0..959) and GPU1 owns spokes 16..31
+(physical 960..1919). Each maps its owned interval to local indices 0..959.
+The legacy four-spoke-quadrant topology remains available through compile-time
+selection for regression and old hardware; animations only see the selected
+logical topology.
 
 The physical LED surface is an annulus, not a disk. The strips do not meet at a
-center point: there is roughly a 30 cm empty center-gap diameter, and the LED
-strips are roughly 30 cm long. Logical radial index `0` is therefore the inner
-visible ring, not the geometric center. Geometry helpers and radial viewers
-must model an inner radius plus strip length instead of assuming normalized
-radius starts at zero. With the current approximate dimensions, the inner ring
-is about one third of the outer radius because the 30 cm center gap is a
-diameter.
+center point. The production SK9822 geometry has an approximately 60 mm inner
+radius (120 mm center-gap diameter). Sixty LEDs at 144 LEDs/m occupy roughly
+417 mm radially and run almost the full umbrella radius. Logical radial index
+`0` is therefore the inner visible ring, not the geometric center. Geometry
+helpers and radial viewers model the topology's own inner radius plus strip
+length instead of assuming normalized radius starts at zero. The legacy
+WS2812B topology retains its separate approximate 300 mm gap-diameter and
+300 mm strip-length geometry.
 
 ## Frame Flow
 
 Each GPU frame follows this path:
 
 1. The present strobe wakes the display task.
-2. Buffered modes present the newest complete frame first.
-3. The display asks the engine to render the next complete frame.
-4. The engine drains queued commands.
-5. The layer stack clears or decays layer buffers according to layer policy.
-6. The engine snapshots latest FFT, peak, and wheel input state and updates
+2. Buffered modes select and present the newest complete frame through the
+   compile-time output backend.
+3. For SK9822, the backend converts HSV to RGB, applies optional output floors,
+   writes one quantized 5-bit hardware level into every pixel header, and sends
+   the complete 3,968-byte owned-half frame through SPI3.
+4. The display asks the engine to render the next complete frame.
+5. The engine drains queued commands.
+6. The layer stack clears or decays layer buffers according to layer policy.
+7. The engine snapshots latest FFT, peak, and wheel input state and updates
    audio controls.
-7. Each active animation renders into shared scratch.
-8. Scratch is blended into the animation's target layer using the animation's
+8. Each active animation renders into shared scratch.
+9. Scratch is blended into the animation's target layer using the animation's
    style.
-9. Layers are composed in fixed order into the present buffer render target.
-10. Timed animations expire after composition.
+10. Layers are composed in fixed order into the present buffer render target.
+11. Timed animations expire after composition.
 
 Command and PubSub paths use the same engine:
 
@@ -200,6 +224,7 @@ Layers are fixed and composed in enum order:
 - `TransientEffect`
 - `Wheel`
 - `Debug`
+- `UI`
 
 Current default policies:
 
@@ -210,10 +235,18 @@ Current default policies:
 - `TransientEffect`: cleared each frame, `MaxValue`, full opacity
 - `Wheel`: cleared each frame, `Alpha`, partial opacity
 - `Debug`: persistent decay, `AddValue`, full opacity
+- `UI`: persistent one-value-per-frame decay, `Replace`, full opacity
 
 These defaults are tuning values. The ownership boundary is the important part:
-backgrounds, FFT, one-shot effects, wheel overlays, and diagnostics never fight
-inside a single shared frame buffer.
+backgrounds, FFT, one-shot effects, wheel overlays, diagnostics, and UI never
+fight inside a single shared frame buffer. `UI` is last in the fixed composition
+order, so its nonzero pixels always replace every lower layer. At the 100 Hz
+frame rate, its decay from 255 to zero takes about 2.55 seconds. A master-owned
+UI flow can therefore stop its animation and rely on one consistent GPU-local
+fade instead of publishing a timed opacity sequence. Starting a new UI
+animation clears retained output from the previous UI state before all active
+UI animations render, preventing a shorter replacement (such as a decreased
+brightness fill) from leaving the old geometry behind during the fade.
 
 Layer active state and opacity are runtime controls. `/layer active <Layer>
 <on|off>` toggles a layer; disabling clears that layer once and then skips its
@@ -364,13 +397,44 @@ received yet, it renders at position zero so the layer is still testable.
 Master starts the persistent wheel indicator only after the bring-up spoke
 probe window has completed.
 
+`RadialGauge` is a configurable 500 ms UI-layer animation. Its command carries
+a value and maximum, two HSV color stops, a center-ring index, and a ring-band
+width. The color stops are interpolated over all spokes and the value controls
+how much of that fixed spectrum is filled. Center ring `255` means the
+topology's outermost ring; an explicit index selects another LED ring. Bands
+wider than one are centered on that ring and shifted at a surface edge so the
+requested width is preserved.
+
+The main dial uses a white-to-white `0..31` gauge, so level 0 lights one spoke
+and level 31 lights all 32. Selecting the main menu's Battery item uses the same
+stable gauge request with the power node's latest fresh `0..1000` state of
+charge and a red-to-green spectrum. Replaying the request restarts the 500 ms
+hold; when it expires, retained UI pixels use the layer's shared two-second
+fade.
+
+`RadialMenu` is the persistent UI-layer presentation for the held rotary
+menu. It divides the surface into a configurable number of angular item slots.
+Each folded item has independent bar spoke width, inner-ring depth, tip spoke
+width, and additional tip-ring depth. The highlighted item interpolates to a
+second independently configured unfurled shape, so radial growth and optional
+angular widening do not share a parameter. A populated-item mask selects
+between per-item hues and the dim-white empty-slot color.
+
+The current main menu occupies eight positions from `-3` through `+4`. Its
+folded default is `4 spokes × 2 rings` plus `2 spokes × 2 rings`; its unfurled
+default is `4 spokes × 6 rings` plus `2 spokes × 2 rings`. Master replaces the
+stable request on `Shown` and `Moved*`, restarting the short unfurl transition,
+then stops it on `Selected`. The retained UI layer supplies the existing fade
+after release before any selected action replaces it.
+
 ## Buffering And Timing
 
-The present strobe currently runs at 125 Hz. `LedPipelineBounds::targetFps` is
-also 125, giving an 8 ms work budget for the GPU's present-and-render step.
-This is separate from FastLED temporal dithering. FastLED's measured-FPS
-threshold remains an output-backend invariant and must not be changed to hide
-pipeline timing failures.
+The present strobe currently runs at 100 Hz. `LedPipelineBounds::targetFps` is
+also 100, giving a 10 ms work budget for the GPU's present-and-render step.
+Temporal dithering is disabled by configuration for production SK9822 output;
+its common 5-bit level supplies hardware brightness. The legacy FastLED backend
+retains its own configurable temporal-dither behavior. Neither policy should be
+changed to hide pipeline timing failures.
 
 `PresentBufferMode` is selected at compile time:
 
@@ -380,16 +444,15 @@ pipeline timing failures.
   default
 - `Quadruple`: available for future experiments with deeper buffering
 
-The current renderer is single-task and sequential. Future 4-8x LED-count work
-may need distributed per-layer rendering: one worker per layer renders into
-layer-local scratch, then a composition task gates on completed layers. Current
-animation code should keep rendering through supplied canvases and avoid
-assuming that only one task will ever render layers, but the present
-implementation should stay sequential until metrics justify the extra stacks,
-barriers, and failure modes.
+The production dense renderer remains single-task and sequential. If measured
+100 fps acceptance fails specifically in rendering, later work may evaluate
+owned-point iteration or distributed per-layer rendering. Animation code should
+keep rendering through supplied canvases, but the current implementation stays
+sequential until metrics justify extra tables, stacks, barriers, and failure
+modes.
 
 The pipeline does not diagnose frame health by comparing task wake-to-task wake
-spacing against 8 ms; that measurement includes ISR and scheduler jitter. The
+spacing against 10 ms; that measurement includes ISR and scheduler jitter. The
 actionable timing diagnostic is the measured LED frame step: selected-buffer
 presentation plus rendering the next complete buffer. Over-budget frame work is
 counted as `ledDisp.slow`, while actual missed external strobes are counted as
@@ -644,10 +707,14 @@ initialization across cores and trigger interrupt-watchdog failures.
 - `whlIn`: wheel input states captured
 - `repeat`: repeated presents because no newer frame was ready
 - `miss`: missed present strobes
-- `slow`: frame steps whose measured work exceeded the 8 ms budget
+- `slow`: frame steps whose measured work exceeded the 10 ms budget
 - `active`: active animation slot count
 - `rndMax`: maximum observed render duration in microseconds
 - `showMax`: maximum observed output-show duration in microseconds
+- `encMax`: maximum observed SK9822 HSV-to-wire encoding duration in
+  microseconds
+- `spiQMax`: maximum observed SPI3 transaction queue duration in microseconds
+- `spiWMax`: maximum observed SPI3 completion-wait duration in microseconds
 - `stepMax`: maximum observed present-and-render step duration in microseconds
 
 Validation on 2026-05-25 with `master`, `gpu0`, `gpu1`, and `io` attached
@@ -665,12 +732,21 @@ update path. Observed maxima were:
 - `gpu0`: `rndMax=3312us`, `showMax=2244us`, `stepMax=4652us`
 - `gpu1`: `rndMax=3725us`, `showMax=3117us`, `stepMax=4765us`
 
-These are comfortably below the 8 ms work budget for the current LED count.
+These are comfortably below the 8 ms work budget for the legacy LED count.
+They are a historical baseline, not evidence for the 32×60 SK9822 build; the
+production-code physical bench must establish new maxima.
 Separate master-side PubSub SPI RX queue backpressure warnings were seen during
 the same monitor session; those are transport pressure signals, not LED render
 pipeline failures.
 
 ## Validation Commands
+
+Run host LED protocol/topology and production ownership regressions:
+
+```sh
+bin/test-led-display
+bin/test-led-render-stitch
+```
 
 Build all active environments:
 

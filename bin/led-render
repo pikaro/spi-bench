@@ -2,7 +2,27 @@
 set -euo pipefail
 
 ROOT=$(git rev-parse --show-toplevel)
-BIN="$ROOT/.build/led-render/led-render"
+PROFILE=legacy-full
+ARGS=()
 
-"$ROOT/bin/led-render-build" >/dev/null
-exec "$BIN" "$@"
+while (($# > 0)); do
+    case "$1" in
+    --profile)
+        if (($# < 2)); then
+            echo "--profile requires a value" >&2
+            exit 2
+        fi
+        PROFILE=$2
+        shift 2
+        ;;
+    *)
+        ARGS+=("$1")
+        shift
+        ;;
+    esac
+done
+
+BIN="$ROOT/.build/led-render/$PROFILE/led-render"
+
+"$ROOT/bin/led-render-build" "$PROFILE" >/dev/null
+exec "$BIN" "${ARGS[@]}"

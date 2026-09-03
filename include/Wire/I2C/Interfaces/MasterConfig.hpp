@@ -13,7 +13,7 @@ struct MasterConfig {
     bool enableInternalPullups = false;
     uint32_t transactionTimeoutMs = 50;
 
-    [[nodiscard]] bool validate() const {
+    [[nodiscard]] constexpr bool validate() const {
         return clockHz > 0 && transactionTimeoutMs > 0;
     }
 };
@@ -25,7 +25,7 @@ struct DeviceConfig {
     uint32_t sclWaitUs = 0;
     bool disableAckCheck = false;
 
-    [[nodiscard]] bool validate() const {
+    [[nodiscard]] constexpr bool validate() const {
         if (addressBits == AddressBits::Seven) {
             return address <= 0x7F;
         }

@@ -1,0 +1,22 @@
+#!/bin/bash
+
+set -euo pipefail
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+cd "$REPO_ROOT"
+
+mkdir -p build/host-tests
+"${CXX:-c++}" \
+    -std=c++23 \
+    -Wall \
+    -Wextra \
+    -Werror \
+    -Iinclude \
+    -I.pio/libdeps/scratch/CRCpp \
+    -I.pio/libdeps/scratch/magic_enum/include \
+    test/battery_monitor_logic.cpp \
+    -o build/host-tests/battery_monitor_logic
+
+build/host-tests/battery_monitor_logic
+exec python3 -m unittest discover -s test \
+    -p 'battery_calibration_validator_test.py'

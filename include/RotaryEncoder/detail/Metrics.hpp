@@ -25,11 +25,11 @@ struct Metrics {
         .level = Totem::MetricsBackend::MetricLevel::Diagnostic,
     };
     static constexpr MetricDesc clockwiseDef = {
-        .name = "clockwise",
+        .name = "cwIncr",
         .type = MetricType::Counter,
     };
     static constexpr MetricDesc counterclockwiseDef = {
-        .name = "counterclockwise",
+        .name = "ccwIncr",
         .type = MetricType::Counter,
     };
     static constexpr MetricDesc invalidDef = {

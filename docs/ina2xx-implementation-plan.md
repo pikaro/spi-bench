@@ -250,6 +250,20 @@ facade consumers.
   samples and independent limit states.
 - [x] Record verification and mark this plan complete.
 
+### Phase 8 — Contract-aligned result and INA228 semantics
+
+- [x] Treat practical and absolute limit classifications as successful samples;
+  reserve `ReturnCode` failures for acquisition, response, and conversion
+  failures.
+- [x] Return the forced sample from `sampleNow()` through `std::expected`.
+- [x] Add `Ina228` to the explicit model/capability surface while making
+  `begin()` return `NotSupported` until its native-width backend exists.
+- [x] Preserve per-sample validity independently from model capabilities and
+  document zero-value semantics for temperature, energy, and charge.
+- [x] Remove raw INA226 mask/sample-valid fields from the semantic ALERT event.
+- [x] Constrain callback templates, make validation/configuration constexpr,
+  update documentation, and rebuild `scratch` without diagnostics.
+
 ## Planned file scope
 
 - `include/Wire/I2C/Interfaces/Ina2xx*.hpp` — public model/config/event/sample

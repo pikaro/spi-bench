@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+cd "$REPO_ROOT"
+
+mkdir -p build/host-tests
+"${CXX:-c++}" \
+    -std=c++23 \
+    -Wall \
+    -Wextra \
+    -Werror \
+    -Itools/pubsub-udp-peer \
+    test/pubsub_wire_logic.cpp \
+    -o build/host-tests/pubsub_wire_logic
+
+build/host-tests/pubsub_wire_logic

@@ -176,7 +176,8 @@ struct RouteDef {
 
     [[nodiscard]] bool
     matches(const Totem::PubSubBackend::Envelope &envelope) const {
-        return static_cast<uint8_t>(source) == envelope.header.source &&
+        return static_cast<Totem::PubSubBackend::NodeId>(source) ==
+                   envelope.header.source &&
                static_cast<uint32_t>(topic) == envelope.header.topic;
     }
 };

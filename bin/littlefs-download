@@ -9,29 +9,40 @@ import json
 import shutil
 import subprocess
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
-
 
 BOARD_CHIPS = {
-    "custom_esp32_nodemcu": "esp32",
-    "custom_esp32s3_devkit": "esp32s3",
-    "custom_esp32s3_nano": "esp32s3",
-    "custom_esp32s3_zero": "esp32s3",
-    "custom_esp32c3_supermini": "esp32c3",
+    'custom_esp32_nodemcu': 'esp32',
+    'custom_esp32s3_devkit': 'esp32s3',
+    'custom_esp32s3_nano': 'esp32s3',
+    'custom_esp32s3_zero': 'esp32s3',
+    'custom_esp32c3_supermini': 'esp32c3',
 }
 
 DEFAULT_BAUD = 921600
-LITTLEFS_BLOCK_SIZE = 4096
-LITTLEFS_PAGE_SIZE = 256
+DEFAULT_LITTLEFS_BLOCK_SIZE = 4096
+DEFAULT_LITTLEFS_READ_SIZE = 128
+DEFAULT_LITTLEFS_WRITE_SIZE = 128
+DEFAULT_LITTLEFS_CACHE_SIZE = 512
+DEFAULT_LITTLEFS_LOOKAHEAD_SIZE = 128
 
 
 @dataclass(frozen=True)
 class Partition:
     offset: int
     size: int
+
+
+@dataclass(frozen=True)
+class LittleFSGeometry:
+    block_size: int
+    read_size: int
+    write_size: int
+    cache_size: int
+    lookahead_size: int
 
 
 @dataclass(frozen=True)
@@ -43,51 +54,52 @@ class EnvConfig:
     partition: Partition
     usb_serials: tuple[str, ...]
     baud: int
+    littlefs: LittleFSGeometry
 
 
 def repo_root() -> Path:
     try:
         out = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
+            ['git', 'rev-parse', '--show-toplevel'],
             check=True,
             capture_output=True,
             text=True,
         ).stdout.strip()
         return Path(out)
-    except (subprocess.CalledProcessError, FileNotFoundError):
+    except subprocess.CalledProcessError, FileNotFoundError:
         return Path(__file__).resolve().parents[1]
 
 
 def load_config(root: Path) -> configparser.ConfigParser:
     config = configparser.ConfigParser(interpolation=None)
     config.optionxform = str
-    with (root / "platformio.ini").open("r", encoding="utf-8") as file:
+    with (root / 'platformio.ini').open('r', encoding='utf-8') as file:
         config.read_file(file)
     return config
 
 
 def section_for_env(env: str) -> str:
-    return env if env.startswith("env:") else f"env:{env}"
+    return env if env.startswith('env:') else f'env:{env}'
 
 
 def env_name(section: str) -> str:
-    return section[4:] if section.startswith("env:") else section
+    return section[4:] if section.startswith('env:') else section
 
 
 def inherited_sections(config: configparser.ConfigParser, section: str) -> list[str]:
     if not config.has_section(section):
-        raise RuntimeError(f"Unknown PlatformIO section {section!r}")
+        raise RuntimeError(f'Unknown PlatformIO section {section!r}')
 
     result: list[str] = []
     visiting: set[str] = set()
 
     def visit(current: str) -> None:
         if current in visiting:
-            raise RuntimeError(f"Cyclic PlatformIO extends chain at {current!r}")
+            raise RuntimeError(f'Cyclic PlatformIO extends chain at {current!r}')
         visiting.add(current)
 
-        if config.has_option(current, "extends"):
-            for parent in config.get(current, "extends").splitlines():
+        if config.has_option(current, 'extends'):
+            for parent in config.get(current, 'extends').splitlines():
                 parent = parent.strip()
                 if not parent:
                     continue
@@ -116,27 +128,64 @@ def inherited_value(
 def parse_int(value: str) -> int:
     value = value.strip()
     multiplier = 1
-    if value[-1:].lower() == "k":
+    if value[-1:].lower() == 'k':
         multiplier = 1024
         value = value[:-1]
-    elif value[-1:].lower() == "m":
+    elif value[-1:].lower() == 'm':
         multiplier = 1024 * 1024
         value = value[:-1]
     return int(value, 0) * multiplier
 
 
 def parse_littlefs_partition(path: Path) -> Partition:
-    with path.open("r", encoding="utf-8") as file:
-        rows = (line for line in file if not line.lstrip().startswith("#"))
+    with path.open('r', encoding='utf-8') as file:
+        rows = (line for line in file if not line.lstrip().startswith('#'))
         for row in csv.reader(rows):
             if len(row) < 5:
                 continue
             name = row[0].strip()
             subtype = row[2].strip()
-            if name != "littlefs" and subtype != "littlefs":
+            if name != 'littlefs' and subtype != 'littlefs':
                 continue
             return Partition(offset=parse_int(row[3]), size=parse_int(row[4]))
-    raise RuntimeError(f"No littlefs partition found in {path}")
+    raise RuntimeError(f'No littlefs partition found in {path}')
+
+
+def load_littlefs_geometry(root: Path, env: str) -> LittleFSGeometry:
+    values = {
+        'CONFIG_LITTLEFS_READ_SIZE': DEFAULT_LITTLEFS_READ_SIZE,
+        'CONFIG_LITTLEFS_WRITE_SIZE': DEFAULT_LITTLEFS_WRITE_SIZE,
+        'CONFIG_LITTLEFS_CACHE_SIZE': DEFAULT_LITTLEFS_CACHE_SIZE,
+        'CONFIG_LITTLEFS_LOOKAHEAD_SIZE': DEFAULT_LITTLEFS_LOOKAHEAD_SIZE,
+    }
+    candidates = (
+        root / f'sdkconfig.{env}',
+        root / 'build' / env / 'config' / 'sdkconfig.h',
+        root / '.pio' / 'build' / env / 'config' / 'sdkconfig.h',
+    )
+    for path in candidates:
+        if not path.exists():
+            continue
+        for line in path.read_text(encoding='utf-8').splitlines():
+            line = line.removeprefix('#define ').strip()
+            if '=' in line:
+                key, value = line.split('=', 1)
+            elif ' ' in line:
+                key, value = line.split(None, 1)
+            else:
+                continue
+            key = key.strip()
+            if key in values:
+                values[key] = parse_int(value)
+        break
+
+    return LittleFSGeometry(
+        block_size=DEFAULT_LITTLEFS_BLOCK_SIZE,
+        read_size=values['CONFIG_LITTLEFS_READ_SIZE'],
+        write_size=values['CONFIG_LITTLEFS_WRITE_SIZE'],
+        cache_size=values['CONFIG_LITTLEFS_CACHE_SIZE'],
+        lookahead_size=values['CONFIG_LITTLEFS_LOOKAHEAD_SIZE'],
+    )
 
 
 def load_env_config(root: Path, env: str) -> EnvConfig:
@@ -144,26 +193,26 @@ def load_env_config(root: Path, env: str) -> EnvConfig:
     section = section_for_env(env)
     name = env_name(section)
 
-    board = inherited_value(config, section, "board")
+    board = inherited_value(config, section, 'board')
     if board is None:
-        raise RuntimeError(f"{section} does not resolve a board")
+        raise RuntimeError(f'{section} does not resolve a board')
 
     chip = BOARD_CHIPS.get(board)
     if chip is None:
-        raise RuntimeError(f"No chip mapping for board {board!r}")
+        raise RuntimeError(f'No chip mapping for board {board!r}')
 
-    partition_value = inherited_value(config, section, "board_build.partitions")
+    partition_value = inherited_value(config, section, 'board_build.partitions')
     if partition_value is None:
-        raise RuntimeError(f"{section} does not resolve board_build.partitions")
+        raise RuntimeError(f'{section} does not resolve board_build.partitions')
     partition_file = root / partition_value.strip()
     partition = parse_littlefs_partition(partition_file)
 
-    serial_value = inherited_value(config, section, "custom_usb_serials", "") or ""
+    serial_value = inherited_value(config, section, 'custom_usb_serials', '') or ''
     usb_serials = tuple(serial_value.split())
     if not usb_serials:
-        raise RuntimeError(f"{section} does not define custom_usb_serials")
+        raise RuntimeError(f'{section} does not define custom_usb_serials')
 
-    baud_value = inherited_value(config, section, "upload_speed", str(DEFAULT_BAUD))
+    baud_value = inherited_value(config, section, 'upload_speed', str(DEFAULT_BAUD))
     baud = int((baud_value or str(DEFAULT_BAUD)).strip())
 
     return EnvConfig(
@@ -174,44 +223,100 @@ def load_env_config(root: Path, env: str) -> EnvConfig:
         partition=partition,
         usb_serials=usb_serials,
         baud=baud,
+        littlefs=load_littlefs_geometry(root, name),
     )
 
 
 def pio_executable(root: Path) -> str:
-    local = root / ".venv" / "bin" / "pio"
+    local = root / '.venv' / 'bin' / 'pio'
     if local.exists():
         return str(local)
-    found = shutil.which("pio")
+    found = shutil.which('pio')
     if found:
         return found
-    raise RuntimeError("PlatformIO executable not found")
+    raise RuntimeError('PlatformIO executable not found')
 
 
 def repo_python(root: Path) -> str:
-    local = root / ".venv" / "bin" / "python"
+    local = root / '.venv' / 'bin' / 'python'
     return str(local) if local.exists() else sys.executable
 
 
 def esptool_path() -> str:
-    packaged = Path.home() / ".platformio" / "packages" / "tool-esptoolpy" / "esptool.py"
+    packaged = (
+        Path.home() / '.platformio' / 'packages' / 'tool-esptoolpy@2.40900.250804' / 'esptool.py'
+    )
     if packaged.exists():
         return str(packaged)
-    found = shutil.which("esptool.py")
+    found = shutil.which('esptool.py')
     if found:
         return found
-    raise RuntimeError("esptool.py not found")
+    raise RuntimeError('esptool.py not found')
 
 
 def mklittlefs_path() -> str | None:
-    packaged = Path.home() / ".platformio" / "packages" / "tool-mklittlefs" / "mklittlefs"
+    packaged = Path.home() / '.platformio' / 'packages' / 'tool-mklittlefs' / 'mklittlefs'
     if packaged.exists():
         return str(packaged)
-    return shutil.which("mklittlefs")
+    return shutil.which('mklittlefs')
+
+
+def build_littlefs_extractor(root: Path) -> tuple[Path | None, str]:
+    compiler = shutil.which('cc')
+    if compiler is None:
+        return None, 'a host C compiler was not found'
+
+    littlefs_dir = root / 'managed_components' / 'joltwallet__littlefs' / 'src' / 'littlefs'
+    source = root / 'tools' / 'littlefs-extract' / 'main.c'
+    sources = (
+        source,
+        littlefs_dir / 'lfs.c',
+        littlefs_dir / 'lfs.h',
+        littlefs_dir / 'lfs_util.c',
+        littlefs_dir / 'lfs_util.h',
+    )
+    missing = next((path for path in sources if not path.exists()), None)
+    if missing is not None:
+        return None, f'LittleFS extractor source is missing: {missing}'
+
+    output = root / '.build' / 'littlefs-extract'
+    newest_source = max(path.stat().st_mtime_ns for path in sources)
+    if output.exists() and output.stat().st_mtime_ns >= newest_source:
+        return output, ''
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(
+        [
+            compiler,
+            '-std=c11',
+            '-O2',
+            '-DLFS_READONLY',
+            '-Wall',
+            '-Wextra',
+            '-Werror',
+            '-Wno-unused-function',
+            f'-I{littlefs_dir}',
+            str(source),
+            str(littlefs_dir / 'lfs.c'),
+            str(littlefs_dir / 'lfs_util.c'),
+            '-o',
+            str(output),
+        ],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None, (
+            f'failed to build the LittleFS extractor (exit {result.returncode})\n'
+            f'{result.stdout}{result.stderr}'
+        )
+    return output, ''
 
 
 def load_devices(root: Path) -> list[dict[str, str]]:
     out = subprocess.run(
-        [pio_executable(root), "device", "list", "--json-output"],
+        [pio_executable(root), 'device', 'list', '--json-output'],
         check=True,
         capture_output=True,
         text=True,
@@ -221,7 +326,7 @@ def load_devices(root: Path) -> list[dict[str, str]]:
 
 def serial_from_hwid(hwid: str) -> str | None:
     for part in hwid.split():
-        if part.startswith("SER="):
+        if part.startswith('SER='):
             return part[4:]
     return None
 
@@ -230,19 +335,19 @@ def select_port(root: Path, serials: Iterable[str]) -> str:
     devices = load_devices(root)
     for serial in serials:
         matches = [
-            device["port"]
+            device['port']
             for device in devices
-            if serial_from_hwid(device.get("hwid", "")) == serial
+            if serial_from_hwid(device.get('hwid', '')) == serial
         ]
         if not matches:
             continue
-        cu_matches = [port for port in matches if "/cu." in port]
+        cu_matches = [port for port in matches if '/cu.' in port]
         return cu_matches[0] if cu_matches else matches[0]
-    raise RuntimeError(f"No connected device matched USB serials: {' '.join(serials)}")
+    raise RuntimeError(f'No connected device matched USB serials: {" ".join(serials)}')
 
 
 def run(cmd: list[str]) -> None:
-    print("+", " ".join(cmd))
+    print('+', ' '.join(cmd))
     subprocess.run(cmd, check=True)
 
 
@@ -258,13 +363,13 @@ def read_flash(
         [
             repo_python(root),
             esptool_path(),
-            "--chip",
+            '--chip',
             chip,
-            "--port",
+            '--port',
             port,
-            "--baud",
+            '--baud',
             str(baud),
-            "read_flash",
+            'read_flash',
             hex(config.partition.offset),
             hex(config.partition.size),
             str(image),
@@ -276,43 +381,84 @@ def unpack_with_mklittlefs(
     image: Path,
     files_dir: Path,
     size: int,
+    geometry: LittleFSGeometry,
 ) -> tuple[bool, str]:
     tool = mklittlefs_path()
     if tool is None:
-        return False, "mklittlefs was not found"
+        return False, 'mklittlefs was not found'
 
     result = subprocess.run(
         [
             tool,
-            "-b",
-            str(LITTLEFS_BLOCK_SIZE),
-            "-p",
-            str(LITTLEFS_PAGE_SIZE),
-            "-s",
+            '-b',
+            str(geometry.block_size),
+            '-p',
+            str(geometry.write_size),
+            '-s',
             str(size),
-            "-u",
+            '-u',
             str(files_dir),
             str(image),
         ],
         capture_output=True,
+        check=False,
         text=True,
     )
     if result.returncode == 0:
-        return True, ""
+        return True, ''
 
-    log_path = files_dir / "mklittlefs.log"
+    log_path = files_dir / 'mklittlefs.log'
     log_path.write_text(
-        "mklittlefs failed while unpacking the raw LittleFS image.\n\n"
-        f"exit code: {result.returncode}\n\n"
-        "stdout:\n"
-        f"{result.stdout}\n\n"
-        "stderr:\n"
-        f"{result.stderr}\n",
-        encoding="utf-8",
+        'mklittlefs failed while unpacking the raw LittleFS image.\n\n'
+        f'exit code: {result.returncode}\n\n'
+        'stdout:\n'
+        f'{result.stdout}\n\n'
+        'stderr:\n'
+        f'{result.stderr}\n',
+        encoding='utf-8',
     )
-    return False, (
-        f"mklittlefs exited with {result.returncode}; see {log_path.name}"
+    return False, (f'mklittlefs exited with {result.returncode}; see {log_path.name}')
+
+
+def unpack_with_vendored_littlefs(
+    root: Path,
+    image: Path,
+    files_dir: Path,
+    geometry: LittleFSGeometry,
+) -> tuple[bool, str]:
+    tool, build_error = build_littlefs_extractor(root)
+    if tool is None:
+        return False, build_error
+
+    result = subprocess.run(
+        [
+            str(tool),
+            str(image),
+            str(files_dir),
+            str(geometry.block_size),
+            str(geometry.read_size),
+            str(geometry.write_size),
+            str(geometry.cache_size),
+            str(geometry.lookahead_size),
+        ],
+        capture_output=True,
+        check=False,
+        text=True,
     )
+    if result.returncode == 0:
+        return True, ''
+
+    log_path = files_dir / 'littlefs-extract.log'
+    log_path.write_text(
+        'The firmware-matched LittleFS reader failed while unpacking the image.\n\n'
+        f'exit code: {result.returncode}\n\n'
+        'stdout:\n'
+        f'{result.stdout}\n\n'
+        'stderr:\n'
+        f'{result.stderr}\n',
+        encoding='utf-8',
+    )
+    return False, f'firmware-matched extractor exited with {result.returncode}'
 
 
 def iter_strings(image: Path, min_len: int = 4) -> Iterable[tuple[int, str]]:
@@ -324,11 +470,11 @@ def iter_strings(image: Path, min_len: int = 4) -> Iterable[tuple[int, str]]:
         if len(current) < min_len:
             current.clear()
             return None
-        value = current.decode("ascii", errors="replace")
+        value = current.decode('ascii', errors='replace')
         current.clear()
         return start, value
 
-    with image.open("rb") as file:
+    with image.open('rb') as file:
         while chunk := file.read(64 * 1024):
             for byte in chunk:
                 if byte == 9 or 32 <= byte <= 126:
@@ -348,67 +494,68 @@ def iter_strings(image: Path, min_len: int = 4) -> Iterable[tuple[int, str]]:
 
 def looks_journal_related(value: str) -> bool:
     lower = value.lower()
-    if value.startswith(("err ", "pre ", "nxt ")):
+    if value.startswith(('err ', 'pre ', 'nxt ')):
         return True
     keywords = (
-        " err ",
-        " wrn ",
-        " crt ",
-        "panic",
-        "guru",
-        "watchdog",
-        "exception",
-        "assert",
-        "bytearena",
-        "littlefs",
-        "spi ",
-        "rs485",
-        "task",
-        "failed",
+        ' err ',
+        ' wrn ',
+        ' crt ',
+        'panic',
+        'guru',
+        'watchdog',
+        'exception',
+        'assert',
+        'bytearena',
+        'littlefs',
+        'spi ',
+        'rs485',
+        'task',
+        'failed',
     )
     return any(keyword in lower for keyword in keywords)
 
 
 def fallback_extract_strings(image: Path, files_dir: Path, reason: str) -> None:
     files_dir.mkdir(parents=True, exist_ok=True)
-    raw_path = files_dir / "_raw_strings.txt"
-    journal_path = files_dir / "errors.log.strings"
+    raw_path = files_dir / '_raw_strings.txt'
+    journal_path = files_dir / 'errors.log.strings'
 
-    with raw_path.open("w", encoding="utf-8") as raw, journal_path.open(
-        "w", encoding="utf-8"
-    ) as journal:
+    with (
+        raw_path.open('w', encoding='utf-8') as raw,
+        journal_path.open('w', encoding='utf-8') as journal,
+    ):
         for offset, value in iter_strings(image):
-            line = f"{offset:08x} {value}\n"
+            line = f'{offset:08x} {value}\n'
             raw.write(line)
             if looks_journal_related(value):
                 journal.write(line)
 
-    (files_dir / "README.txt").write_text(
-        "mklittlefs could not unpack this raw image, so this directory contains "
-        "printable-string extracts instead of a complete file tree.\n"
-        f"Reason: {reason}\n",
-        encoding="utf-8",
+    (files_dir / 'README.txt').write_text(
+        'No LittleFS reader could unpack this raw image, so this directory contains '
+        'printable-string extracts instead of a complete file tree.\n'
+        f'Reason: {reason}\n',
+        encoding='utf-8',
     )
 
 
 def default_output(root: Path, env: str) -> Path:
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    return root / "data" / env / "downloaded-littlefs" / timestamp
+    timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+    return root / 'data' / env / 'downloaded-littlefs' / timestamp
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Download a node LittleFS partition and unpack it outside the upload tree."
+        description='Download a node LittleFS partition and unpack it outside the upload tree.'
     )
-    parser.add_argument("env", help="PlatformIO environment, for example master or gpu0")
-    parser.add_argument("--port", help="Serial port override")
-    parser.add_argument("--chip", help="esptool chip override")
-    parser.add_argument("--baud", type=int, help="esptool baud override")
-    parser.add_argument("--output", type=Path, help="Output directory override")
+    parser.add_argument('env', help='PlatformIO environment, for example master or gpu0')
+    parser.add_argument('--port', help='Serial port override')
+    parser.add_argument('--chip', help='esptool chip override')
+    parser.add_argument('--baud', type=int, help='esptool baud override')
+    parser.add_argument('--output', type=Path, help='Output directory override')
     parser.add_argument(
-        "--from-image",
+        '--from-image',
         type=Path,
-        help="Unpack an existing LittleFS partition image instead of reading a board",
+        help='Unpack an existing LittleFS partition image instead of reading a board',
     )
     return parser.parse_args()
 
@@ -418,8 +565,8 @@ def main() -> int:
     root = repo_root()
     config = load_env_config(root, args.env)
     output = args.output or default_output(root, config.env)
-    files_dir = output / "files"
-    image = output / "image.bin"
+    files_dir = output / 'files'
+    image = output / 'image.bin'
 
     output.mkdir(parents=True, exist_ok=True)
     files_dir.mkdir(parents=True, exist_ok=True)
@@ -439,21 +586,32 @@ def main() -> int:
             image=image,
         )
 
-    unpacked, unpack_reason = unpack_with_mklittlefs(
-        image, files_dir, config.partition.size
+    unpacked, unpack_reason = unpack_with_vendored_littlefs(
+        root,
+        image,
+        files_dir,
+        config.littlefs,
     )
     if not unpacked:
-        print(f"warning: {unpack_reason}; writing printable-string fallback")
+        print(f'warning: {unpack_reason}; trying mklittlefs')
+        unpacked, unpack_reason = unpack_with_mklittlefs(
+            image,
+            files_dir,
+            config.partition.size,
+            config.littlefs,
+        )
+    if not unpacked:
+        print(f'warning: {unpack_reason}; writing printable-string fallback')
         fallback_extract_strings(
             image,
             files_dir,
             unpack_reason,
         )
 
-    print(f"LittleFS output: {output}")
-    print(f"Unpacked files: {files_dir}")
+    print(f'LittleFS output: {output}')
+    print(f'Unpacked files: {files_dir}')
     return 0
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     raise SystemExit(main())

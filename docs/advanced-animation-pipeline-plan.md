@@ -137,9 +137,9 @@ Implementation steps:
 1. Add a 16-entry sine/cosine table or generate one at compile time if the
    current toolchain allows clean constexpr math.
 2. Add geometry constants for the physical annulus: a center-gap diameter and
-   a visible strip length. The current hardware is roughly a 30 cm center-gap
-   diameter and 30 cm strip length, so LED centers start about one third of the
-   way out from the geometric center.
+   a visible strip length. These belong to the selected topology: the legacy
+   WS2812B surface is roughly 300/300 mm, while the production SK9822 surface
+   has an approximately 60 mm inner radius and a roughly 417 mm strip length.
 3. Add a 46-entry strip-radius table using radial cell centers.
 4. Derive `worldRadius` from `(innerRadius + stripRadius) / outerRadius` before
    computing `x` and `y`.

@@ -17,9 +17,11 @@ struct DecoderResult {
 /**
  * Compact Gray-code decoder for a two-channel mechanical encoder.
  *
- * Each legal adjacent transition contributes +1 or -1. Reversals and contact
- * bounce cancel naturally; skipped diagonal transitions reset the partial
- * detent so they cannot manufacture a turn in either direction.
+ * Each legal adjacent transition contributes +1 or -1. A direction change
+ * starts a new partial detent so a stale phase offset cannot consume the first
+ * complete detent after a reversal. Alternating contact bounce therefore
+ * cannot accumulate to a complete detent. Skipped diagonal transitions reset
+ * the partial detent so they cannot manufacture a turn in either direction.
  */
 class QuadratureDecoder {
   public:
@@ -44,7 +46,11 @@ class QuadratureDecoder {
             return {.invalidTransition = true};
         }
 
-        _accumulator = static_cast<int8_t>(_accumulator + transition);
+        const bool directionChanged = (_accumulator > 0 && transition < 0) ||
+                                      (_accumulator < 0 && transition > 0);
+        _accumulator = directionChanged
+                           ? transition
+                           : static_cast<int8_t>(_accumulator + transition);
         const int8_t threshold = static_cast<int8_t>(transitionsPerDetent);
         if (_accumulator < threshold && _accumulator > -threshold) {
             return {};
@@ -109,8 +115,40 @@ consteval bool rejectsBounceAndSkippedStates() {
     return invalid.invalidTransition && !invalid.direction.has_value();
 }
 
+consteval bool decodesReversalWithPartialPhase() {
+    QuadratureDecoder decoder{};
+    decoder.reset(0b00);
+
+    // Simulate startup between physical detents. Reaching the first stable
+    // position leaves one positive transition of phase history.
+    if (decoder.update(0b01, 4, false).direction.has_value()) {
+        return false;
+    }
+
+    // A complete detent in the opposite direction must not be consumed by
+    // that stale partial transition.
+    if (decoder.update(0b00, 4, false).direction.has_value() ||
+        decoder.update(0b10, 4, false).direction.has_value() ||
+        decoder.update(0b11, 4, false).direction.has_value()) {
+        return false;
+    }
+    if (decoder.update(0b01, 4, false).direction !=
+        Direction::Counterclockwise) {
+        return false;
+    }
+
+    // Returning by one complete detent must produce the matching event too.
+    if (decoder.update(0b11, 4, false).direction.has_value() ||
+        decoder.update(0b10, 4, false).direction.has_value() ||
+        decoder.update(0b00, 4, false).direction.has_value()) {
+        return false;
+    }
+    return decoder.update(0b01, 4, false).direction == Direction::Clockwise;
+}
+
 static_assert(decodesFullDetents());
 static_assert(rejectsBounceAndSkippedStates());
+static_assert(decodesReversalWithPartialPhase());
 
 } // namespace tests
 

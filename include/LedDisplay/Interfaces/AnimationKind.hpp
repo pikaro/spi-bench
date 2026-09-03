@@ -26,6 +26,8 @@ enum class AnimationKind : uint8_t {
     RadialCurtain,
     PolarLattice,
     Bolt,
+    RadialGauge,
+    RadialMenu,
 };
 
 } // namespace Totem::LedDisplay

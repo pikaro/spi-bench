@@ -1,0 +1,22 @@
+#!/bin/bash
+
+set -euo pipefail
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+cd "$REPO_ROOT"
+
+BUILD_DIR="$REPO_ROOT/build/host-tests"
+mkdir -p "$BUILD_DIR"
+
+"${CXX:-c++}" \
+    -std=c++23 \
+    -Wall \
+    -Wextra \
+    -Werror \
+    -Itest/host_include \
+    -Iinclude \
+    -I.pio/libdeps/scratch/magic_enum/include \
+    test/status_led_logic.cpp \
+    -o "$BUILD_DIR/status_led_logic"
+
+"$BUILD_DIR/status_led_logic"

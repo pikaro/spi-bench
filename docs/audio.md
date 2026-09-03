@@ -328,10 +328,10 @@ Read timeouts are expected while the source is offline and are logged by this
 component at a low periodic rate with the configured pins and I2S mode instead
 of surfacing audio-tools' raw `I2SDriverESP32V1::readBytes` trace.
 
-The current `env:media` board is `custom_esp32_nodemcu` through
-`platformio.ini`. The legacy preset pins are not a safe classic ESP32 NodeMCU
-pinout, so hardware validation still needs a board decision or a custom device
-config before unattended runtime use.
+The active `env:media` board is an ESP32-S3 Zero. Its SPH0645 link uses GPIO13
+for BCLK, GPIO1 for WS/LRCK, and GPIO12 for data input. The S3 uses native USB
+Serial/JTAG for its console so the schematic's GPIO44 indicator is not claimed
+by a hardware UART.
 
 ## FFT Notes
 
@@ -436,7 +436,7 @@ the evidence group, BPM bounds, hit window, and confidence rules are plausible.
 The `/peaks` console command prints the analyzer's current peak rate estimate,
 last peak energy, peak count, and last-peak age for every group, and marks the
 configured indicator group. The `/tempo` command prints tracker lock state, BPM,
-confidence, last beat outcome, and hit/miss/reacquire/lost counters. The GPIO26
+confidence, last beat outcome, and hit/miss/reacquire/lost counters. The GPIO44
 indicator LED is driven only by the peak indicator group, which defaults to bass.
 Tempo confidence is capped by recent expected-hit / expected-miss stability, so
 a consistent but frequently lost/reacquired lock cannot report full confidence.
@@ -446,9 +446,9 @@ rate estimate, allowing octave-related half/double-time matches, so isolated
 short bass transients do not override a slower stable peak cadence.
 
 `FftAnalyzerConfig::peakIndicator` is an optional single peak callback slot for
-local hardware indicators. `src/media/main.cpp` wires it to a `LedPwm` pulse on
-active-high GPIO26 so physical peak timing can be compared against the display
-without relying on serial logs.
+local hardware indicators. `src/media/main.cpp` wires it to an electrically
+active-low `LedPwm` pulse on GPIO44 so physical peak timing can be compared
+against the display without relying on serial logs.
 
 The analyzer registers metrics through `include/AudioFft/detail/Metrics.hpp`.
 `audCore` keeps rare frame-drop counters, `audFft` keeps diagnostic
@@ -478,9 +478,9 @@ main metric groups are:
 
 `src/media/config.hpp` contains optional I2C SSD1306 display config for realtime
 FFT debugging. `enableFftDebugDisplay` currently enables it for the I2S media
-build. Bluetooth media builds may need to disable it because Classic Bluetooth,
-SPI/PubSub, FFT, and the display task can leave too little internal heap
-headroom on the original ESP32. When enabled, the media node starts
+build. The v2 bus uses GPIO5 SCL and GPIO6 SDA, external pull-ups, and the
+owner-selected 1 MHz display overclock; MCU internal pull-ups remain disabled.
+When enabled, the media node starts
 `Wire::I2C::Master`, `Wire::I2C::Ssd1306Display`, and `AudioFft::FftDisplay`
 before the analyzer starts.
 The analyzer callbacks only update a latest-frame slot; the display task owns

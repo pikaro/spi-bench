@@ -12,9 +12,10 @@ ESP32-class MCUs.
 
 The target topology is:
 
-- one master node that coordinates the bus and handles WiFi
+- one master node that coordinates the hardware buses
 - one media node that publishes FFT frames, peak events, and beat outcome events
   from I2S audio
+- one power node that monitors the battery and bridges WiFi/UDP PubSub to SPI
 - four GPU nodes that render LED segments locally
 - side nodes over RS485, I2C, and BLE for sensors, bulbs, and peripherals
 
@@ -24,11 +25,12 @@ nodes subscribe to those topics and generate their own frame output.
 
 ## Prototype Status
 
-For the first prototype target, PubSub is considered integration-ready for the
-current five-node graph:
+For the v2 prototype target, PubSub is integration-ready for the current
+six-node graph:
 
-- `master` bridges one low-speed SPI link to `media`, one high-speed shared SPI
-  router with `gpu0` and `gpu1`, and one RS485 link to `io`.
+- `master` bridges one low-speed shared SPI router with `media` and `power`, one
+  high-speed shared SPI router with `gpu0` and `gpu1`, and one RS485 link to
+  `io`.
 - Production entrypoints use `include/Setups/PubSubNetwork.hpp` to register the
   real transports and expose `PubSubService`. Test publishers and synthetic
   subscribers are not active in production.
@@ -37,8 +39,15 @@ current five-node graph:
 - GPU nodes subscribe through `LedDisplay` to animation and FFT-frame events.
   They share the same event interests in this prototype shape, matching the
   intended later four-GPU bus.
+- GPU0 and GPU1 periodically publish LED output-readiness state. Master waits
+  for both sources, publishes the LED output-enable command back to the GPU
+  peers, and only then publishes the boot animation.
 - Media owns the audio/FFT pipeline and the low-speed SPI transport. It publishes
   FFT frames, peak/accent events, and sparse tempo-clock beat outcome events.
+- Power is a low-speed SPI edge. It owns the two INA226 monitors and local
+  BatteryMonitor behavior. It also owns the WiFi-backed UDP PubSub transport and
+  bridges that transport to SPI; this migration does not add a new telemetry
+  payload or wire format.
 
 The accepted behavior for this stage is reliable delivery, bounded static
 storage, graceful recovery after master or edge reset, and visibility through
@@ -77,7 +86,9 @@ fanout is based on topic masks maintained by subscription control messages.
 Subscription replay is normally triggered by transport availability. A config
 may also enable periodic replay for hardware bring-up or transports where a
 missed availability-era control frame should be repaired as soft state rather
-than leaving later application publishes unrouted.
+than leaving later application publishes unrouted. A replay advertises all
+current local subscriptions in one topic-mask control event; ordinary
+subscribe and unsubscribe changes remain individual events.
 
 Payload pools are storage helpers, not PubSub node owners. Application pools may
 use the facade-level no-argument message ID callback, while node-owned
@@ -123,11 +134,12 @@ callback fires. Ingress frames are copied into a small RX queue from the RS485
 data handler and published during the normal PubSub transport polling path.
 
 `PubSubBackend/Transports/SpiTransport.hpp` is the hardware point-to-point SPI
-transport used by edge nodes and by the master's low-speed media link.
+transport used by edge nodes.
 `PubSubBackend/Transports/SpiRouterTransport.hpp` fronts multiple hardware SPI
 links as one shared-bus router transport. The current master setup keeps
-transport IDs named for physical buses: low-speed SPI is a media point-to-point
-link, while high-speed SPI is one router transport with GPU0 and GPU1 peers.
+transport IDs named for physical buses: low-speed SPI is one router transport
+with Media and Power peers, while high-speed SPI is one router transport with
+GPU0 and GPU1 peers.
 Do not model the target topology as one master PubSub transport per endpoint:
 the high-speed bus must eventually host the four GPU nodes, and the low-speed
 bus must host media plus future LoRA and GPS peripherals.
@@ -165,6 +177,7 @@ owning components register application subscriptions:
 - master registers low-speed SPI, high-speed SPI, and RS485 transports and only
   bridges traffic
 - media registers one SPI edge transport
+- power registers one SPI edge transport
 - GPU0 and GPU1 register SPI edge transports; `LedDisplay` subscribes to
   animation and FFT-frame topics
 - IO registers one RS485 transport; the local button/PWM path subscribes to
@@ -305,5 +318,5 @@ Keep PubSub changes minimal and reviewable:
   already required by transport abstraction
 - update this document when ownership, scheduling, or transport semantics
   change
-- build `master`, `media`, `gpu0`, `gpu1`, and `io` after hardware PubSub
-  changes
+- build `master`, `media`, `power`, `gpu0`, `gpu1`, and `io` after hardware
+  PubSub changes

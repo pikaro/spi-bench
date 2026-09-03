@@ -1,0 +1,580 @@
+#!/usr/bin/env python3
+# ruff: noqa: C901, COM812, EM102, PLR0912, PLR0915, TRY003
+"""Validate a BatteryMonitor v2 calibration journal and optional capture log."""
+
+from __future__ import annotations
+
+import argparse
+import re
+import struct
+import sys
+import zlib
+from dataclasses import dataclass, field
+from enum import IntEnum
+from pathlib import Path
+
+RECORD_SIZE = 64
+PAYLOAD_OFFSET = 16
+PAYLOAD_SIZE = 44
+CRC_OFFSET = 60
+JOURNAL_MAGIC = 0x4E4F4D42
+JOURNAL_VERSION = 2
+COMPLETE_STATE = 4
+NO_INVALID_REASON = 0
+PROFILE_POINT_COUNT = 101
+
+# These are the current scratch commissioning settings. The journal itself
+# carries the load resistance; timing settings are not part of format v2.
+SAMPLE_INTERVAL_MS = 100
+PERSISTENCE_INTERVAL_SECONDS = 60
+PERSISTENCE_TOLERANCE_SECONDS = 2
+SAMPLE_GAP_LIMIT_MS = 2_000
+DISCONNECTED_VOLTAGE_MV = 1_000
+SAMPLE_COUNT_TOLERANCE = 0.10
+LOAD_TOLERANCE = 0.05
+INTEGRATION_TOLERANCE = 0.02
+MIN_CHARGE_TOLERANCE_MAH = 2.0
+MIN_ENERGY_TOLERANCE_MWH = 20.0
+
+
+class RecordType(IntEnum):
+    SESSION_HEADER = 1
+    INTERVAL = 2
+    PROFILE_POINT = 3
+    SESSION_FOOTER = 4
+
+
+class JournalValidationError(RuntimeError):
+    """Raised when the journal cannot be decoded safely."""
+
+
+@dataclass(frozen=True)
+class Record:
+    kind: RecordType
+    sequence: int
+    session_id: int
+    payload: bytes
+    crc: int
+
+
+@dataclass(frozen=True)
+class Header:
+    started_at_ms: int
+    pack_id: int
+    nominal_mah: int
+    nominal_mwh: int
+    load_milliohms: int
+
+
+@dataclass(frozen=True)
+class Interval:
+    elapsed_seconds: int
+    average_mv: int
+    minimum_mv: int
+    maximum_mv: int
+    average_ua: int
+    average_mw: int
+    cumulative_mah: int
+    cumulative_mwh: int
+    sample_count: int
+    maximum_gap_ms: int
+    last_under_load_mv: int
+
+
+@dataclass(frozen=True)
+class ProfilePoint:
+    soc_percent: int
+    loaded_mv: int
+    representative_ua: int
+
+
+@dataclass(frozen=True)
+class Footer:
+    state: int
+    reason: int
+    point_count: int
+    usable_mah: int
+    usable_mwh: int
+    duration_seconds: int
+    observed_cutoff_mv: int
+    last_under_load_mv: int
+    interval_count: int
+    maximum_gap_ms: int
+    records_checksum: int
+
+
+@dataclass
+class Session:
+    session_id: int
+    header: Header
+    next_sequence: int
+    records_checksum: int
+    intervals: list[Interval] = field(default_factory=list)
+    points: dict[int, ProfilePoint] = field(default_factory=dict)
+    footer: Footer | None = None
+
+
+@dataclass(frozen=True)
+class ValidationSummary:
+    session_id: int
+    intervals: int
+    samples: int
+    points: int
+    duration_seconds: int
+    usable_mah: int
+    usable_mwh: int
+    reconstructed_mah: float
+    reconstructed_mwh: float
+    maximum_gap_ms: int
+
+
+INTERVAL_LOG_RE = re.compile(
+    r'Battery cal interval: sid=(\d+) n=(\d+) elapsed=(\d+)s '
+    r'samples=(\d+) maxGap=(\d+)ms'
+)
+VALUES_LOG_RE = re.compile(
+    r'Battery cal values: sid=(\d+) n=(\d+) V=(\d+)/(\d+)/(\d+)mV '
+    r'I=(-?\d+)uA P=(-?\d+)mW used=(\d+)mAh/(\d+)mWh'
+)
+HOST_TIMESTAMP_RE = re.compile(r'^\[\d{2}:\d{2}:\d{2}\.\d{3}\]')
+
+
+def decode_header(payload: bytes) -> Header:
+    return Header(
+        started_at_ms=struct.unpack_from('<I', payload, 4)[0],
+        pack_id=struct.unpack_from('<I', payload, 8)[0],
+        nominal_mah=struct.unpack_from('<I', payload, 12)[0],
+        nominal_mwh=struct.unpack_from('<I', payload, 16)[0],
+        load_milliohms=struct.unpack_from('<I', payload, 20)[0],
+    )
+
+
+def decode_interval(payload: bytes) -> Interval:
+    values = struct.unpack_from('<IIIIiiIIIII', payload)
+    return Interval(*values)
+
+
+def decode_profile_point(payload: bytes) -> ProfilePoint:
+    soc_percent = struct.unpack_from('<H', payload)[0]
+    loaded_mv = struct.unpack_from('<I', payload, 4)[0]
+    representative_ua = struct.unpack_from('<i', payload, 8)[0]
+    return ProfilePoint(soc_percent, loaded_mv, representative_ua)
+
+
+def decode_footer(payload: bytes) -> Footer:
+    state, reason, point_count = struct.unpack_from('<BBH', payload)
+    values = struct.unpack_from('<IIIIIIII', payload, 4)
+    return Footer(state, reason, point_count, *values)
+
+
+def read_records(path: Path) -> list[Record]:
+    data = path.read_bytes()
+    if not data:
+        raise JournalValidationError(f'{path} is empty')
+    if len(data) % RECORD_SIZE != 0:
+        raise JournalValidationError(
+            f'journal size {len(data)} is not a multiple of {RECORD_SIZE} bytes'
+        )
+
+    records: list[Record] = []
+    for index in range(len(data) // RECORD_SIZE):
+        raw = data[index * RECORD_SIZE : (index + 1) * RECORD_SIZE]
+        magic, version, raw_kind, payload_size, sequence, session_id = struct.unpack_from(
+            '<IBBHII', raw
+        )
+        if magic != JOURNAL_MAGIC:
+            raise JournalValidationError(f'record {index} has invalid magic 0x{magic:08X}')
+        if version != JOURNAL_VERSION:
+            raise JournalValidationError(f'record {index} has unsupported version {version}')
+        if payload_size != PAYLOAD_SIZE:
+            raise JournalValidationError(f'record {index} has invalid payload size {payload_size}')
+        try:
+            kind = RecordType(raw_kind)
+        except ValueError as error:
+            raise JournalValidationError(f'record {index} has invalid type {raw_kind}') from error
+        stored_crc = struct.unpack_from('<I', raw, CRC_OFFSET)[0]
+        calculated_crc = zlib.crc32(raw[:CRC_OFFSET]) & 0xFFFFFFFF
+        if stored_crc != calculated_crc:
+            raise JournalValidationError(
+                f'record {index} CRC mismatch: stored=0x{stored_crc:08X}, '
+                f'calculated=0x{calculated_crc:08X}'
+            )
+        records.append(
+            Record(
+                kind=kind,
+                sequence=sequence,
+                session_id=session_id,
+                payload=raw[PAYLOAD_OFFSET:CRC_OFFSET],
+                crc=stored_crc,
+            )
+        )
+    return records
+
+
+def build_sessions(records: list[Record]) -> tuple[list[Session], list[str]]:
+    sessions: list[Session] = []
+    errors: list[str] = []
+    active: Session | None = None
+    seen_session_ids: set[int] = set()
+
+    for index, record in enumerate(records):
+        if record.kind is RecordType.SESSION_HEADER:
+            if active is not None and active.footer is None:
+                errors.append(f'session {active.session_id} is interrupted before record {index}')
+            if record.sequence != 0:
+                errors.append(
+                    f'session {record.session_id} header sequence is {record.sequence}, not 0'
+                )
+            if record.session_id in seen_session_ids:
+                errors.append(f'session ID {record.session_id} is reused')
+            seen_session_ids.add(record.session_id)
+            active = Session(
+                session_id=record.session_id,
+                header=decode_header(record.payload),
+                next_sequence=1,
+                records_checksum=record.crc,
+            )
+            sessions.append(active)
+            continue
+
+        if active is None:
+            errors.append(f'record {index} is outside a session')
+            continue
+        if record.session_id != active.session_id:
+            errors.append(
+                f'record {index} session is {record.session_id}, expected {active.session_id}'
+            )
+        if record.sequence != active.next_sequence:
+            errors.append(
+                f'session {active.session_id} sequence jumps from '
+                f'{active.next_sequence} to {record.sequence}'
+            )
+        active.next_sequence = record.sequence + 1
+
+        if record.kind is RecordType.INTERVAL:
+            if active.points:
+                errors.append(f'session {active.session_id} has an interval after profile points')
+            active.intervals.append(decode_interval(record.payload))
+            active.records_checksum ^= record.crc
+            continue
+
+        if record.kind is RecordType.PROFILE_POINT:
+            point = decode_profile_point(record.payload)
+            if point.soc_percent in active.points:
+                errors.append(
+                    f'session {active.session_id} repeats profile point {point.soc_percent}%'
+                )
+            active.points[point.soc_percent] = point
+            active.records_checksum ^= record.crc
+            continue
+
+        footer = decode_footer(record.payload)
+        active.footer = footer
+        if footer.records_checksum != active.records_checksum:
+            errors.append(
+                f'session {active.session_id} footer checksum mismatch: '
+                f'stored=0x{footer.records_checksum:08X}, '
+                f'calculated=0x{active.records_checksum:08X}'
+            )
+        active = None
+
+    if active is not None and active.footer is None:
+        errors.append(f'session {active.session_id} has no footer')
+    return sessions, errors
+
+
+def relative_error(actual: float, expected: float) -> float:
+    if expected == 0:
+        return 0.0 if actual == 0 else float('inf')
+    return abs(actual - expected) / abs(expected)
+
+
+def validate_session(session: Session) -> tuple[ValidationSummary | None, list[str]]:
+    errors: list[str] = []
+    footer = session.footer
+    if footer is None:
+        return None, [f'session {session.session_id} has no footer']
+    if footer.state != COMPLETE_STATE or footer.reason != NO_INVALID_REASON:
+        return None, [
+            f'session {session.session_id} is not complete '
+            f'(state={footer.state}, reason={footer.reason})'
+        ]
+    if not session.intervals:
+        errors.append(f'session {session.session_id} contains no intervals')
+    if footer.interval_count != len(session.intervals):
+        errors.append(
+            f'footer interval count {footer.interval_count} does not match '
+            f'{len(session.intervals)} records'
+        )
+    expected_points = set(range(PROFILE_POINT_COUNT))
+    actual_points = set(session.points)
+    if footer.point_count != PROFILE_POINT_COUNT:
+        errors.append(f'footer point count is {footer.point_count}, expected {PROFILE_POINT_COUNT}')
+    if actual_points != expected_points:
+        missing = sorted(expected_points - actual_points)
+        extra = sorted(actual_points - expected_points)
+        errors.append(f'profile point set is incomplete; missing={missing}, extra={extra}')
+
+    previous_elapsed = 0
+    previous_mah = 0
+    previous_mwh = 0
+    reconstructed_mah = 0.0
+    reconstructed_mwh = 0.0
+    total_samples = 0
+    interval_pairs: set[tuple[int, int]] = set()
+
+    for number, interval in enumerate(session.intervals, start=1):
+        if interval.elapsed_seconds <= previous_elapsed:
+            errors.append(
+                f'interval {number} elapsed time {interval.elapsed_seconds}s '
+                f'does not follow {previous_elapsed}s'
+            )
+            delta_seconds = 0
+        else:
+            delta_seconds = interval.elapsed_seconds - previous_elapsed
+        if (
+            number < len(session.intervals)
+            and abs(delta_seconds - PERSISTENCE_INTERVAL_SECONDS) > PERSISTENCE_TOLERANCE_SECONDS
+        ):
+            errors.append(
+                f'interval {number} duration is {delta_seconds}s, expected '
+                f'{PERSISTENCE_INTERVAL_SECONDS}±{PERSISTENCE_TOLERANCE_SECONDS}s'
+            )
+        if number < len(session.intervals):
+            expected_samples = delta_seconds * 1_000 / SAMPLE_INTERVAL_MS
+            if (
+                expected_samples > 0
+                and relative_error(interval.sample_count, expected_samples) > SAMPLE_COUNT_TOLERANCE
+            ):
+                errors.append(
+                    f'interval {number} has {interval.sample_count} samples, '
+                    f'expected about {expected_samples:.0f}'
+                )
+        if interval.sample_count == 0:
+            errors.append(f'interval {number} contains no samples')
+        if not (interval.minimum_mv <= interval.average_mv <= interval.maximum_mv):
+            errors.append(f'interval {number} voltage average is outside its min/max')
+        if interval.average_ua <= 0 or interval.average_mw <= 0:
+            errors.append(f'interval {number} is not a positive discharge measurement')
+        if interval.maximum_gap_ms >= SAMPLE_GAP_LIMIT_MS:
+            errors.append(
+                f'interval {number} maximum gap {interval.maximum_gap_ms}ms '
+                f'reaches the {SAMPLE_GAP_LIMIT_MS}ms invalidation limit'
+            )
+        if interval.cumulative_mah < previous_mah:
+            errors.append(f'interval {number} cumulative mAh decreases')
+        if interval.cumulative_mwh < previous_mwh:
+            errors.append(f'interval {number} cumulative mWh decreases')
+
+        if session.header.load_milliohms > 0:
+            expected_ua = interval.average_mv * 1_000_000 / session.header.load_milliohms
+            if relative_error(interval.average_ua, expected_ua) > LOAD_TOLERANCE:
+                errors.append(
+                    f'interval {number} current {interval.average_ua}uA differs '
+                    f'from V/R expectation {expected_ua:.0f}uA by more than 5%'
+                )
+        expected_mw = interval.average_mv * interval.average_ua / 1_000_000
+        if relative_error(interval.average_mw, expected_mw) > INTEGRATION_TOLERANCE:
+            errors.append(
+                f'interval {number} power {interval.average_mw}mW differs from '
+                f'VxI expectation {expected_mw:.1f}mW by more than 2%'
+            )
+
+        reconstructed_mah += interval.average_ua * delta_seconds / 3_600_000
+        reconstructed_mwh += interval.average_mw * delta_seconds / 3_600
+        total_samples += interval.sample_count
+        interval_pairs.add((interval.average_mv, interval.average_ua))
+        previous_elapsed = interval.elapsed_seconds
+        previous_mah = interval.cumulative_mah
+        previous_mwh = interval.cumulative_mwh
+
+    if session.intervals:
+        last = session.intervals[-1]
+        if footer.usable_mah != last.cumulative_mah:
+            errors.append(
+                f'footer mAh {footer.usable_mah} does not match final interval '
+                f'{last.cumulative_mah}'
+            )
+        if footer.usable_mwh != last.cumulative_mwh:
+            errors.append(
+                f'footer mWh {footer.usable_mwh} does not match final interval '
+                f'{last.cumulative_mwh}'
+            )
+        if footer.last_under_load_mv != last.last_under_load_mv:
+            errors.append('footer last-under-load voltage does not match final interval')
+        if footer.duration_seconds < last.elapsed_seconds:
+            errors.append('footer duration ends before the final interval')
+
+    maximum_interval_gap = max(
+        (interval.maximum_gap_ms for interval in session.intervals), default=0
+    )
+    if footer.maximum_gap_ms < maximum_interval_gap:
+        errors.append('footer maximum gap is below an interval maximum')
+    if footer.maximum_gap_ms >= SAMPLE_GAP_LIMIT_MS:
+        errors.append(
+            f'footer maximum gap {footer.maximum_gap_ms}ms reaches the '
+            f'{SAMPLE_GAP_LIMIT_MS}ms invalidation limit'
+        )
+    if footer.observed_cutoff_mv > DISCONNECTED_VOLTAGE_MV:
+        errors.append(
+            f'footer cutoff {footer.observed_cutoff_mv}mV exceeds the '
+            f'{DISCONNECTED_VOLTAGE_MV}mV disconnected threshold'
+        )
+
+    charge_tolerance = max(MIN_CHARGE_TOLERANCE_MAH, footer.usable_mah * INTEGRATION_TOLERANCE)
+    energy_tolerance = max(MIN_ENERGY_TOLERANCE_MWH, footer.usable_mwh * INTEGRATION_TOLERANCE)
+    if abs(reconstructed_mah - footer.usable_mah) > charge_tolerance:
+        errors.append(
+            f'reconstructed charge {reconstructed_mah:.2f}mAh differs from '
+            f'footer {footer.usable_mah}mAh by more than {charge_tolerance:.2f}mAh'
+        )
+    if abs(reconstructed_mwh - footer.usable_mwh) > energy_tolerance:
+        errors.append(
+            f'reconstructed energy {reconstructed_mwh:.2f}mWh differs from '
+            f'footer {footer.usable_mwh}mWh by more than {energy_tolerance:.2f}mWh'
+        )
+
+    for soc, point in session.points.items():
+        if (point.loaded_mv, point.representative_ua) not in interval_pairs:
+            errors.append(f'profile point {soc}% does not originate from an interval')
+
+    summary = ValidationSummary(
+        session_id=session.session_id,
+        intervals=len(session.intervals),
+        samples=total_samples,
+        points=len(session.points),
+        duration_seconds=footer.duration_seconds,
+        usable_mah=footer.usable_mah,
+        usable_mwh=footer.usable_mwh,
+        reconstructed_mah=reconstructed_mah,
+        reconstructed_mwh=reconstructed_mwh,
+        maximum_gap_ms=footer.maximum_gap_ms,
+    )
+    return summary, errors
+
+
+def validate_log(path: Path, session: Session) -> list[str]:
+    errors: list[str] = []
+    intervals: dict[int, tuple[int, int, int]] = {}
+    values: dict[int, tuple[int, ...]] = {}
+    timestamped = True
+
+    for line in path.read_text(errors='replace').splitlines():
+        interval_match = INTERVAL_LOG_RE.search(line)
+        if interval_match and int(interval_match.group(1)) == session.session_id:
+            timestamped &= bool(HOST_TIMESTAMP_RE.match(line))
+            number = int(interval_match.group(2))
+            decoded = tuple(int(value) for value in interval_match.groups()[2:])
+            if number in intervals and intervals[number] != decoded:
+                errors.append(f'log repeats interval {number} with different values')
+            intervals[number] = decoded
+            continue
+
+        values_match = VALUES_LOG_RE.search(line)
+        if values_match and int(values_match.group(1)) == session.session_id:
+            timestamped &= bool(HOST_TIMESTAMP_RE.match(line))
+            number = int(values_match.group(2))
+            decoded = tuple(int(value) for value in values_match.groups()[2:])
+            if number in values and values[number] != decoded:
+                errors.append(f'log repeats values {number} with different values')
+            values[number] = decoded
+
+    if not timestamped:
+        errors.append('one or more calibration log records lacks a host timestamp')
+
+    for number, journal_interval in enumerate(session.intervals, start=1):
+        expected_interval = (
+            journal_interval.elapsed_seconds,
+            journal_interval.sample_count,
+            journal_interval.maximum_gap_ms,
+        )
+        if intervals.get(number) != expected_interval:
+            errors.append(f'log interval {number} is missing or differs from journal')
+        expected_values = (
+            journal_interval.average_mv,
+            journal_interval.minimum_mv,
+            journal_interval.maximum_mv,
+            journal_interval.average_ua,
+            journal_interval.average_mw,
+            journal_interval.cumulative_mah,
+            journal_interval.cumulative_mwh,
+        )
+        if values.get(number) != expected_values:
+            errors.append(f'log values {number} are missing or differ from journal')
+    return errors
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('journal', type=Path, help='extracted battery.bin path')
+    parser.add_argument('--log', type=Path, help='optional monitor-multi timestamped capture')
+    parser.add_argument(
+        '--session', type=int, help='session ID; defaults to latest complete session'
+    )
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    try:
+        records = read_records(args.journal)
+        sessions, errors = build_sessions(records)
+        complete_sessions = [
+            session
+            for session in sessions
+            if session.footer is not None
+            and session.footer.state == COMPLETE_STATE
+            and session.footer.reason == NO_INVALID_REASON
+        ]
+        if args.session is None:
+            if not complete_sessions:
+                errors.append('journal contains no completed calibration session')
+                selected = None
+            else:
+                selected = max(complete_sessions, key=lambda item: item.session_id)
+        else:
+            selected = next(
+                (session for session in sessions if session.session_id == args.session),
+                None,
+            )
+            if selected is None:
+                errors.append(f'journal does not contain session {args.session}')
+
+        summary = None
+        if selected is not None:
+            summary, session_errors = validate_session(selected)
+            errors.extend(session_errors)
+            if args.log is not None:
+                errors.extend(validate_log(args.log, selected))
+    except (OSError, JournalValidationError) as error:
+        print(f'FAIL: {error}', file=sys.stderr)
+        return 1
+
+    if errors:
+        for error in errors:
+            print(f'FAIL: {error}', file=sys.stderr)
+        return 1
+    if summary is None:
+        print('FAIL: no session was validated', file=sys.stderr)
+        return 1
+
+    print(
+        f'PASS session {summary.session_id}: {summary.intervals} intervals, '
+        f'{summary.samples} samples, {summary.points} profile points'
+    )
+    print(
+        f'  result: {summary.usable_mah}mAh, {summary.usable_mwh}mWh, '
+        f'duration={summary.duration_seconds}s, maxGap={summary.maximum_gap_ms}ms'
+    )
+    print(
+        f'  reconstructed: {summary.reconstructed_mah:.2f}mAh, '
+        f'{summary.reconstructed_mwh:.2f}mWh '
+        f'(tolerance=max(2%, 2mAh/20mWh))'
+    )
+    if args.log is not None:
+        print(f'  log: all {summary.intervals} timestamped interval reports match')
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

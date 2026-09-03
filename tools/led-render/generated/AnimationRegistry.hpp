@@ -12,6 +12,8 @@
 #include "LedDisplay/Animations/OrbitSparks/Animation.hpp"
 #include "LedDisplay/Animations/PolarLattice/Animation.hpp"
 #include "LedDisplay/Animations/RadialCurtain/Animation.hpp"
+#include "LedDisplay/Animations/RadialGauge/Animation.hpp"
+#include "LedDisplay/Animations/RadialMenu/Animation.hpp"
 #include "LedDisplay/Animations/Shutter/Animation.hpp"
 #include "LedDisplay/Animations/SineWave/Animation.hpp"
 #include "LedDisplay/Animations/Sinelon/Animation.hpp"
@@ -41,6 +43,8 @@ using Payload = std::variant<Totem::LedDisplay::Animations::Bolt,
                              Totem::LedDisplay::Animations::OrbitSparks,
                              Totem::LedDisplay::Animations::PolarLattice,
                              Totem::LedDisplay::Animations::RadialCurtain,
+                             Totem::LedDisplay::Animations::RadialGauge,
+                             Totem::LedDisplay::Animations::RadialMenu,
                              Totem::LedDisplay::Animations::Shutter,
                              Totem::LedDisplay::Animations::SineWave,
                              Totem::LedDisplay::Animations::Sinelon,
@@ -52,12 +56,13 @@ using Payload = std::variant<Totem::LedDisplay::Animations::Bolt,
                              Totem::LedDisplay::Animations::Vortex,
                              Totem::LedDisplay::Animations::WheelIndicator>;
 
-inline constexpr std::array<std::string_view, 20> animationNames{
-    "Bolt",           "BreathingRings", "CenterWave",    "Cymatic",
-    "DiagnosticFill", "Lighthouse",     "OrbitRing",     "OrbitSparks",
-    "PolarLattice",   "RadialCurtain",  "Shutter",       "SineWave",
-    "Sinelon",        "SpectralIris",   "SpectralWeave", "SpokeSweep",
-    "StainedCells",   "Starburst",      "Vortex",        "WheelIndicator"};
+inline constexpr std::array<std::string_view, 22> animationNames{
+    "Bolt",           "BreathingRings", "CenterWave",   "Cymatic",
+    "DiagnosticFill", "Lighthouse",     "OrbitRing",    "OrbitSparks",
+    "PolarLattice",   "RadialCurtain",  "RadialGauge",  "RadialMenu",
+    "Shutter",        "SineWave",       "Sinelon",      "SpectralIris",
+    "SpectralWeave",  "SpokeSweep",     "StainedCells", "Starburst",
+    "Vortex",         "WheelIndicator"};
 
 [[nodiscard]] inline bool
 applyBoltConfig(Totem::LedDisplay::Animations::BoltConfig &config,
@@ -583,6 +588,160 @@ applyOrbitSparksConfig(Totem::LedDisplay::Animations::OrbitSparksConfig &config,
             }
         } else {
             error = "Unknown config field for RadialCurtain: " + fieldName;
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] inline bool
+applyRadialGaugeConfig(Totem::LedDisplay::Animations::RadialGaugeConfig &config,
+                       const JsonValue *configValue, std::string &error) {
+    if (configValue == nullptr) {
+        return true;
+    }
+    if (configValue->kind != JsonValue::Kind::Object) {
+        error = "Config for RadialGauge must be an object";
+        return false;
+    }
+    for (const auto &[fieldName, value] : configValue->object) {
+        if (fieldName == "value") {
+            if (!readJsonInteger(value, config.value, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "maximumValue") {
+            if (!readJsonInteger(value, config.maximumValue, error,
+                                 fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "startHue") {
+            if (!readJsonInteger(value, config.startHue, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "startSaturation") {
+            if (!readJsonInteger(value, config.startSaturation, error,
+                                 fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "startValue") {
+            if (!readJsonInteger(value, config.startValue, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "endHue") {
+            if (!readJsonInteger(value, config.endHue, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "endSaturation") {
+            if (!readJsonInteger(value, config.endSaturation, error,
+                                 fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "endValue") {
+            if (!readJsonInteger(value, config.endValue, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "centerRing") {
+            if (!readJsonInteger(value, config.centerRing, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "ringWidth") {
+            if (!readJsonInteger(value, config.ringWidth, error, fieldName)) {
+                return false;
+            }
+        } else {
+            error = "Unknown config field for RadialGauge: " + fieldName;
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] inline bool
+applyRadialMenuConfig(Totem::LedDisplay::Animations::RadialMenuConfig &config,
+                      const JsonValue *configValue, std::string &error) {
+    if (configValue == nullptr) {
+        return true;
+    }
+    if (configValue->kind != JsonValue::Kind::Object) {
+        error = "Config for RadialMenu must be an object";
+        return false;
+    }
+    for (const auto &[fieldName, value] : configValue->object) {
+        if (fieldName == "populatedItems") {
+            if (!readJsonInteger(value, config.populatedItems, error,
+                                 fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "itemCount") {
+            if (!readJsonInteger(value, config.itemCount, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "selectedItem") {
+            if (!readJsonInteger(value, config.selectedItem, error,
+                                 fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "itemSaturation") {
+            if (!readJsonInteger(value, config.itemSaturation, error,
+                                 fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "itemValue") {
+            if (!readJsonInteger(value, config.itemValue, error, fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "emptyItemValue") {
+            if (!readJsonInteger(value, config.emptyItemValue, error,
+                                 fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "baseSpokeWidth") {
+            if (!readJsonInteger(value, config.baseSpokeWidth, error,
+                                 fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "baseRingDepth") {
+            if (!readJsonInteger(value, config.baseRingDepth, error,
+                                 fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "baseTipSpokeWidth") {
+            if (!readJsonInteger(value, config.baseTipSpokeWidth, error,
+                                 fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "baseTipRingDepth") {
+            if (!readJsonInteger(value, config.baseTipRingDepth, error,
+                                 fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "unfurledSpokeWidth") {
+            if (!readJsonInteger(value, config.unfurledSpokeWidth, error,
+                                 fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "unfurledRingDepth") {
+            if (!readJsonInteger(value, config.unfurledRingDepth, error,
+                                 fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "unfurledTipSpokeWidth") {
+            if (!readJsonInteger(value, config.unfurledTipSpokeWidth, error,
+                                 fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "unfurledTipRingDepth") {
+            if (!readJsonInteger(value, config.unfurledTipRingDepth, error,
+                                 fieldName)) {
+                return false;
+            }
+        } else if (fieldName == "unfurlDurationMs") {
+            if (!readJsonInteger(value, config.unfurlDurationMs, error,
+                                 fieldName)) {
+                return false;
+            }
+        } else {
+            error = "Unknown config field for RadialMenu: " + fieldName;
             return false;
         }
     }
@@ -1239,6 +1398,20 @@ makePayload(std::string_view animation, const JsonValue *configValue,
         }
         return Payload{
             Totem::LedDisplay::Animations::RadialCurtain{.config = config}};
+    } else if (animation == "RadialGauge") {
+        Totem::LedDisplay::Animations::RadialGaugeConfig config{};
+        if (!applyRadialGaugeConfig(config, configValue, error)) {
+            return std::nullopt;
+        }
+        return Payload{
+            Totem::LedDisplay::Animations::RadialGauge{.config = config}};
+    } else if (animation == "RadialMenu") {
+        Totem::LedDisplay::Animations::RadialMenuConfig config{};
+        if (!applyRadialMenuConfig(config, configValue, error)) {
+            return std::nullopt;
+        }
+        return Payload{
+            Totem::LedDisplay::Animations::RadialMenu{.config = config}};
     } else if (animation == "Shutter") {
         Totem::LedDisplay::Animations::ShutterConfig config{};
         if (!applyShutterConfig(config, configValue, error)) {
@@ -1356,6 +1529,14 @@ makePayload(std::string_view animation, const JsonValue *configValue,
                                                 Totem::LedDisplay::Animations::
                                                     RadialCurtain>) {
                 return "RadialCurtain";
+            } else if constexpr (std::is_same_v<Animation,
+                                                Totem::LedDisplay::Animations::
+                                                    RadialGauge>) {
+                return "RadialGauge";
+            } else if constexpr (std::is_same_v<Animation,
+                                                Totem::LedDisplay::Animations::
+                                                    RadialMenu>) {
+                return "RadialMenu";
             } else if constexpr (std::is_same_v<
                                      Animation,
                                      Totem::LedDisplay::Animations::Shutter>) {

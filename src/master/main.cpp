@@ -1,14 +1,10 @@
 #include "Clock/Facade.hpp"
 #include "Macros/Facade.hpp"
-#include "Network/Facade.hpp"
 #include "Platform/Gpio.hpp"
 #include "Platform/PlatformSelect.hpp"
-#include "PubSubBackend/Transports/UdpTransport.hpp"
 #include "Services/Clock.hpp"
 #include "Setups/Core.hpp"
 #include "Setups/PubSubNetwork.hpp"
-#include "StaticConfig/PubSubUdp.hpp"
-#include "Wifi/Facade.hpp"
 #include "Wire/Rs485/Facade.hpp"
 #include "Wire/Spi/Facade.hpp"
 #include "config.hpp"
@@ -16,6 +12,8 @@
 #include "driver/gptimer.h"
 #include "led_bringup.hpp"
 #include "orchestration.hpp"
+#include <array>
+#include <cstddef>
 #include <cstdint>
 
 namespace {
@@ -76,17 +74,21 @@ class LedPresentStrobeOutput {
     bool _level = false;
 };
 
-bool pubSubUdpNetworkReady(void *owner) {
-    auto *wifiRef = static_cast<Totem::Wifi::Wifi *>(owner);
-    if (wifiRef == nullptr) {
-        return false;
+class SpiChipSelectHold {
+  public:
+    ReturnCode begin() {
+        for (std::size_t index = 0; index < _gpios.size(); ++index) {
+            FAIL_IF_ERR_FWD(_gpios[index].initOutput(spiChipSelectPins[index],
+                                                     GpioOutputMode::PushPull,
+                                                     true),
+                            "Failed to hold SPI chip select high");
+        }
+        return OK();
     }
-    const auto status = wifiRef->status();
-    if (!status.started) {
-        return false;
-    }
-    return status.stationIpv4.valid || status.accessPointStarted;
-}
+
+  private:
+    std::array<platform::Gpio, spiChipSelectPins.size()> _gpios{};
+};
 
 } // namespace
 
@@ -96,30 +98,18 @@ Totem::Wire::Rs485::Master rs485master{core.taskRegistry};
 Totem::Wire::Spi::Master spiMasterGpu0{core.taskRegistry};
 Totem::Wire::Spi::Master spiMasterGpu1{core.taskRegistry};
 Totem::Wire::Spi::Master spiMasterLowSpeed{core.taskRegistry};
+Totem::Wire::Spi::Master spiMasterPower{core.taskRegistry};
 Totem::Clock::Clock clockMaster{Totem::Clock::Clock::Role::Master};
-Totem::Wifi::Wifi wifi;
 PubSubNetworkMasterSetup<Totem::Wire::Spi::Master, Totem::Wire::Spi::Master,
                          Totem::Wire::Rs485::Master>
-    pubSubNetwork{core.taskRegistry, spiMasterLowSpeed, spiMasterGpu0,
-                  spiMasterGpu1, rs485master};
-Totem::PubSubBackend::Transports::UdpTransport pubSubUdpTransport{
-    Totem::PubSubBackend::Transports::UdpTransportDependencies{
-        .base = PubSubNetwork::makeBaseDeps(
-            pubSubNetwork.node(),
-            static_cast<uint8_t>(
-                Totem::Data::PubSub::PubSubData<
-                    Totem::Data::NodeName::Master>::Transport::UDP),
-            "PubSub-UDP"),
-        .taskRegistry = &core.taskRegistry,
-        .networkReadyOwner = &wifi,
-        .networkReady = pubSubUdpNetworkReady,
-    },
-};
-platform::Gpio ledLevelShifterOutputEnable;
+    pubSubNetwork{core.taskRegistry, spiMasterLowSpeed, spiMasterPower,
+                  spiMasterGpu0,     spiMasterGpu1,     rs485master};
 LedPresentStrobeOutput ledPresentStrobeOutput;
+SpiChipSelectHold spiChipSelectHold;
 
 void setup() {
     ABORT_IF_ERR_BEGIN(core.beginStatusLedEarly(statusLedConfig));
+    ABORT_IF_ERR_BEGIN(spiChipSelectHold.begin());
     ::platform::delay(::platform::ms_to_ticks(3000));
 
     core.setup();
@@ -129,20 +119,17 @@ void setup() {
 
     _log_d("Current clock time: %uus", clockMaster.nowUs());
 
-    ABORT_IF_ERR_BEGIN(wifi.begin(wifiConfig));
-    ABORT_IF_ERR(Totem::Wifi::Commands::registerCommands(wifi),
-                 "Failed to register WiFi commands");
-    ABORT_IF_ERR(Totem::Network::Commands::registerCommands(),
-                 "Failed to register network diagnostic commands");
-
     ABORT_IF_ERR_BEGIN(rs485master.begin(rs485MasterConfig));
 
     ABORT_IF_ERR_BEGIN(spiMasterGpu0.begin(spiMasterBusHighSpeedConfig))
     ABORT_IF_ERR_BEGIN(spiMasterGpu1.begin(spiMasterBusHighSpeedGpu1Config))
     ABORT_IF_ERR_BEGIN(spiMasterLowSpeed.begin(spiMasterBusLowSpeedConfig))
+    ABORT_IF_ERR_BEGIN(spiMasterPower.begin(spiMasterBusLowSpeedPowerConfig))
 
     ABORT_IF_ERR(clockMaster.registerHandler(spiMasterLowSpeed),
-                 "Failed to register low-speed SPI clock handler");
+                 "Failed to register Media SPI clock handler");
+    ABORT_IF_ERR(clockMaster.registerHandler(spiMasterPower),
+                 "Failed to register Power SPI clock handler");
     ABORT_IF_ERR(clockMaster.registerHandler(spiMasterGpu0),
                  "Failed to register GPU0 SPI clock handler");
     ABORT_IF_ERR(clockMaster.registerHandler(spiMasterGpu1),
@@ -152,24 +139,10 @@ void setup() {
                  "Failed to register RS485 clock handler");
 
     pubSubNetwork.setup();
-    if constexpr (Totem::StaticConfig::PubSubUdp::enabled) {
-        _log_i("Starting UDP PubSub transport");
-        ABORT_IF_ERR_BEGIN(pubSubUdpTransport.begin());
-        _log_i("UDP PubSub transport began; registering with PubSub node");
-        ABORT_IF_UNEXPECTED(udpHandle,
-                            pubSubNetwork.node().registerTransport(
-                                pubSubUdpTransport),
-                            "Failed to register UDP PubSub transport");
-        _log_i("UDP PubSub transport registered with PubSub node");
-        (void)udpHandle;
-    }
 
     ABORT_IF_ERR(MasterOrchestration::begin(),
                  "Failed to begin master orchestration");
 
-    ABORT_IF_ERR(
-        ledLevelShifterOutputEnable.initOutput(ledLevelShifterOutputEnablePin),
-        "Failed to initialize LED level shifter output enable GPIO");
     ABORT_IF_ERR_BEGIN(ledPresentStrobeOutput.begin(ledPresentStrobeOutputPin));
 
     _log_i("Setup complete");
@@ -184,10 +157,7 @@ void app_main(void);
 void app_main() {
     setup();
 
-    ABORT_IF_ERR(
-        ledLevelShifterOutputEnable.setLevel(ledLevelShifterOutputEnabledLevel),
-        "Failed to enable LED level shifter output");
-    ABORT_IF_ERR(MasterLedBringup::begin(::platform::get_time()),
+    ABORT_IF_ERR(MasterLedBringup::begin(),
                  "Failed to begin master LED bringup orchestration");
 
     for (;;) {

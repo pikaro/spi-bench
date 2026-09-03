@@ -148,6 +148,8 @@ def main() -> None:
     if not isinstance(custom_usb_serials, str):
         raise RuntimeError('`custom_usb_serial` must be a list of USB serial numbers')
 
+    custom_usb_serials = custom_usb_serials.strip()
+
     success = False
 
     devs = _load_devices()

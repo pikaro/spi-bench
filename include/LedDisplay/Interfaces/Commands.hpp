@@ -11,6 +11,8 @@
 #include "LedDisplay/Animations/OrbitSparks/CommandDesc.hpp"
 #include "LedDisplay/Animations/PolarLattice/CommandDesc.hpp"
 #include "LedDisplay/Animations/RadialCurtain/CommandDesc.hpp"
+#include "LedDisplay/Animations/RadialGauge/CommandDesc.hpp"
+#include "LedDisplay/Animations/RadialMenu/CommandDesc.hpp"
 #include "LedDisplay/Animations/Shutter/CommandDesc.hpp"
 #include "LedDisplay/Animations/SineWave/CommandDesc.hpp"
 #include "LedDisplay/Animations/Sinelon/CommandDesc.hpp"
@@ -32,7 +34,7 @@ inline ReturnCode handleAnimRoot(CommandDesc::ParsedArgs /*unused*/,
     _log_i("Use /anim "
            "wave|starburst|vortex|shutter|orbit|lighthouse|cymatic|rings|"
            "curtain|lattice|bolt|sinelon|sine|fill|weave|iris|sparks|cells|"
-           "sweep|wheel|wheel-update|stop");
+           "sweep|wheel|wheel-update|gauge|menu|stop");
     return OK();
 }
 
@@ -50,7 +52,7 @@ inline ReturnCode handleLayerRoot(CommandDesc::ParsedArgs /*unused*/,
 
 } // namespace Totem::Support::detail
 
-inline constinit std::array<CommandDesc, 22> animSubcommands{{
+inline constinit std::array<CommandDesc, 24> animSubcommands{{
     Totem::LedDisplay::Animations::centerWaveSubcommand,
     Totem::LedDisplay::Animations::starburstSubcommand,
     Totem::LedDisplay::Animations::vortexSubcommand,
@@ -72,6 +74,8 @@ inline constinit std::array<CommandDesc, 22> animSubcommands{{
     Totem::LedDisplay::Animations::spokeSweepSubcommand,
     Totem::LedDisplay::Animations::wheelIndicatorSubcommand,
     Totem::LedDisplay::Animations::wheelIndicatorUpdateSubcommand,
+    Totem::LedDisplay::Animations::radialGaugeSubcommand,
+    Totem::LedDisplay::Animations::radialMenuSubcommand,
     Totem::LedDisplay::Animations::animationStopSubcommand,
 }};
 

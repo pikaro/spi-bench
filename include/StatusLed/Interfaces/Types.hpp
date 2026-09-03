@@ -24,6 +24,40 @@ struct RgbColor {
     }
 };
 
+/** Linear per-channel brightness multiplier expressed as a whole percent. */
+struct BrightnessMultiplier {
+    static constexpr uint8_t fullPercent = 100;
+
+    uint8_t percent = fullPercent;
+
+    [[nodiscard]] static constexpr BrightnessMultiplier
+    fromPercent(uint8_t percent) {
+        return BrightnessMultiplier{.percent = percent};
+    }
+
+    [[nodiscard]] constexpr bool validate() const {
+        return percent <= fullPercent;
+    }
+
+    /**
+     * Scales each RGB channel and truncates fractional channel values.
+     * Requires `validate()` to be true.
+     */
+    [[nodiscard]] constexpr RgbColor apply(RgbColor color) const {
+        return RgbColor{
+            .red = scale(color.red),
+            .green = scale(color.green),
+            .blue = scale(color.blue),
+        };
+    }
+
+  private:
+    [[nodiscard]] constexpr uint8_t scale(uint8_t value) const {
+        return static_cast<uint8_t>((static_cast<uint16_t>(value) * percent) /
+                                    fullPercent);
+    }
+};
+
 struct StateDef {
     const char *name = nullptr;
     RgbColor color{};

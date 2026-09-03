@@ -1,6 +1,6 @@
 # Battery Monitor and Pack Calibration Implementation Plan
 
-Status: **ready for implementation**
+Status: **software implemented; battery-dependent verification pending**
 Last updated: **2026-08-26**
 
 ## Goal
@@ -87,8 +87,9 @@ BatteryMonitor::work(nowMs)
   conventions.
 - Invoke it exactly once after every successful sample, after the latest sample
   and metrics have been updated.
-- Invoke it before returning a software absolute-limit error for that valid
-  sample, so a low-voltage calibration point is not discarded.
+- Deliver practical and absolute limit states as successful samples so a
+  low-voltage calibration point is not discarded or reported as an unhandled
+  acquisition failure.
 - Never invoke it for failed I2C reads or device math overflow.
 - Document that the callback must be bounded and non-blocking. It must not
   perform filesystem I/O.
@@ -102,8 +103,8 @@ BatteryMonitor::work(nowMs)
   transitions, and persistence scheduling.
 - Write LittleFS only from `BatteryMonitor::work()`, never from a sensor
   callback.
-- Permit future measurement adapters for INA228 or unrelated current sensors
-  without changing the estimator.
+- Preserve the intended INA228 measurement/accumulator adapter boundary, while
+  permitting unrelated current sensors without changing the estimator.
 
 ## Proposed public data model
 
@@ -192,11 +193,14 @@ deltaEnergy[mWh] = averagePower[mW]   * deltaTime[s] / 3600
 
 - Use the profile's measured usable charge and usable energy instead of the
   nominal claim.
-- Use the learned voltage curve primarily for initialization and gentle drift
-  correction, not as a replacement for integration under load.
-- Apply voltage-based correction only after current has remained below a
-  relaxation threshold for a configured dwell time. Otherwise retain the
-  integrated estimate and lower confidence as appropriate.
+- Treat the learned voltage curve explicitly as a **loaded** curve from the
+  50 ohm calibration. Use it for low-confidence initialization only when the
+  observed discharge current is reasonably close to the curve's representative
+  current; otherwise fall back to the conservative idealized voltage estimate.
+- Do not use the loaded curve as an open-circuit-voltage drift correction after
+  relaxation. That would systematically bias SOC because the calibration does
+  not record rested voltage. A future OCV correction requires separately
+  collected rest points (or a validated resistance model) and remains deferred.
 - Record the calibration load and optional temperature metadata because usable
   capacity and loaded voltage depend on discharge rate and temperature.
 - Treat a profile from the 50 ohm test as a good low-rate baseline, not a
@@ -392,59 +396,64 @@ justified.
 
 ## Implementation phases
 
+Current staging: initial component integration and hardware checks use the
+breadboarded single-INA226 `scratch` environment. The eventual two-monitor
+`power` node integration remains Phase 6 work after general board bring-up and
+physical address-strapping confirmation.
+
 ### Phase 1 - Interfaces and pure estimator math
 
 - [x] Add this maintained plan before implementation.
-- [ ] Add `BatteryMeasurement`, chemistry/configuration, state, status, profile,
+- [x] Add `BatteryMeasurement`, chemistry/configuration, state, status, profile,
   and callback interface types.
-- [ ] Validate 7S4P values, ordered per-cell thresholds, nominal capacity,
+- [x] Validate 7S4P values, ordered per-cell thresholds, nominal capacity,
   timing intervals, paths, and 32-bit output ranges.
-- [ ] Implement rollover-safe trapezoidal charge/energy integration with
+- [x] Implement rollover-safe trapezoidal charge/energy integration with
   retained fixed-point remainders.
-- [ ] Implement default idealized voltage initialization, confidence, load
+- [x] Implement default idealized voltage initialization, confidence, load
   smoothing, and time-to-empty calculation.
-- [ ] Add focused compile-time or host-side tests for arithmetic boundaries,
+- [x] Add focused compile-time or host-side tests for arithmetic boundaries,
   sample gaps, zero/negative current, timestamp rollover, and TTE validity.
 
 ### Phase 2 - INA2xx sample delivery
 
-- [ ] Add allocation-free successful-sample callback registration to INA2xx.
-- [ ] Define callback ordering relative to latest sample, metrics, alerts, and
+- [x] Add allocation-free successful-sample callback registration to INA2xx.
+- [x] Define callback ordering relative to latest sample, metrics, alerts, and
   limit error returns.
-- [ ] Verify one callback per valid sample and no callback on failed samples.
-- [ ] Document that callbacks must not block or access LittleFS.
+- [x] Verify one callback per valid sample and no callback on failed samples.
+- [x] Document that callbacks must not block or access LittleFS.
 
 ### Phase 3 - Calibration state machine and aggregation
 
-- [ ] Implement explicit arm/start, discharge, BMS-cutoff dwell, finalize,
+- [x] Implement explicit arm/start, discharge, BMS-cutoff dwell, finalize,
   invalid, and abort transitions.
-- [ ] Qualify the full 7S pack before accepting a calibration start.
-- [ ] Aggregate frequent input samples into minute records without losing
+- [x] Qualify the full 7S pack before accepting a calibration start.
+- [x] Aggregate frequent input samples into minute records without losing
   integration precision.
-- [ ] Detect excessive sample gaps, current reversal, load removal, sensor
+- [x] Detect excessive sample gaps, current reversal, load removal, sensor
   failure, and storage failure.
-- [ ] Produce measured mAh/mWh totals, observed cutoff metadata, and the compact
+- [x] Produce measured mAh/mWh totals, observed cutoff metadata, and the compact
   normalized SOC curve.
 
 ### Phase 4 - LittleFS persistence
 
-- [ ] Define packed, endian-stable journal records with magic, version, explicit
+- [x] Define packed, endian-stable journal records with magic, version, explicit
   lengths, and CRC.
-- [ ] Implement append-and-flush from `work()` at the configured interval.
-- [ ] Implement bounded-memory sequential journal loading and validation.
-- [ ] Ignore partial trailing records and reject incomplete/invalid sessions as
+- [x] Implement append-and-flush from `work()` at the configured interval.
+- [x] Implement bounded-memory sequential journal loading and validation.
+- [x] Ignore partial trailing records and reject incomplete/invalid sessions as
   active profiles.
 - [ ] Verify storage-full, short-write, corrupt-record, incompatible-version,
   and reboot-during-calibration behavior.
 
 ### Phase 5 - Metrics, commands, and documentation
 
-- [ ] Add 32-bit battery estimator/calibration metrics and validity/confidence
+- [x] Add 32-bit battery estimator/calibration metrics and validity/confidence
   reporting.
-- [ ] Add status, calibration start/abort/status, and profile-list commands.
-- [ ] Document configuration, units, calibration wiring, BMS-cutoff semantics,
+- [x] Add status, calibration start/abort/status, and profile-list commands.
+- [x] Document configuration, units, calibration wiring, BMS-cutoff semantics,
   storage format, expected test duration, and limitations.
-- [ ] Document that pack-level monitoring cannot diagnose a weak individual
+- [x] Document that pack-level monitoring cannot diagnose a weak individual
   series group and never replaces the BMS.
 
 ### Phase 6 - Power-node integration
@@ -461,9 +470,12 @@ justified.
 
 ### Phase 7 - Verification
 
-- [ ] Replay deterministic synthetic discharge traces and compare integrated
+- [x] Replay deterministic synthetic discharge traces and compare integrated
   mAh/mWh against analytically calculated totals.
-- [ ] Build only the relevant `power` environment and inspect its SARIF output.
+- [x] Build only the currently relevant `scratch` environment and inspect its
+  SARIF output.
+- [ ] After production integration, build only the `power` environment and
+  inspect its SARIF output.
 - [ ] Verify two physical INA226 devices coexist at their configured addresses.
 - [ ] Perform a short bench run to validate sample delivery, journal appends,
   commands, and abort handling before starting a full pack discharge.
@@ -484,8 +496,10 @@ justified.
 - `include/BatteryMonitor/Facade.hpp` - public component export.
 - `include/Wire/I2C/Interfaces/Ina2xxConfig.hpp` and
   `include/Wire/I2C/detail/Ina2xx.hpp` - successful-sample callback only.
-- `src/power/config.hpp` and `src/power/main.cpp` - two-monitor wiring and main
-  battery-monitor integration.
+- `src/scratch/config.hpp` and `src/scratch/main.cpp` - current breadboard
+  integration for the single INA226 at `0x40`.
+- `src/power/config.hpp` and `src/power/main.cpp` - deferred two-monitor wiring
+  and main battery-monitor integration after production board bring-up.
 - `docs/wire-i2c.md`, `docs/overview.md`, and battery-monitor documentation -
   API, operation, calibration procedure, and limitations.
 - This plan - maintained checklist and verification record.
@@ -501,17 +515,57 @@ justified.
   externally charged and a calibration begins from an explicitly full pack.
 - No cell-temperature sensor is currently available. The calibration should at
   least record user-provided ambient/test conditions in its metadata.
-- INA228's hardware energy/charge accumulators remain out of scope. A future
-  adapter may supply their semantic readings to the same battery component.
+- INA228 is the production target, but its native energy/charge register backend
+  remains out of scope for the INA226-based first test. Its semantic capability
+  surface is protected rather than treated as speculative.
 - Runtime estimates are operational guidance, not a safety mechanism. Hardware
   BMS protection and appropriate load wiring remain mandatory.
 
 ## Verification record
 
+- Contract-alignment implementation completed on 2026-08-26. The core now has
+  single-owner runtime state, an atomic one-request command mailbox, a
+  zero-wait published status snapshot, explicit freshness/storage health,
+  optional TTE, one-shot failed writes, bounded journal growth, and incremental
+  four-record finalization steps. Commands are registered through an explicit
+  optional adapter.
+- `bin/test-battery-monitor` builds with C++23, `-Wall -Wextra -Werror`, and
+  passes fixed-point EMA decay, charging/staleness invalidation, valid zero TTE,
+  sample gaps, timestamp rollover, calibration pending-write consumption,
+  journal CRC/format, complete-profile activation, partial-write/reboot recovery,
+  record bounds, and injected open/write/short-write/flush/close outcomes.
+- The final contract-aligned `scratch` image builds with no SARIF diagnostics at
+  75,948 bytes RAM (23.2%) and 744,928 bytes flash (35.5%). Compared with the
+  pre-alignment image below, that is 24 bytes less RAM and 4,824 bytes more
+  flash. `batteryMonitor` is 3,640 bytes (80 bytes smaller) and `ina226` remains
+  696 bytes. This image has not been uploaded; live verification is the next
+  battery-test step.
+
+- Implementation iteration started on 2026-08-26. Battery-dependent checks are
+  intentionally deferred until the pack has charged; the current hardware
+  scope is configuration, zero-input behavior, persistence initialization, and
+  command/boot validation on `env:scratch` only. The production `power` node is
+  not connected and will not be flashed during this iteration.
+- `env:scratch` built successfully with no SARIF diagnostics and was flashed to
+  ESP32-C3 `80:f1:b2:8b:09:48`. Firmware uses 75,972 bytes RAM (23.2%) and
+  740,104 bytes flash (35.3%) after the final journal compatibility and
+  arithmetic-boundary checks.
+- Live battery-free checks confirmed an empty, mounted LittleFS; INA226
+  sampling at `0x40`; `/battery status` reporting `Absent`, zero budget, and
+  unavailable TTE; `/battery profiles` reporting zero complete, incompatible,
+  incomplete, and corrupt sessions; and calibration start being rejected as
+  `NotFull` without creating a journal.
+- The unloaded INA226 showed approximately +/-2.5 mA conversion noise. The
+  scratch reverse-current practical limit now matches the 5 mA estimator
+  deadband, eliminating warning chatter without hiding meaningful charging.
+- Deterministic compile-time traces verify one hour at 1 A integrates to
+  1,000 mAh and one hour at 1 W integrates to 1,000 mWh while retaining
+  fractional remainders. Additional checks cover rollover, voltage/SOC bounds,
+  deadband signs, saturation, and TTE division.
 - Focused schematic analysis on 2026-08-26 confirmed U8 covers J5-to-U7/J6 and
   U9 covers the buck-to-5 V source-select path.
 - Existing LittleFS provides append, byte-span write, flush/close, chunked
   reading, file inspection, and explicit removal; the journal design fits these
   capabilities without a shared filesystem refactor.
 - Physical full-discharge calibration, observed BMS cutoff, learned capacity,
-  and runtime prediction remain pending implementation.
+  and runtime prediction remain pending battery-dependent verification.

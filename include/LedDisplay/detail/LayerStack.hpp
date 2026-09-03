@@ -18,6 +18,7 @@ struct LayerConfig {
     AnimationStyle style{};
     uint8_t decay = 0;
     bool clearEachFrame = true;
+    bool clearOnPlay = false;
     bool enabled = true;
 };
 
@@ -27,6 +28,8 @@ inline constexpr uint8_t layerWheelOpacity = 192;
 inline constexpr uint8_t persistentFftLayerDecay = 4;
 inline constexpr uint8_t persistentEffectLayerDecay = 3;
 inline constexpr uint8_t debugLayerDecay = 8;
+// At 100 FPS, decaying 255 values by one per frame takes about 2.55 seconds.
+inline constexpr uint8_t uiLayerDecay = 1;
 
 [[nodiscard]] inline constexpr size_t layerIndex(Layer layer) {
     return static_cast<size_t>(layer);
@@ -77,6 +80,13 @@ defaultLayerConfigs() {
         .clearEachFrame = false,
         .enabled = true,
     };
+    configs[layerIndex(Layer::UI)] = LayerConfig{
+        .style = {.blendOp = BlendOp::Replace, .opacity = layerFullOpacity},
+        .decay = uiLayerDecay,
+        .clearEachFrame = false,
+        .clearOnPlay = true,
+        .enabled = true,
+    };
     return configs;
 }
 
@@ -107,6 +117,13 @@ class LayerStack {
     }
 
     void clearScratch() { Compositor::clear(_scratch); }
+
+    void prepareForPlay(Layer layer) {
+        auto &state = _layers[layerIndex(layer)];
+        if (state.config.clearOnPlay) {
+            Compositor::clear(state.frame);
+        }
+    }
 
     [[nodiscard]] std::span<HsvColor> scratch() { return _scratch; }
 

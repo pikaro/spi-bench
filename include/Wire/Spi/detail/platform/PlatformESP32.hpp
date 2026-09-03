@@ -8,6 +8,7 @@
 #include "Wire/Spi/Interfaces/MasterConfig.hpp"
 #include "Wire/Spi/Interfaces/SlaveConfig.hpp"
 #include "Wire/Spi/detail/Types.hpp"
+#include "driver/gpio.h"
 #include "driver/spi_common.h"
 #include "driver/spi_master.h"
 #include "driver/spi_slave.h"
@@ -333,6 +334,10 @@ class SpiSlaveDevice {
         if (config.bitOrder == BitOrder::LsbFirst) {
             slaveConfig.flags |= SPI_SLAVE_BIT_LSBFIRST;
         }
+
+        FAIL_IF_PLATFORM_FWD(
+            gpio_pullup_en(static_cast<gpio_num_t>(pinValue(*config.csPin))),
+            "Failed to enable SPI slave CS pull-up");
 
         FAIL_IF_PLATFORM_FWD(spi_slave_initialize(*hostResult, &busConfig,
                                                   &slaveConfig,

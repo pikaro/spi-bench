@@ -31,6 +31,7 @@ enum class MetricComponent : uint8_t {
     Bluetooth,
     Wheel,
     LedDisplay,
+    Battery,
 };
 
 enum class MetricLevel : uint8_t {
@@ -58,6 +59,7 @@ enum class MetricUnit : uint8_t {
     Ticks,
     Volts,
     Millivolts,
+    Minutes,
 };
 
 constexpr std::string_view metric_unit_to_string(MetricUnit unit) {
@@ -82,6 +84,8 @@ constexpr std::string_view metric_unit_to_string(MetricUnit unit) {
         return "V";
     case MetricUnit::Millivolts:
         return "mV";
+    case MetricUnit::Minutes:
+        return "min";
     }
     return "?";
 }

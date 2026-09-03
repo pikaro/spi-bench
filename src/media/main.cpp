@@ -24,12 +24,11 @@ Totem::Wire::I2C::Ssd1306Display fftDisplay{i2cMaster};
 MediaAudioSourceType audioSource{};
 Totem::AudioFft::FftAnalyzer fftAnalyzer{core.taskRegistry, audioSource};
 Totem::AudioFft::FftDisplay fftDisplayVisualizer{core.taskRegistry, fftAnalyzer,
-                                              fftDisplay};
+                                                 fftDisplay};
 
 Totem::Wire::Spi::Slave spiSlave{core.taskRegistry};
 ClockSyncSetup<Totem::Wire::Spi::Slave> clockSync{clockSlave, spiSlave};
-PubSubNetworkSpiEdgeSetup<Totem::Wire::Spi::Slave,
-                          Totem::Data::NodeName::Media>
+PubSubNetworkSpiEdgeSetup<Totem::Wire::Spi::Slave, Totem::Data::NodeName::Media>
     pubSubNetwork{core.taskRegistry, spiSlave};
 
 namespace {

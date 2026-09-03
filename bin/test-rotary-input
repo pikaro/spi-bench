@@ -1,0 +1,18 @@
+#!/bin/bash
+
+set -euo pipefail
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+cd "$REPO_ROOT"
+
+mkdir -p build/host-tests
+"${CXX:-c++}" \
+    -std=c++23 \
+    -Wall \
+    -Wextra \
+    -Werror \
+    -Iinclude \
+    test/rotary_input_logic.cpp \
+    -o build/host-tests/rotary_input_logic
+
+build/host-tests/rotary_input_logic

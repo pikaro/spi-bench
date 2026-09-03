@@ -2,6 +2,8 @@
 
 #include "LedDisplay/Interfaces/Color.hpp"
 #include "LedDisplay/Interfaces/PresentBufferMode.hpp"
+#include "LedTopology/detail/DenseUmbrella.hpp"
+#include "LedTopology/detail/Umbrella.hpp"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -10,16 +12,12 @@
 #define LED_GROUP_COUNT 1
 #endif
 
-#ifndef LED_GROUP_INDEX
-#define LED_GROUP_INDEX 0
-#endif
-
 #ifndef LED_NODE_GROUP_COUNT
 #define LED_NODE_GROUP_COUNT 1
 #endif
 
 #ifndef LED_NODE_GROUP0
-#define LED_NODE_GROUP0 LED_GROUP_INDEX
+#define LED_NODE_GROUP0 0
 #endif
 
 #ifndef LED_NODE_GROUP1
@@ -42,25 +40,37 @@
 #define LED_DISPLAY_GENERIC_RENDERER 0
 #endif
 
+#ifndef LED_TOPOLOGY_DENSE_UMBRELLA
+#define LED_TOPOLOGY_DENSE_UMBRELLA 0
+#endif
+
+#ifndef LED_OUTPUT_SK9822_SPI
+#define LED_OUTPUT_SK9822_SPI 0
+#endif
+
 struct LedTopologyStaticConfig {
-    static constexpr size_t stripCount = 4;
-    static constexpr size_t segmentsPerStrip = 4;
-    static constexpr size_t ledsPerSegment = 46;
-    static constexpr size_t ledsPerStrip = segmentsPerStrip * ledsPerSegment;
-    static constexpr size_t totalPixelCount = stripCount * ledsPerStrip;
-    static constexpr size_t spokeCount = stripCount * segmentsPerStrip;
-    static constexpr size_t ringCount = ledsPerSegment;
+#if LED_TOPOLOGY_DENSE_UMBRELLA
+    using Topology = Totem::LedTopology::detail::DenseUmbrella;
+#else
+    using Topology = Totem::LedTopology::detail::Umbrella;
+#endif
+
+    static constexpr size_t stripCount = Topology::stripCount;
+    static constexpr size_t segmentsPerStrip = Topology::segmentsPerStrip;
+    static constexpr size_t ledsPerSegment = Topology::ledsPerSegment;
+    static constexpr size_t ledsPerStrip = Topology::ledsPerStrip;
+    static constexpr size_t totalPixelCount = Topology::totalPixelCount;
+    static constexpr size_t spokeCount = Topology::spokeCount;
+    static constexpr size_t ringCount = Topology::ringCount;
 };
 
 struct LedGeometryStaticConfig : LedTopologyStaticConfig {
-    // Approximate current hardware: a 30 cm center opening with 30 cm radial
-    // LED strips. The exact measured values can replace these constants later
-    // without changing the animation coordinate model.
-    static constexpr uint16_t centerGapDiameterMm = 300;
-    static constexpr uint16_t radialStripLengthMm = 300;
-    static constexpr uint16_t innerRadiusMm = centerGapDiameterMm / 2U;
-    static constexpr uint16_t outerRadiusMm =
-        innerRadiusMm + radialStripLengthMm;
+    static constexpr uint16_t centerGapDiameterMm =
+        Topology::centerGapDiameterMm;
+    static constexpr uint16_t radialStripLengthMm =
+        Topology::radialStripLengthMm;
+    static constexpr uint16_t innerRadiusMm = Topology::innerRadiusMm;
+    static constexpr uint16_t outerRadiusMm = Topology::outerRadiusMm;
 
     static_assert(radialStripLengthMm > 0,
                   "LED radial strip length must be greater than zero");
@@ -70,7 +80,6 @@ struct LedGeometryStaticConfig : LedTopologyStaticConfig {
 
 struct LedOwnershipStaticConfig : LedGeometryStaticConfig {
     static constexpr size_t ledGroupCount = LED_GROUP_COUNT;
-    static constexpr size_t ledGroupIndex = LED_GROUP_INDEX;
     static constexpr size_t nodeGroupCount = LED_NODE_GROUP_COUNT;
     static constexpr std::array<size_t, nodeGroupCount> nodeGroups = [] {
         std::array<size_t, nodeGroupCount> groups{};
@@ -87,8 +96,6 @@ struct LedOwnershipStaticConfig : LedGeometryStaticConfig {
     }();
 
     static_assert(ledGroupCount > 0, "LED_GROUP_COUNT must be greater than 0");
-    static_assert(ledGroupIndex < ledGroupCount,
-                  "LED_GROUP_INDEX must be less than LED_GROUP_COUNT");
     static_assert(nodeGroupCount > 0,
                   "LED_NODE_GROUP_COUNT must be greater than 0");
     static_assert(nodeGroupCount <= 4,
@@ -126,32 +133,14 @@ struct LedOwnershipStaticConfig : LedGeometryStaticConfig {
 struct LedOutputStaticConfig : LedOwnershipStaticConfig {
     static constexpr size_t dataLineCount = LED_DATA_LINE_COUNT;
     static constexpr bool genericRenderer = LED_DISPLAY_GENERIC_RENDERER != 0;
+    static constexpr bool sk9822SpiOutput = LED_OUTPUT_SK9822_SPI != 0;
     static constexpr Totem::LedDisplay::HsvConversion hsvConversion =
         Totem::LedDisplay::HsvConversion::Rainbow;
-
-    static_assert(dataLineCount > 0,
-                  "LED_DATA_LINE_COUNT must be greater than 0");
-    static_assert(dataLineCount >= nodeGroupCount,
-                  "Data lines must cover every explicitly owned LED group");
-    static_assert(dataLineCount % nodeGroupCount == 0,
-                  "Data line count must be divisible by owned group count");
-
-    static constexpr size_t dataLinesPerNodeGroup =
-        dataLineCount / nodeGroupCount;
-
-    static_assert(groupPixelCount % dataLinesPerNodeGroup == 0,
-                  "Owned LED groups must split evenly across data lines");
-
-    static constexpr size_t dataLinePixelCount =
-        groupPixelCount / dataLinesPerNodeGroup;
 
     static constexpr std::array<uint8_t, 2> outputPins{
         1,
         2,
     };
-
-    static_assert(dataLineCount <= outputPins.size(),
-                  "Add more LED output pins before increasing dataLineCount");
 };
 
 struct LedAnimationBounds {
@@ -164,7 +153,7 @@ struct LedAnimationBounds {
 struct LedPipelineBounds {
     static constexpr Totem::LedDisplay::PresentBufferMode presentBufferMode =
         Totem::LedDisplay::PresentBufferMode::Triple;
-    static constexpr uint8_t targetFps = 125;
+    static constexpr uint8_t targetFps = 100;
     static constexpr uint32_t frameIntervalMs = 1000U / targetFps;
     static constexpr uint32_t taskIntervalMs = frameIntervalMs - 1U;
     static constexpr uint32_t defaultFrameBudgetUs = 1000000UL / targetFps;

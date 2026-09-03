@@ -54,6 +54,25 @@ Validation on 2026-05-24:
 - `/metrics` on `io` showed `ble notif=270 drop=0 fail=0` and
   `wheel notif=270 publish=270 bad=0 fail=0`.
 
+Weak-link resilience update on 2026-09-01:
+
+- The wheel's pinned ArduinoBLE 2.0.2 dependency is patched at build time to
+  bound HCI ACL-buffer backpressure to one second. A failed notification now
+  returns to wheel firmware so it can log the failure and disconnect instead
+  of blocking the main loop indefinitely. The wheel-only build hook verifies
+  the exact dependency revision and refuses to patch an unexpected or dirty
+  checkout.
+- The wheel logs subscribe/unsubscribe, notification failure or latency,
+  advertising retry failure, invalid IMU FIFO reads, and bounded FIFO-drain
+  yields. It also reports the FIFO overrun bit correctly. Per-sample gyro
+  anomalies remain filtered before integration, while accumulated valid
+  movement is no longer incorrectly rejected by the per-sample threshold.
+- The `io` central logs connection parameters, connection and PHY update
+  failures, termination failures, notification counts and silence at
+  disconnect, and notification delivery resuming after at least ten seconds.
+- `pio run -e main` in `../led/wheel` and `bin/build -e io` both succeed with
+  these changes.
+
 ## Existing Behavior
 
 The old central side is split across:

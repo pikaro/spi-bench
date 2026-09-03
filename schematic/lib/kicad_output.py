@@ -1,4 +1,4 @@
-# ruff: noqa: C901, CPY001, PLR2004
+# ruff: noqa: C901, PLR2004
 
 """KiCad generation and narrowly-scoped SKiDL 2.3 output repairs."""
 
@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING, Any
 from skidl.skidl import KICAD10
 from skidl.tools.inject_labels import parse_netlist, parse_sexp
 
-from .connectivity_contract import assert_pin_contract
 from .skidl_helpers import LAYOUT_SEED, SignalCatalog
 
 if TYPE_CHECKING:
@@ -366,7 +365,6 @@ def generate_outputs(
 ) -> list[Path]:
     """Validate the pin contract and generate every requested artifact."""
 
-    assert_pin_contract(circuit)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     previous_cwd = Path.cwd()

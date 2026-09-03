@@ -265,11 +265,13 @@ inline std::expected<FileStats, ReturnCode> statPath(const char *path) {
         return std::unexpected(mapErrnoOrFailure(errno));
     }
 
-    FAIL_IF(result.st_size < 0, std::unexpected(ERR(CoreError, InvalidData)),
+    const bool directory = S_ISDIR(result.st_mode);
+    FAIL_IF(!directory && result.st_size < 0,
+            std::unexpected(ERR(CoreError, InvalidData)),
             "Filesystem returned negative file size for %s", path);
     return FileStats{
-        .size = static_cast<std::size_t>(result.st_size),
-        .directory = S_ISDIR(result.st_mode),
+        .size = directory ? 0 : static_cast<std::size_t>(result.st_size),
+        .directory = directory,
     };
 }
 

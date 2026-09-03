@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Wire/I2C/Interfaces/Ina2xxConfig.hpp"
+#include "Wire/I2C/Interfaces/Ina2xxConfig.hpp" // IWYU pragma: export
 #include "Wire/I2C/detail/Device.hpp"
 #include "Wire/I2C/detail/Ina2xx.hpp"
 #include "Wire/I2C/detail/Master.hpp"

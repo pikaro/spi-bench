@@ -14,6 +14,29 @@ bin/led-render \
   --output /tmp/center-wave.tled
 ```
 
+The default host build profile is `legacy-full`. Select the production dense
+surface or either owned half explicitly:
+
+```sh
+bin/led-render --profile dense-full --config tools/led-render/examples/center-wave-green.json --output /tmp/dense-full.tled
+bin/led-render --profile dense-gpu0 --config tools/led-render/examples/center-wave-green.json --output /tmp/dense-gpu0.tled
+bin/led-render --profile dense-gpu1 --config tools/led-render/examples/center-wave-green.json --output /tmp/dense-gpu1.tled
+```
+
+These profiles are host verification builds. They do not create alternate
+PlatformIO environments or a reduced production geometry.
+
+Run the production ownership/stitch regression across every checked-in
+animation fixture:
+
+```sh
+bin/test-led-render-stitch
+```
+
+For each fixture this renders dense-full, dense-gpu0, and dense-gpu1 traces,
+rejects writes outside either owned half, and proves that combining the two
+halves exactly reconstructs every full trace plane.
+
 Inspect:
 
 ```sh
@@ -45,9 +68,9 @@ bin/led-view /tmp/center-wave.tled --capture /tmp/frame.png --frame 80 --layout 
 ```
 
 Preview brightness defaults to `255`, matching the trace's unscaled RGB data.
-Use `--brightness 96` when intentionally previewing the firmware default
-FastLED global brightness. `--glare` remains accepted as an alias for
-`--bloom`.
+Use `--brightness 96` to preview a lower logical display brightness.
+This viewer scaling does not emulate ordinary SK9822's 5-bit hardware
+quantization. `--glare` remains accepted as an alias for `--bloom`.
 Interactive playback caps displayed frames with `--max-fps` and skips trace
 frames as needed to preserve playback timing. `bin/led-view-pretty` uses the
 radial bloom view at `--scale 10 --max-fps 30`.
@@ -190,4 +213,6 @@ The renderer uses production animation, primitive, layer stack, compositor,
 topology, and `GenericRenderer` code. It does not yet emulate FastLED temporal
 dithering. A flicker visible in `hsv_final` is likely in animation/composition
 logic. A flicker only visible on hardware still needs FastLED or electrical
-validation.
+validation. The firmware SK9822 byte encoder has a separate exhaustive C++ host
+test; `.tled` traces remain logical animation/color traces, not captured wire
+frames.

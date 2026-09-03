@@ -137,6 +137,9 @@ make_calibration(Ina2xxModel model, uint32_t shuntMicroOhms,
     if (shuntMicroOhms == 0 || expectedMaxCurrentMicroamps == 0) {
         return std::unexpected(CoreError::InvalidArgument);
     }
+    if (model == Ina2xxModel::Ina228) {
+        return std::unexpected(CoreError::NotSupported);
+    }
 
     constexpr uint32_t positiveRawRange = 32767;
     const auto rangeCurrentLsb = static_cast<uint32_t>(
@@ -207,6 +210,10 @@ static_assert(
     make_calibration(Ina2xxModel::Ina219, 10000, 3200000).has_value());
 static_assert(
     make_calibration(Ina2xxModel::Ina226, 10000, 3200000).has_value());
+static_assert(
+    !make_calibration(Ina2xxModel::Ina228, 10000, 3200000).has_value());
+static_assert(make_calibration(Ina2xxModel::Ina228, 10000, 3200000).error() ==
+              CoreError::NotSupported);
 static_assert(make_calibration(Ina2xxModel::Ina226, 2000, 2000000)
                   ->registerValue == 32405);
 static_assert(make_calibration(Ina2xxModel::Ina226, 2000, 2000000)

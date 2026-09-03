@@ -37,8 +37,7 @@ template <class Link> struct SpiRouterPeerDependencies {
     }
 };
 
-template <class Link, size_t PeerCount>
-struct SpiRouterTransportDependencies {
+template <class Link, size_t PeerCount> struct SpiRouterTransportDependencies {
     void *pubSubNode = nullptr;
     detail::TransportId transportId = 0;
     std::string_view name;
@@ -70,10 +69,10 @@ class SpiRouterTransport
     friend class HasLifecycle<SpiRouterTransport<Link, PeerCount>>;
     friend struct LifecycleContract<SpiRouterTransport<Link, PeerCount>>;
 
-    static constexpr size_t rxQueueDepth = 8;
-    static constexpr size_t inFlightDepth = 8;
-    static constexpr size_t deferredRawDepth = 8;
-    static constexpr size_t pendingDepth = 8;
+    static constexpr size_t rxQueueDepth = 16;
+    static constexpr size_t inFlightDepth = 16;
+    static constexpr size_t deferredRawDepth = 16;
+    static constexpr size_t pendingDepth = 16;
     static constexpr size_t bufferSize = detail::SerDe::headerSize +
                                          detail::Spec::Limits::maxPayloadSize +
                                          detail::SerDe::overheadSize;
@@ -146,8 +145,7 @@ class SpiRouterTransport
             std::numeric_limits<uint32_t>::max()};
         std::atomic<uint32_t> txQueueWaitMaxUs{0};
         std::atomic<uint32_t> txWireSumUs{0};
-        std::atomic<uint32_t> txWireMinUs{
-            std::numeric_limits<uint32_t>::max()};
+        std::atomic<uint32_t> txWireMinUs{std::numeric_limits<uint32_t>::max()};
         std::atomic<uint32_t> txWireMaxUs{0};
         std::atomic<uint32_t> txTotalSumUs{0};
         std::atomic<uint32_t> txTotalMinUs{
@@ -232,8 +230,9 @@ class SpiRouterTransport
         return _takeStats(peer->stats);
     }
 
-    ReturnCode enqueue(detail::FrameHandle frameHandle,
-                       const detail::TransportDispatch &dispatch = {}) override {
+    ReturnCode
+    enqueue(detail::FrameHandle frameHandle,
+            const detail::TransportDispatch &dispatch = {}) override {
         FAIL_IF_INACTIVE_ERR("Cannot enqueue inactive SPI router transport");
         FAIL_IF(!dispatch.hasTargetPeers(), ERR(CoreError, InvalidArgument),
                 "SPI router enqueue requires target peers");
@@ -244,17 +243,18 @@ class SpiRouterTransport
         auto frameSizeResult = _prepareFrameForSend(frameHandle, sendBuffer);
         if (!frameSizeResult) {
             detail::metrics().addSpiDrop();
-            _log_w(SV_FMT ": dropping unserializable shared SPI message %u: "
-                   ERR_FMT,
+            _log_w(SV_FMT
+                   ": dropping unserializable shared SPI message %u: " ERR_FMT,
                    SV_ARG(_instanceName),
-                   frameHandle == nullptr ? 0
-                                          : frameHandle->envelope.header.messageId,
+                   frameHandle == nullptr
+                       ? 0
+                       : frameHandle->envelope.header.messageId,
                    ERR_ARG(frameSizeResult.error()));
             return frameSizeResult.error();
         }
 
-        auto targetPeers = static_cast<detail::PeerMask>(
-            dispatch.targetPeers & _configuredPeerMask());
+        auto targetPeers = static_cast<detail::PeerMask>(dispatch.targetPeers &
+                                                         _configuredPeerMask());
         const auto targetCount = _countTargetPeers(targetPeers);
         if (targetCount == 0) {
             return _ack(frameHandle->envelope);
@@ -264,8 +264,8 @@ class SpiRouterTransport
         FAIL_IF_NULL(pending, ERR(CoreError, Overflow),
                      "No SPI router pending frame slots available");
 
-        const auto frame = std::span<const std::byte>{sendBuffer.data(),
-                                                      *frameSizeResult};
+        const auto frame =
+            std::span<const std::byte>{sendBuffer.data(), *frameSizeResult};
         auto ret = OK();
         for (auto &peer : _peers) {
             const auto peerBit = peer.peerId;
@@ -276,7 +276,7 @@ class SpiRouterTransport
                                            frame, pending, true);
             if (!sendRet.ok()) {
                 _log_w(SV_FMT ": dropped shared SPI target " SV_FMT
-                       " for PubSub message %u: " ERR_FMT,
+                              " for PubSub message %u: " ERR_FMT,
                        SV_ARG(_instanceName), SV_ARG(peer.name),
                        frameHandle->envelope.header.messageId,
                        ERR_ARG(sendRet));
@@ -291,10 +291,11 @@ class SpiRouterTransport
         return ret;
     }
 
-    ReturnCode enqueueRaw(const Header &header, std::span<const std::byte> frame,
-                          const detail::TransportDispatch &dispatch = {})
-        override {
-        FAIL_IF_INACTIVE_ERR("Cannot enqueue raw inactive SPI router transport");
+    ReturnCode
+    enqueueRaw(const Header &header, std::span<const std::byte> frame,
+               const detail::TransportDispatch &dispatch = {}) override {
+        FAIL_IF_INACTIVE_ERR(
+            "Cannot enqueue raw inactive SPI router transport");
         FAIL_IF(!dispatch.hasTargetPeers(), ERR(CoreError, InvalidArgument),
                 "SPI router raw enqueue requires target peers");
         FAIL_IF(frame.size() > bufferSize, ERR(CoreError, Overflow),
@@ -304,8 +305,8 @@ class SpiRouterTransport
 
         auto sentCount = uint8_t{0};
         ReturnCode lastError = ERR(CoreError, Overflow);
-        auto targetPeers = static_cast<detail::PeerMask>(
-            dispatch.targetPeers & _configuredPeerMask());
+        auto targetPeers = static_cast<detail::PeerMask>(dispatch.targetPeers &
+                                                         _configuredPeerMask());
         for (auto &peer : _peers) {
             const auto peerBit = peer.peerId;
             if ((targetPeers & peerBit) == 0) {
@@ -315,7 +316,7 @@ class SpiRouterTransport
             if (!sendRet.ok()) {
                 lastError = sendRet;
                 _log_w(SV_FMT ": dropped direct shared SPI target " SV_FMT
-                       " for PubSub message %u: " ERR_FMT,
+                              " for PubSub message %u: " ERR_FMT,
                        SV_ARG(_instanceName), SV_ARG(peer.name),
                        header.messageId, ERR_ARG(sendRet));
                 continue;
@@ -325,8 +326,8 @@ class SpiRouterTransport
         return sentCount == 0 ? lastError : OK();
     }
 
-    ReturnCode send(size_t maxCount = std::numeric_limits<size_t>::max())
-        override {
+    ReturnCode
+    send(size_t maxCount = std::numeric_limits<size_t>::max()) override {
         FAIL_IF_INACTIVE_ERR("Cannot send with inactive SPI router transport");
         FAIL_IF_ERR_FWD(_observePeerAvailability(),
                         "Failed to observe SPI router peer availability");
@@ -344,16 +345,17 @@ class SpiRouterTransport
         return OK();
     }
 
-    ReturnCode receive(size_t maxCount = std::numeric_limits<size_t>::max())
-        override {
+    ReturnCode
+    receive(size_t maxCount = std::numeric_limits<size_t>::max()) override {
         (void)maxCount;
-        FAIL_IF_INACTIVE_ERR("Cannot receive with inactive SPI router transport");
+        FAIL_IF_INACTIVE_ERR(
+            "Cannot receive with inactive SPI router transport");
         return _observePeerAvailability();
     }
 
-    ReturnCode pollInto(void *ctx, detail::PollIntoCallback callback,
-                        size_t maxCount = std::numeric_limits<size_t>::max())
-        override {
+    ReturnCode
+    pollInto(void *ctx, detail::PollIntoCallback callback,
+             size_t maxCount = std::numeric_limits<size_t>::max()) override {
         FAIL_IF_INACTIVE_ERR("Cannot poll inactive SPI router transport");
         FAIL_IF_ERR_FWD(_observePeerAvailability(),
                         "Failed to observe SPI router peer availability");
@@ -374,8 +376,8 @@ class SpiRouterTransport
                         continue;
                     }
                     FAIL(receiveRet,
-                         "Failed to receive shared SPI frame from peer "
-                         SV_FMT ": " ERR_FMT,
+                         "Failed to receive shared SPI frame from peer " SV_FMT
+                         ": " ERR_FMT,
                          SV_ARG(peer.name), ERR_ARG(receiveRet));
                 }
 
@@ -408,13 +410,12 @@ class SpiRouterTransport
                     _receiveCursor = (index + 1) % PeerCount;
                     continue;
                 }
-                FAIL_IF_ERR_FWD(
-                    callback(ctx, *envelope,
-                             detail::IngressContext{
-                                 .transportId = _transportId,
-                                 .peerId = peer.peerId,
-                             }),
-                    "Failed to process shared SPI ingress frame");
+                FAIL_IF_ERR_FWD(callback(ctx, *envelope,
+                                         detail::IngressContext{
+                                             .transportId = _transportId,
+                                             .peerId = peer.peerId,
+                                         }),
+                                "Failed to process shared SPI ingress frame");
                 ++count;
                 madeProgress = true;
                 _receiveCursor = (index + 1) % PeerCount;
@@ -432,9 +433,9 @@ class SpiRouterTransport
             return value.exchange(0, std::memory_order_relaxed);
         };
         auto takeMin = [](std::atomic<uint32_t> &value) {
-            const auto min = value.exchange(
-                std::numeric_limits<uint32_t>::max(),
-                std::memory_order_relaxed);
+            const auto min =
+                value.exchange(std::numeric_limits<uint32_t>::max(),
+                               std::memory_order_relaxed);
             return min == std::numeric_limits<uint32_t>::max() ? 0 : min;
         };
         const auto timingSamples = take(stats.txTimingSamples);
@@ -471,7 +472,8 @@ class SpiRouterTransport
         return out;
     }
 
-    [[nodiscard]] uint8_t _countTargetPeers(detail::PeerMask targetPeers) const {
+    [[nodiscard]] uint8_t
+    _countTargetPeers(detail::PeerMask targetPeers) const {
         auto count = uint8_t{0};
         for (const auto &peer : _peers) {
             if ((targetPeers & peer.peerId) != 0) {
@@ -502,8 +504,8 @@ class SpiRouterTransport
 
     ReturnCode _observePeerAvailability() {
         const auto availablePeers = _availablePeers();
-        const auto newlyAvailablePeers =
-            static_cast<detail::PeerMask>(availablePeers & ~_knownAvailablePeers);
+        const auto newlyAvailablePeers = static_cast<detail::PeerMask>(
+            availablePeers & ~_knownAvailablePeers);
         const bool wasAvailable = _knownAvailablePeers != 0;
         const bool isAvailable = availablePeers != 0;
         if (availablePeers == _knownAvailablePeers) {
@@ -536,20 +538,21 @@ class SpiRouterTransport
         return peer->transport->_receiveWireData(*peer, payload);
     }
 
-    ReturnCode _receiveWireData(Peer &peer, std::span<const std::byte> payload) {
+    ReturnCode _receiveWireData(Peer &peer,
+                                std::span<const std::byte> payload) {
         if (!peer.link->ready()) {
             detail::metrics().addSpiDrop();
             peer.stats.rxDropped.fetch_add(1, std::memory_order_relaxed);
             _log_w(SV_FMT ": rejecting SPI PubSub frame from " SV_FMT
-                   " while link is not ready",
+                          " while link is not ready",
                    SV_ARG(_instanceName), SV_ARG(peer.name));
             return ERR(CoreError, InvalidState);
         }
         if (payload.size() > bufferSize) {
             detail::metrics().addSpiDrop();
             peer.stats.rxDropped.fetch_add(1, std::memory_order_relaxed);
-            _log_w(SV_FMT ": dropping oversized SPI PubSub frame from "
-                   SV_FMT " of %zu bytes",
+            _log_w(SV_FMT ": dropping oversized SPI PubSub frame from " SV_FMT
+                          " of %zu bytes",
                    SV_ARG(_instanceName), SV_ARG(peer.name), payload.size());
             return OK();
         }
@@ -558,18 +561,18 @@ class SpiRouterTransport
             detail::metrics().addSpiDrop();
             peer.stats.rxDropped.fetch_add(1, std::memory_order_relaxed);
             _log_w(SV_FMT ": dropping invalid SPI PubSub frame from " SV_FMT
-                   " of %zu bytes: " ERR_FMT,
+                          " of %zu bytes: " ERR_FMT,
                    SV_ARG(_instanceName), SV_ARG(peer.name), payload.size(),
                    ERR_ARG(headerResult.error()));
             return OK();
         }
-        auto validateRet = detail::SerDe::tryValidateFrame(payload,
-                                                           *headerResult);
+        auto validateRet =
+            detail::SerDe::tryValidateFrame(payload, *headerResult);
         if (!validateRet.ok()) {
             detail::metrics().addSpiDrop();
             peer.stats.rxDropped.fetch_add(1, std::memory_order_relaxed);
             _log_w(SV_FMT ": dropping corrupt SPI PubSub frame from " SV_FMT
-                   " of %zu bytes: " ERR_FMT,
+                          " of %zu bytes: " ERR_FMT,
                    SV_ARG(_instanceName), SV_ARG(peer.name), payload.size(),
                    ERR_ARG(validateRet));
             return OK();
@@ -581,15 +584,16 @@ class SpiRouterTransport
         detail::log_trace_frame("spi.router.ingress", payload,
                                 detail::SerDe::peekHeader,
                                 _instanceName.data());
-        auto sendRet = Totem::Queue::Platform::send(
-            peer.rxFrameQueue, &rxFrame, queueSendTimeoutTicks);
+        auto sendRet = Totem::Queue::Platform::send(peer.rxFrameQueue, &rxFrame,
+                                                    queueSendTimeoutTicks);
         if (!sendRet.ok()) {
             detail::metrics().addSpiDrop();
             peer.stats.rxDropped.fetch_add(1, std::memory_order_relaxed);
             if (sendRet == ERR(Timeout) || sendRet == ERR(CoreError, Timeout) ||
-                sendRet == ERR(Overflow) || sendRet == ERR(CoreError, Overflow)) {
+                sendRet == ERR(Overflow) ||
+                sendRet == ERR(CoreError, Overflow)) {
                 _log_w(SV_FMT ": dropping SPI PubSub frame from " SV_FMT
-                       " after RX queue backpressure: " ERR_FMT,
+                              " after RX queue backpressure: " ERR_FMT,
                        SV_ARG(_instanceName), SV_ARG(peer.name),
                        ERR_ARG(sendRet));
                 return OK();
@@ -600,9 +604,8 @@ class SpiRouterTransport
         peer.stats.rxQueued.fetch_add(1, std::memory_order_relaxed);
         auto wakeRet = _wake();
         if (!wakeRet.ok()) {
-            _log_w(SV_FMT
-                   ": accepted SPI PubSub frame from " SV_FMT
-                   " but failed to wake PubSub: " ERR_FMT,
+            _log_w(SV_FMT ": accepted SPI PubSub frame from " SV_FMT
+                          " but failed to wake PubSub: " ERR_FMT,
                    SV_ARG(_instanceName), SV_ARG(peer.name), ERR_ARG(wakeRet));
         }
         return OK();
@@ -700,8 +703,7 @@ class SpiRouterTransport
 
         auto *slot = _findFreeInFlight(peer);
         if (slot == nullptr) {
-            peer.stats.txInFlightFull.fetch_add(1,
-                                                std::memory_order_relaxed);
+            peer.stats.txInFlightFull.fetch_add(1, std::memory_order_relaxed);
             return _queueRawFrame(peer, header, frame);
         }
 
@@ -710,10 +712,10 @@ class SpiRouterTransport
 
     ReturnCode _queueRawFrame(Peer &peer, const Header &header,
                               std::span<const std::byte> frame) {
-        FAIL_IF_ERR_FWD(_ensurePeerRawSendQueue(peer),
-                        "Failed to ensure shared SPI raw send queue for "
-                        SV_FMT,
-                        SV_ARG(peer.name));
+        FAIL_IF_ERR_FWD(
+            _ensurePeerRawSendQueue(peer),
+            "Failed to ensure shared SPI raw send queue for " SV_FMT,
+            SV_ARG(peer.name));
         RawFrame rawFrame{};
         rawFrame.header = header;
         std::memcpy(rawFrame.data.data(), frame.data(), frame.size());
@@ -721,8 +723,7 @@ class SpiRouterTransport
 
         if (Totem::Queue::Platform::spacesAvailable(peer.rawSendQueue) == 0) {
             detail::metrics().addSpiDrop();
-            peer.stats.txInFlightFull.fetch_add(1,
-                                                std::memory_order_relaxed);
+            peer.stats.txInFlightFull.fetch_add(1, std::memory_order_relaxed);
             return ERR(CoreError, Overflow);
         }
 
@@ -730,8 +731,7 @@ class SpiRouterTransport
             Totem::Queue::Platform::send(peer.rawSendQueue, &rawFrame, 0);
         if (!sendRet.ok()) {
             detail::metrics().addSpiDrop();
-            peer.stats.txInFlightFull.fetch_add(1,
-                                                std::memory_order_relaxed);
+            peer.stats.txInFlightFull.fetch_add(1, std::memory_order_relaxed);
             return sendRet;
         }
         peer.rawSendQueued.fetch_add(1, std::memory_order_relaxed);
@@ -743,10 +743,10 @@ class SpiRouterTransport
         for (size_t scanned = 0; scanned < PeerCount; ++scanned) {
             const auto index = (_sendCursor + scanned) % PeerCount;
             auto &peer = _peers[index];
-            FAIL_IF_ERR_FWD(_sendDeferredRawFrame(peer, sent),
-                            "Failed to send deferred raw shared SPI frame to "
-                            SV_FMT,
-                            SV_ARG(peer.name));
+            FAIL_IF_ERR_FWD(
+                _sendDeferredRawFrame(peer, sent),
+                "Failed to send deferred raw shared SPI frame to " SV_FMT,
+                SV_ARG(peer.name));
             if (sent) {
                 _sendCursor = (index + 1) % PeerCount;
                 return OK();
@@ -763,8 +763,7 @@ class SpiRouterTransport
 
         auto *slot = _findFreeInFlight(peer);
         if (slot == nullptr) {
-            peer.stats.txInFlightFull.fetch_add(1,
-                                                std::memory_order_relaxed);
+            peer.stats.txInFlightFull.fetch_add(1, std::memory_order_relaxed);
             return OK();
         }
 
@@ -785,9 +784,8 @@ class SpiRouterTransport
             std::span<const std::byte>{rawFrame.data.data(), rawFrame.size},
             *slot);
         if (!sendRet.ok()) {
-            _log_w(SV_FMT
-                   ": dropping deferred raw shared SPI PubSub message %u to "
-                   SV_FMT " after enqueue failed: " ERR_FMT,
+            _log_w(SV_FMT ": dropping deferred raw shared SPI PubSub message "
+                          "%u to " SV_FMT " after enqueue failed: " ERR_FMT,
                    SV_ARG(_instanceName), rawFrame.header.messageId,
                    SV_ARG(peer.name), ERR_ARG(sendRet));
         }
@@ -827,12 +825,12 @@ class SpiRouterTransport
             peer->stats.txFailed.fetch_add(1, std::memory_order_relaxed);
             if (result.result == ERR(CoreError, Timeout)) {
                 _log_v(SV_FMT ": SPI write to " SV_FMT
-                       " timed out for PubSub message %u: " ERR_FMT,
+                              " timed out for PubSub message %u: " ERR_FMT,
                        SV_ARG(_instanceName), SV_ARG(peer->name),
                        header.messageId, ERR_ARG(result.result));
             } else {
                 _log_w(SV_FMT ": SPI write to " SV_FMT
-                       " failed for PubSub message %u: " ERR_FMT,
+                              " failed for PubSub message %u: " ERR_FMT,
                        SV_ARG(_instanceName), SV_ARG(peer->name),
                        header.messageId, ERR_ARG(result.result));
             }
@@ -939,8 +937,7 @@ class SpiRouterTransport
 
     static void _recordTimingValue(std::atomic<uint32_t> &sum,
                                    std::atomic<uint32_t> &min,
-                                   std::atomic<uint32_t> &max,
-                                   uint32_t value) {
+                                   std::atomic<uint32_t> &max, uint32_t value) {
         sum.fetch_add(value, std::memory_order_relaxed);
 
         auto currentMin = min.load(std::memory_order_relaxed);
@@ -977,8 +974,7 @@ class SpiRouterTransport
         if (peer.rawSendQueue != nullptr) {
             return OK();
         }
-        auto queueResult =
-            Totem::Queue::Platform::create(peer.rawSendStorage);
+        auto queueResult = Totem::Queue::Platform::create(peer.rawSendStorage);
         FAIL_IF_UNEXPECTED_FWD(
             queueHandle, queueResult,
             "Failed to create shared SPI raw send queue for " SV_FMT,
@@ -991,14 +987,12 @@ class SpiRouterTransport
         auto ret = OK();
         for (auto &peer : _peers) {
             if (peer.rawSendQueue != nullptr) {
-                ret.combine(
-                    Totem::Queue::Platform::destroy(peer.rawSendQueue));
+                ret.combine(Totem::Queue::Platform::destroy(peer.rawSendQueue));
                 peer.rawSendQueue = {};
                 peer.rawSendQueued.store(0, std::memory_order_relaxed);
             }
             if (peer.rxFrameQueue != nullptr) {
-                ret.combine(
-                    Totem::Queue::Platform::destroy(peer.rxFrameQueue));
+                ret.combine(Totem::Queue::Platform::destroy(peer.rxFrameQueue));
                 peer.rxFrameQueue = {};
             }
         }

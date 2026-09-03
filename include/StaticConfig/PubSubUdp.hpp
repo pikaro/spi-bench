@@ -18,7 +18,7 @@ inline constexpr size_t txBurstLimit = 1;
 inline constexpr Totem::TaskController::Config task{
     .name = "PubSubUdpTask",
     .priority = 3,
-    .core = Totem::TaskController::Config::CorePreference::specific(1),
+    .core = Totem::TaskController::Config::CorePreference::any(),
     .stackSize = Totem::StaticConfig::TaskStacks::pubSubUdp,
     .intervalMs = 1,
     .noCatchup = true,

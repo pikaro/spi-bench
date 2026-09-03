@@ -6,8 +6,8 @@
 #include "PubSubBackend/detail/ControlPlane.hpp"
 #include "PubSubBackend/detail/Metrics.hpp"
 #include "PubSubBackend/detail/Publisher.hpp"
-#include "PubSubBackend/detail/TransportDirectory.hpp"
 #include "PubSubBackend/detail/Trace.hpp"
+#include "PubSubBackend/detail/TransportDirectory.hpp"
 #include "PubSubBackend/detail/Types.hpp"
 #include "Queue/Facade.hpp"
 #include "Types/Error.hpp"
@@ -70,12 +70,11 @@ class Drainer {
                         found = true;
                         frame.pendingMask &= ~mask;
                         if (--frame.pendingCount == 0) {
-                            _log_d("Drainer: final ack for "
-                                   MAGIC_PUBSUB_SV_FMT,
-                                   MAGIC_PUBSUB_SV_ARG(envelope.header));
+                            _log_d(
+                                "Drainer: final ack for " MAGIC_PUBSUB_SV_FMT,
+                                MAGIC_PUBSUB_SV_ARG(envelope.header));
                             releaseEnvelope = frame.envelope;
-                            shouldRelease =
-                                releaseEnvelope.release != nullptr;
+                            shouldRelease = releaseEnvelope.release != nullptr;
                             frame = StoredFrame{};
                         }
                         break;
@@ -160,8 +159,8 @@ class Drainer {
                 .self = this,
                 .transportId = entry.transportId,
             };
-            ret.combine(
-                entry.transporter->pollInto(&ctx, &_publishCallback, freeSlots));
+            ret.combine(entry.transporter->pollInto(&ctx, &_publishCallback,
+                                                    freeSlots));
         }
         return ret;
     }
@@ -205,10 +204,10 @@ class Drainer {
     }
 
     std::expected<size_t, ReturnCode>
-    _collectTransportTargets(
-        const Envelope &item, std::optional<IngressContext> ingressContext,
-        std::span<TransportTarget> targets, TransportMask &mask,
-        uint8_t &pendingCount) {
+    _collectTransportTargets(const Envelope &item,
+                             std::optional<IngressContext> ingressContext,
+                             std::span<TransportTarget> targets,
+                             TransportMask &mask, uint8_t &pendingCount) {
         size_t targetCount = 0;
         mask = 0;
         pendingCount = 0;
@@ -241,9 +240,8 @@ class Drainer {
     _publishFrame(const Envelope &item,
                   std::optional<IngressContext> ingressContext = std::nullopt) {
         auto ret = OK();
-        log_trace_packet(ingressContext.has_value()
-                             ? "drainer.ingress.publish"
-                             : "drainer.local.publish",
+        log_trace_packet(ingressContext.has_value() ? "drainer.ingress.publish"
+                                                    : "drainer.local.publish",
                          item.header, "Drainer");
         _log_d("Drainer: publish frame " MAGIC_PUBSUB_SV_FMT "%s",
                MAGIC_PUBSUB_SV_ARG(item.header),
@@ -252,10 +250,9 @@ class Drainer {
         if (!controlRet.ok()) {
             if (ingressContext.has_value() &&
                 _isRecoverableIngressError(controlRet)) {
-                _log_w("Drainer: dropping invalid control-plane ingress "
-                       MAGIC_PUBSUB_SV_FMT ": " ERR_FMT,
-                       MAGIC_PUBSUB_SV_ARG(item.header),
-                       ERR_ARG(controlRet));
+                _log_w("Drainer: dropping invalid control-plane "
+                       "ingress " MAGIC_PUBSUB_SV_FMT ": " ERR_FMT,
+                       MAGIC_PUBSUB_SV_ARG(item.header), ERR_ARG(controlRet));
                 FAIL_IF_ERR_FWD(item.ack(),
                                 "Failed to release invalid control-plane "
                                 "ingress frame");
@@ -267,11 +264,11 @@ class Drainer {
         std::array<TransportTarget, Spec::Limits::maxTransports> targets{};
         TransportMask pendingMask = 0;
         uint8_t pendingCount = 0;
-        FAIL_IF_UNEXPECTED_FWD(
-            targetCount,
-            _collectTransportTargets(item, ingressContext, targets, pendingMask,
-                                     pendingCount),
-            "Failed to route PubSub frame to transports");
+        FAIL_IF_UNEXPECTED_FWD(targetCount,
+                               _collectTransportTargets(item, ingressContext,
+                                                        targets, pendingMask,
+                                                        pendingCount),
+                               "Failed to route PubSub frame to transports");
         if (targetCount == 0) {
             _log_d("Drainer: releasing " MAGIC_PUBSUB_SV_FMT
                    " without transport fanout",
@@ -287,9 +284,8 @@ class Drainer {
         if (!storeResult) {
             if (storeResult.error() == ERR(Overflow)) {
                 metrics().addEgressRejectedCritical();
-                _log_w("Drainer: dropping transport fanout for "
-                       MAGIC_PUBSUB_SV_FMT
-                       " because all in-flight slots are occupied",
+                _log_w("Drainer: drop fanout for " MAGIC_PUBSUB_SV_FMT
+                       " - all in-flight slots occupied",
                        MAGIC_PUBSUB_SV_ARG(item.header));
                 FAIL_IF_ERR_FWD(item.ack(),
                                 "Failed to release PubSub message after "
@@ -314,15 +310,13 @@ class Drainer {
             auto enqueueRet =
                 target.transporter->enqueue(*storeResult, target.dispatch);
             if (!enqueueRet.ok()) {
-                _log_w("Drainer: dropping transport target " SV_FMT
-                       " for " MAGIC_PUBSUB_SV_FMT " after enqueue failed: "
-                       ERR_FMT,
-                       SV_ARG(target.name),
-                       MAGIC_PUBSUB_SV_ARG(item.header),
+                _log_w("Drainer: drop target " SV_FMT
+                       " for " MAGIC_PUBSUB_SV_FMT " - fail: " ERR_FMT,
+                       SV_ARG(target.name), MAGIC_PUBSUB_SV_ARG(item.header),
                        ERR_ARG(enqueueRet));
-                FAIL_IF_ERR_FWD(_releaseTransportTarget(
-                                    **storeResult, target.transportId),
-                                "Failed to release failed transport target");
+                FAIL_IF_ERR_FWD(
+                    _releaseTransportTarget(**storeResult, target.transportId),
+                    "Failed to release failed transport target");
             }
         }
         return ret;

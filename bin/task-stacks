@@ -84,12 +84,17 @@ def configured_tasks(env: str) -> list[tuple[str, str]]:
             ("Spi::Master -> SpiGpu0Task", "spiMaster"),
             ("Spi::Master -> SpiGpu1Task", "spiMaster"),
             ("Spi::Master -> SpiMediaTask", "spiMaster"),
+            ("Spi::Master -> SpiPowerTask", "spiMaster"),
             ("PubSub::Node -> PubSubStar", "pubSubNode"),
         ],
         "media": [
-            ("LedPwm -> BeatLed", "ledPwm"),
+            ("LedPwm -> PeakLed", "ledPwm"),
             ("Audio::FftDisplay -> FftDisplay", "audioFftDisplay"),
             ("Audio::FftAnalyzer -> AudioFft", "audioFft"),
+            ("Spi::Slave -> SpiSlaveTask", "spiSlave"),
+            ("PubSub::Node -> PubSubStar", "pubSubNode"),
+        ],
+        "power": [
             ("Spi::Slave -> SpiSlaveTask", "spiSlave"),
             ("PubSub::Node -> PubSubStar", "pubSubNode"),
         ],

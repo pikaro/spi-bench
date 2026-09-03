@@ -5,7 +5,7 @@
 #include "LedDisplay/Interfaces/AnimationCommand.hpp"
 #include "LedDisplay/Interfaces/Color.hpp"
 #include "LedDisplay/Interfaces/Config.hpp"
-#include "LedDisplay/Outputs/FastLedOutput.hpp"
+#include "LedDisplay/Outputs/Select.hpp"
 #include "LedDisplay/detail/AnimationEngine.hpp"
 #include "LedDisplay/detail/Metrics.hpp"
 #include "LedDisplay/detail/PresentBuffers.hpp"
@@ -43,7 +43,6 @@ class Display : public HasLifecycle<Display, Config>,
 
     static constexpr const char *name = "LedDisplay";
     static constexpr LogComponent logComponent = LogComponent::Output;
-    static constexpr uint8_t maxFastLedDataLines = 2;
     static constexpr uint32_t presentMissLogIntervalMs = 1000;
     static constexpr uint32_t frameBudgetLogIntervalMs = 1000;
     static constexpr size_t animationSubscriptionCount = 9;
@@ -71,8 +70,7 @@ class Display : public HasLifecycle<Display, Config>,
         return OK();
     }
 
-    ReturnCode beginPresentStrobe(Pin pin,
-                                  GpioPull pull = GpioPull::Down) {
+    ReturnCode beginPresentStrobe(Pin pin, GpioPull pull = GpioPull::Down) {
         FAIL_IF_INACTIVE_ERR("Cannot initialize LED present strobe before %s "
                              "begins",
                              name);
@@ -93,8 +91,6 @@ class Display : public HasLifecycle<Display, Config>,
 
   private:
     ReturnCode _onBegin() {
-        static_assert(Config::dataLineCount <= maxFastLedDataLines,
-                      "FastLED output currently supports two configured lines");
         prewarmMetrics();
         DEFAULT_TASK();
         _renderTask = task;
@@ -133,18 +129,15 @@ class Display : public HasLifecycle<Display, Config>,
     }
 
     ReturnCode _subscribeAnimationCommandTopics() {
-        FAIL_IF_ERR_FWD(
-            _subscribeAnimationCommand<AnimationPlayCommand>(
-                "led-play", PubSubService::Topic::AnimationPlay),
-            "Failed to subscribe LED animation play commands");
-        FAIL_IF_ERR_FWD(
-            _subscribeAnimationCommand<AnimationUpdateCommand>(
-                "led-upd", PubSubService::Topic::AnimationUpdate),
-            "Failed to subscribe LED animation update commands");
-        FAIL_IF_ERR_FWD(
-            _subscribeAnimationCommand<AnimationStopCommand>(
-                "led-stop", PubSubService::Topic::AnimationStop),
-            "Failed to subscribe LED animation stop commands");
+        FAIL_IF_ERR_FWD(_subscribeAnimationCommand<AnimationPlayCommand>(
+                            "led-play", PubSubService::Topic::AnimationPlay),
+                        "Failed to subscribe LED animation play commands");
+        FAIL_IF_ERR_FWD(_subscribeAnimationCommand<AnimationUpdateCommand>(
+                            "led-upd", PubSubService::Topic::AnimationUpdate),
+                        "Failed to subscribe LED animation update commands");
+        FAIL_IF_ERR_FWD(_subscribeAnimationCommand<AnimationStopCommand>(
+                            "led-stop", PubSubService::Topic::AnimationStop),
+                        "Failed to subscribe LED animation stop commands");
         FAIL_IF_ERR_FWD(
             _subscribeAnimationCommand<AnimationSetHueOffsetCommand>(
                 "led-hue", PubSubService::Topic::AnimationSetHueOffset),
@@ -225,8 +218,8 @@ class Display : public HasLifecycle<Display, Config>,
             return;
         }
         self->_pendingPresentStrobes.fetch_add(1, std::memory_order_relaxed);
-        Totem::TaskController::Controller::signalTaskFromIsr(
-            self->_renderTask, Signal::Ready);
+        Totem::TaskController::Controller::signalTaskFromIsr(self->_renderTask,
+                                                             Signal::Ready);
     }
 
     ReturnCode _onTaskStep() {
@@ -269,8 +262,8 @@ class Display : public HasLifecycle<Display, Config>,
     ReturnCode _renderFrame(uint32_t nowMs) {
         const auto renderStartUs = ::platform::get_time_us();
         auto ret = _engine.render(nowMs, _presentBuffers.renderTarget());
-        const auto renderUs = static_cast<uint32_t>(
-            ::platform::get_time_us() - renderStartUs);
+        const auto renderUs =
+            static_cast<uint32_t>(::platform::get_time_us() - renderStartUs);
         metrics().recordRenderDuration(renderUs);
         if (!ret.ok()) {
             metrics().addRenderFailure();
@@ -346,7 +339,7 @@ class Display : public HasLifecycle<Display, Config>,
                static_cast<unsigned long>(this->config().frameBudgetUs));
     }
 
-    Outputs::FastLedOutput _output;
+    Outputs::SelectedOutput _output;
     AnimationEngine _engine{};
     PresentBuffers _presentBuffers{};
     bool _pubSubSubscribed = false;

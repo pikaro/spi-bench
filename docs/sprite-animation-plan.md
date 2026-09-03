@@ -15,8 +15,8 @@ and for the expected future increase in spoke count.
 
 - GPU rendering runs at 125 Hz with an 8 ms present-and-render budget.
 - The current logical surface is 16 spokes by 46 rings.
-- The physical surface is an annulus. The strips start after a roughly 30 cm
-  center gap and are themselves roughly 30 cm long, so logical radial index `0`
+- The physical surface is an annulus. Production strips start at roughly 60 mm
+  radius and run about 417 mm, so logical radial index `0`
   is the inner visible ring, not the center of a circle.
 - Each GPU renders only physically owned pixels, but animations can address
   logical pixels through `Canvas`; unowned pixels are ignored by the current
@@ -135,9 +135,9 @@ Implementation steps:
    };
    ```
 
-2. Add static geometry inputs for inner radius and strip length. Approximate
-   defaults can be 300 mm and 300 mm, but they should be ordinary project
-   configuration so the measured hardware can replace them later.
+2. Add static geometry inputs for inner radius and strip length. These values
+   belong to the selected topology so legacy and production hardware retain
+   their own physical coordinate models.
 3. Add `fieldPoint(spoke, radial)`.
 4. Add `forEachLogicalPoint(callback)` if it reduces repeated boilerplate.
 5. Add `rotate(point, angle)` as a cheap fixed-point transform.

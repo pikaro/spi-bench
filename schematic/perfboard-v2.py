@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# ruff: noqa: CPY001, PLR0913, PLR0917
+
+# ruff: noqa: PLR0913
 
 """Generate the perfboard-v2 logic-board reference schematic and netlists.
 
@@ -70,9 +71,6 @@ def media_controller(vcc: Net, gnd: Net, media_3v3: Net) -> Part:
     mark_no_connect(
         media,
         'TX',
-        'GPIO2',
-        'GPIO3',
-        'GPIO4',
         'GPIO14',
         'GPIO15',
         'GPIO16',
@@ -170,16 +168,59 @@ def low_speed_spi(
     master: Part,
     media: Part,
     power: Part,
+    master_3v3: Net,
 ) -> None:
     """Low-speed SPI bus from master to the media and power nodes."""
 
-    catalog.series('SPI0_MISO', 'R1', '33', master['GPIO1'], media['GPIO11'], power['GPIO4'])
-    catalog.series('SPI0_CLK', 'R2', '33', master['GPIO2'], media['GPIO10'], power['GPIO3'])
-    catalog.series('SPI0_MOSI', 'R3', '33', master['GPIO3'], media['GPIO9'], power['GPIO1'])
-    catalog.series('SPI0_CS_MEDIA', 'R4', '33', master['GPIO4'], media['GPIO8'])
+    catalog.series(
+        'SPI0_MISO',
+        'R1',
+        '33',
+        master['GPIO1'],
+        media['GPIO11'],
+        media['GPIO2'],
+        power['GPIO4'],
+    )
+    catalog.series(
+        'SPI0_CLK',
+        'R2',
+        '33',
+        master['GPIO2'],
+        media['GPIO10'],
+        media['GPIO3'],
+        power['GPIO3'],
+    )
+    catalog.series(
+        'SPI0_MOSI',
+        'R3',
+        '33',
+        master['GPIO3'],
+        media['GPIO9'],
+        media['GPIO4'],
+        power['GPIO1'],
+    )
+    _, media_cs, _ = catalog.series(
+        'SPI0_CS_MEDIA',
+        'R4',
+        '33',
+        master['GPIO4'],
+        media['GPIO8'],
+    )
     catalog.series('SPI0_ATTN_MEDIA', 'R5', '1k', master['GPIO5'], media['GPIO7'])
-    catalog.series('SPI0_CS_POWER', 'R6', '33', master['GPIO6'], power['GPIO0'])
+    _, power_cs, _ = catalog.series(
+        'SPI0_CS_POWER',
+        'R6',
+        '33',
+        master['GPIO6'],
+        power['GPIO0'],
+    )
     catalog.series('SPI0_ATTN_POWER', 'R7', '1k', master['GPIO9'], power['GPIO10'])
+
+    media_cs_pullup = resistor('R23', '10k')
+    power_cs_pullup = resistor('R24', '10k')
+    media_cs.connect(media_cs_pullup[1])
+    power_cs.connect(power_cs_pullup[1])
+    master_3v3.connect(media_cs_pullup[2], power_cs_pullup[2])
 
 
 @subcircuit
@@ -188,17 +229,36 @@ def high_speed_spi(
     master: Part,
     gpu0: Part,
     gpu1: Part,
+    master_3v3: Net,
 ) -> None:
     """High-speed SPI bus and frame-present strobe for the GPU nodes."""
 
     catalog.series('SPI1_ATTN_GPU0', 'R8', '1k', master['GPIO7'], gpu0['GPIO2'])
-    catalog.series('SPI1_CS_GPU0', 'R9', '33', master['GPIO8'], gpu0['GPIO1'])
+    _, gpu0_cs, _ = catalog.series(
+        'SPI1_CS_GPU0',
+        'R9',
+        '33',
+        master['GPIO8'],
+        gpu0['GPIO1'],
+    )
     catalog.series('STROBE', 'R10', '1k', master['GPIO10'], gpu0['GPIO10'], gpu1['GPIO4'])
     catalog.series('SPI1_MOSI', 'R11', '33', master['GPIO11'], gpu0['GPIO11'], gpu1['GPIO3'])
     catalog.series('SPI1_CLK', 'R12', '33', master['GPIO12'], gpu0['GPIO12'], gpu1['GPIO2'])
     catalog.series('SPI1_MISO', 'R13', '33', master['GPIO13'], gpu0['GPIO13'], gpu1['GPIO1'])
-    catalog.series('SPI1_CS_GPU1', 'R14', '33', master['RX'], gpu1['GPIO5'])
+    _, gpu1_cs, _ = catalog.series(
+        'SPI1_CS_GPU1',
+        'R14',
+        '33',
+        master['RX'],
+        gpu1['GPIO5'],
+    )
     catalog.series('SPI1_ATTN_GPU1', 'R15', '1k', master['TX'], gpu1['GPIO6'])
+
+    gpu0_cs_pullup = resistor('R25', '10k')
+    gpu1_cs_pullup = resistor('R26', '10k')
+    gpu0_cs.connect(gpu0_cs_pullup[1])
+    gpu1_cs.connect(gpu1_cs_pullup[1])
+    master_3v3.connect(gpu0_cs_pullup[2], gpu1_cs_pullup[2])
 
 
 @subcircuit
@@ -209,7 +269,6 @@ def power_distribution(
     vcc: Net,
     vusb: Net,
     gnd: Net,
-    master_3v3: Net,
     power_3v3: Net,
 ) -> None:
     """24 V input, 5 V conversion/selection, and rail monitoring."""
@@ -221,13 +280,15 @@ def power_distribution(
     conn_power_out = Part('Connector', 'Conn_01x03_Socket', ref='J6', tag='J6')
     conn_usb = Part('Connector', 'Conn_01x04_Pin', ref='J8', tag='J8')
     switch_power = Part('Switch', 'SW_SPDT', ref='SW1', tag='SW1')
+    power_led = Part('Device', 'LED', ref='LED2', tag='LED2', value='Green')
+    power_led_resistor = resistor('R27', '4.7k')
     vin_power_flag = Part('power', 'PWR_FLAG', ref='#FLG01', tag='VIN_24V source')
-    vcc_power_flag = Part('power', 'PWR_FLAG', ref='#FLG02', tag='VCC_5V source')
+    sense_power_flag = Part('power', 'PWR_FLAG', ref='#FLG02', tag='Sense source')
 
-    vin.connect(conn_power_in[1], sense_24v['IN+'], sense_24v['V+'], vin_power_flag[1])
-    make_net('VIN_24V_SENSED', sense_24v['IN-'], buck['IN+'], conn_power_out[1])
-    make_net('VCC_5V_RAW', buck['OUT+'], sense_5v['IN+'], sense_5v['V+'])
-    make_net('VCC_5V_SENSED', sense_5v['IN-'], switch_power[1])
+    vin.connect(conn_power_in[1], sense_24v['C+'], sense_24v['V+'], vin_power_flag[1])
+    make_net('VIN_24V_SENSED', sense_24v['C-'], buck['IN+'], conn_power_out[1])
+    make_net('VCC_5V_RAW', buck['OUT+'], switch_power[1])
+    make_net('VCC_5V_SENSED', switch_power[2], sense_5v['C+'], sense_5v['V+'], sense_power_flag[1])
 
     gnd.connect(
         conn_power_in[3],
@@ -240,9 +301,11 @@ def power_distribution(
         sense_5v['V-'],
         sense_5v['GND'],
     )
-    master_3v3.connect(sense_24v['VCC'], sense_5v['VCC'])
+    power_3v3.connect(sense_24v['VCC'], sense_5v['VCC'])
     vusb.connect(conn_usb[4], switch_power[3])
-    vcc.connect(switch_power[2], vcc_power_flag[1])
+    vcc.connect(sense_5v['C-'], power_led[2])
+    make_net('LED_POWER_K', power_led[1], power_led_resistor[1])
+    gnd.connect(power_led_resistor[2])
 
     i2c_sda = catalog.direct('I2C_POWER_SDA', power['GPIO7'], sense_24v['SDA'], sense_5v['SDA'])
     i2c_scl = catalog.direct('I2C_POWER_SCL', power['GPIO8'], sense_24v['SCL'], sense_5v['SCL'])
@@ -257,10 +320,10 @@ def power_distribution(
         conn_power_out[2],
         conn_usb[2],
         conn_usb[3],
-        sense_24v['C-'],
-        sense_24v['C+'],
-        sense_5v['C-'],
-        sense_5v['C+'],
+        sense_24v['IN-'],
+        sense_24v['IN+'],
+        sense_5v['IN-'],
+        sense_5v['IN+'],
     )
 
 
@@ -337,16 +400,17 @@ def led_outputs(
     """3.3 V to 5 V LED clock/data level shifting and connectors."""
 
     shifter = Part('74xx', '74AHCT125', ref='U6', tag='U6')
+    decoupler = Part('Device', 'C', ref='C1', tag='C1', value='100n')
     conn_led0 = Part('Connector', 'Conn_01x03_Pin', ref='J3', tag='J3')
     conn_led1 = Part('Connector', 'Conn_01x03_Socket', ref='J4', tag='J4')
 
-    vcc.connect(shifter['VCC'])
-    gnd.connect(shifter['GND'], conn_led0[2], conn_led1[2])
+    vcc.connect(shifter['VCC'], decoupler[1])
+    gnd.connect(shifter['GND'], decoupler[2], conn_led0[2], conn_led1[2])
 
     catalog.direct('LED0_3V3_CLK', gpu0['GPIO7'], shifter[2])
     catalog.direct('LED0_3V3_DAT', gpu0['GPIO8'], shifter[5])
-    catalog.direct('LED1_3V3_CLK', gpu1['GPIO13'], shifter[9])
-    catalog.direct('LED1_3V3_DAT', gpu1['GPIO10'], shifter[12])
+    catalog.direct('LED1_3V3_CLK', gpu1['GPIO10'], shifter[12])
+    catalog.direct('LED1_3V3_DAT', gpu1['GPIO13'], shifter[9])
 
     led_enable = catalog.direct(
         'LED_EN',
@@ -362,8 +426,8 @@ def led_outputs(
 
     catalog.direct('LED0_5V_CLK', shifter[3], conn_led0[1], stub=False)
     catalog.direct('LED0_5V_DAT', shifter[6], conn_led0[3], stub=False)
-    catalog.direct('LED1_5V_CLK', shifter[8], conn_led1[1], stub=False)
-    catalog.direct('LED1_5V_DAT', shifter[11], conn_led1[3], stub=False)
+    catalog.direct('LED1_5V_DAT', shifter[8], conn_led1[3], stub=False)
+    catalog.direct('LED1_5V_CLK', shifter[11], conn_led1[1], stub=False)
 
 
 def build_circuit() -> tuple[Circuit, SignalCatalog]:
@@ -384,11 +448,30 @@ def build_circuit() -> tuple[Circuit, SignalCatalog]:
 
         master = master_controller(vcc, gnd, master_3v3, tag='master_controller')
         media = media_controller(vcc, gnd, media_3v3, tag='media_controller')
-        gpu0, gpu1 = gpu_controllers(vcc, gnd, gpu1_3v3, tag='gpu_controllers')
+        gpu0, gpu1 = gpu_controllers(
+            vcc,
+            gnd,
+            gpu1_3v3,
+            tag='gpu_controllers',
+        )
         power = power_controller(vcc, gnd, power_3v3, tag='power_controller')
 
-        low_speed_spi(catalog, master, media, power, tag='low_speed_spi')
-        high_speed_spi(catalog, master, gpu0, gpu1, tag='high_speed_spi')
+        low_speed_spi(
+            catalog,
+            master,
+            media,
+            power,
+            master_3v3,
+            tag='low_speed_spi',
+        )
+        high_speed_spi(
+            catalog,
+            master,
+            gpu0,
+            gpu1,
+            master_3v3,
+            tag='high_speed_spi',
+        )
         power_distribution(
             catalog,
             power,
@@ -396,7 +479,6 @@ def build_circuit() -> tuple[Circuit, SignalCatalog]:
             vcc,
             vusb,
             gnd,
-            master_3v3,
             power_3v3,
             tag='power_distribution',
         )

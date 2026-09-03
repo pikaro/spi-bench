@@ -9,5 +9,5 @@ struct PubSubEventProducerConfig {
     // ISR callbacks may bind only compact event identity/state. The complete
     // PubSub payload is constructed later by the producer task.
     static constexpr size_t maxFactorySize = 4;
-    static constexpr size_t maxArgumentSize = 4;
+    static constexpr size_t maxArgumentSize = 8;
 };

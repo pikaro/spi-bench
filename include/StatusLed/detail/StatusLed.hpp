@@ -260,7 +260,9 @@ class StatusLed : public HasLifecycle<StatusLed, Config>,
             return OK();
         }
 
-        FAIL_IF_ERR_FWD(_output.show(_states[selected].def.color),
+        const auto color =
+            config().brightness.apply(_states[selected].def.color);
+        FAIL_IF_ERR_FWD(_output.show(color),
                         "Failed to show status LED state %s",
                         _states[selected].def.name);
         _lastDisplayed = selected;

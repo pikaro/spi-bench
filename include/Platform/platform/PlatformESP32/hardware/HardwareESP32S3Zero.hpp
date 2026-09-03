@@ -11,6 +11,7 @@ namespace platform {
 enum class Esp32S3ZeroPin : uint8_t {
     GPIO1 = PIN(Esp32S3, GPIO1),
     GPIO2 = PIN(Esp32S3, GPIO2),
+    StrappingGPIO3 = PIN(Esp32S3, StrappingGPIO3),
     GPIO4 = PIN(Esp32S3, GPIO4),
     GPIO5 = PIN(Esp32S3, GPIO5),
     GPIO6 = PIN(Esp32S3, GPIO6),
@@ -21,6 +22,9 @@ enum class Esp32S3ZeroPin : uint8_t {
     GPIO11 = PIN(Esp32S3, GPIO11),
     GPIO12 = PIN(Esp32S3, GPIO12),
     GPIO13 = PIN(Esp32S3, GPIO13),
+
+    TX = PIN(Esp32S3, GPIO43),
+    RX = PIN(Esp32S3, GPIO44),
 
     PadGPIO14 = PIN(Esp32S3, GPIO14),
     PadGPIO15 = PIN(Esp32S3, GPIO15),

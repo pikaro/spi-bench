@@ -6,7 +6,6 @@
 #include "Services/StatusLed.hpp"
 #include "Setups/Core.hpp"
 #include "Wifi/Facade.hpp"
-#include "Wifi/detail/Commands.hpp"
 #include "assistant_session.hpp"
 #include "config.hpp"
 #include <cstddef>
@@ -123,8 +122,6 @@ void setup() {
     _log_i("Core setup complete");
 
     ABORT_IF_ERR_BEGIN(wifi.begin(wifiConfig));
-    ABORT_IF_ERR(Totem::Wifi::Commands::registerCommands(wifi),
-                 "Failed to register WiFi commands");
     ABORT_IF_ERR_BEGIN(micSource.begin(i2sAudioSourceConfig));
     ABORT_IF_ERR_BEGIN(maxSink.begin(max98357ResponseSinkConfig));
     ABORT_IF_ERR(afeMicInput.begin(micSource),

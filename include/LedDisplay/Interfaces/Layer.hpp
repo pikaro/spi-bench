@@ -12,6 +12,7 @@ enum class Layer : uint8_t {
     TransientEffect,
     Wheel,
     Debug,
+    UI,
 };
 
 } // namespace Totem::LedDisplay

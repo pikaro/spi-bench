@@ -10,6 +10,8 @@
 #include "LedDisplay/Animations/OrbitSparks/Animation.hpp"
 #include "LedDisplay/Animations/PolarLattice/Animation.hpp"
 #include "LedDisplay/Animations/RadialCurtain/Animation.hpp"
+#include "LedDisplay/Animations/RadialGauge/Animation.hpp"
+#include "LedDisplay/Animations/RadialMenu/Animation.hpp"
 #include "LedDisplay/Animations/Shutter/Animation.hpp"
 #include "LedDisplay/Animations/SineWave/Animation.hpp"
 #include "LedDisplay/Animations/Sinelon/Animation.hpp"
@@ -34,7 +36,8 @@ using Payload =
     std::variant<DiagnosticFill, CenterWave, SpectralWeave, SpectralIris,
                  OrbitSparks, StainedCells, WheelIndicator, SpokeSweep, Sinelon,
                  SineWave, Starburst, Vortex, Shutter, OrbitRing, Lighthouse,
-                 Cymatic, BreathingRings, RadialCurtain, PolarLattice, Bolt>;
+                 Cymatic, BreathingRings, RadialCurtain, PolarLattice, Bolt,
+                 RadialGauge, RadialMenu>;
 
 static_assert(std::is_trivially_copyable_v<Payload>,
               "Animation payload must remain queue-copyable");
@@ -149,6 +152,18 @@ makePayload(const AnimationPlayCommand &cmd) {
                                           decodeCommandPayload<BoltConfig>(cmd),
                                           "Failed to decode bolt config");
         return Payload{Bolt{.config = config}};
+    }
+    case AnimationKind::RadialGauge: {
+        FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
+            config, decodeCommandPayload<RadialGaugeConfig>(cmd),
+            "Failed to decode radial gauge config");
+        return Payload{RadialGauge{.config = config}};
+    }
+    case AnimationKind::RadialMenu: {
+        FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(
+            config, decodeCommandPayload<RadialMenuConfig>(cmd),
+            "Failed to decode radial menu config");
+        return Payload{RadialMenu{.config = config}};
     }
     case AnimationKind::WheelIndicator: {
         FAIL_IF_UNEXPECTED_FWD_UNEXPECTED(

@@ -18,6 +18,7 @@
 #include <atomic>
 #include <bit>
 #include <cinttypes>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -64,6 +65,7 @@ class Ina2xx : public HasLifecycle<Ina2xx, Ina2xxConfig> {
     }
 
     template <typename Callback>
+        requires std::constructible_from<Ina2xxLimitCallback, Callback>
     ReturnCode setLimitCallback(Callback callback) {
         return setLimitCallback(Ina2xxLimitCallback{std::move(callback)});
     }
@@ -78,8 +80,26 @@ class Ina2xx : public HasLifecycle<Ina2xx, Ina2xxConfig> {
     }
 
     template <typename Callback>
+        requires std::constructible_from<Ina2xxAlertCallback, Callback>
     ReturnCode setAlertCallback(Callback callback) {
         return setAlertCallback(Ina2xxAlertCallback{std::move(callback)});
+    }
+
+    /**
+     * Registers a bounded callback for each successfully converted sample.
+     * The callback runs synchronously from work() and must not block or access
+     * a filesystem.
+     */
+    ReturnCode setSampleCallback(Ina2xxSampleCallback callback) {
+        FAIL_IF_ACTIVE_ERR("Cannot change active INA2xx sample callback");
+        _sampleCallback.emplace(std::move(callback));
+        return OK();
+    }
+
+    template <typename Callback>
+        requires std::constructible_from<Ina2xxSampleCallback, Callback>
+    ReturnCode setSampleCallback(Callback callback) {
+        return setSampleCallback(Ina2xxSampleCallback{std::move(callback)});
     }
 
     ReturnCode clearLimitCallback() {
@@ -91,6 +111,12 @@ class Ina2xx : public HasLifecycle<Ina2xx, Ina2xxConfig> {
     ReturnCode clearAlertCallback() {
         FAIL_IF_ACTIVE_ERR("Cannot change active INA2xx ALERT callback");
         _alertCallback.reset();
+        return OK();
+    }
+
+    ReturnCode clearSampleCallback() {
+        FAIL_IF_ACTIVE_ERR("Cannot change active INA2xx sample callback");
+        _sampleCallback.reset();
         return OK();
     }
 
@@ -115,11 +141,15 @@ class Ina2xx : public HasLifecycle<Ina2xx, Ina2xxConfig> {
         return ret;
     }
 
-    ReturnCode sampleNow(uint32_t nowMs) {
-        FAIL_IF_INACTIVE_ERR("Cannot sample inactive INA2xx sensor");
+    [[nodiscard]] std::expected<Ina2xxSample, ReturnCode>
+    sampleNow(uint32_t nowMs) {
+        FAIL_IF_INACTIVE_UNEXPECTED("Cannot sample inactive INA2xx sensor");
         auto ret = _sample(nowMs);
         _recordAge(nowMs);
-        return ret;
+        if (!ret.ok()) {
+            return std::unexpected(ret);
+        }
+        return _latestSample;
     }
 
     [[nodiscard]] std::expected<Ina2xxSample, ReturnCode> latestSample() const {
@@ -229,6 +259,9 @@ class Ina2xx : public HasLifecycle<Ina2xx, Ina2xxConfig> {
     }
 
     ReturnCode _validateModelConfig() {
+        FAIL_IF(_model == Ina2xxModel::Ina228, ERR(CoreError, NotSupported),
+                "INA228 is the production target but its 20-bit/24-bit/40-bit "
+                "register backend is not implemented yet");
         const uint32_t maximumBusMillivolts =
             _model == Ina2xxModel::Ina219 ? 26000U : 36000U;
         FAIL_IF(
@@ -272,6 +305,8 @@ class Ina2xx : public HasLifecycle<Ina2xx, Ina2xxConfig> {
                     "INA226 expected current or current limits exceed its "
                     "shunt range");
             break;
+        case Ina2xxModel::Ina228:
+            return ERR(CoreError, NotSupported);
         }
 
         FAIL_IF(config().hardwareAlert.has_value() &&
@@ -343,6 +378,8 @@ class Ina2xx : public HasLifecycle<Ina2xx, Ina2xxConfig> {
                                            _calibration.registerValue),
                             "Failed to calibrate INA226");
             return _configureIna226Alert();
+        case Ina2xxModel::Ina228:
+            return ERR(CoreError, NotSupported);
         }
         return ERR(CoreError, NotSupported);
     }
@@ -506,16 +543,11 @@ class Ina2xx : public HasLifecycle<Ina2xx, Ina2xxConfig> {
         _updateLimitState(Ina2xxLimitMeasurement::Current, nextCurrentState);
         _metrics->recordSample(_latestSample, nextBusVoltageState,
                                nextCurrentState);
+        if (_sampleCallback.has_value()) {
+            (*_sampleCallback)(_latestSample);
+        }
         _emitHardwareAlert(raw->maskEnable);
 
-        if (nextBusVoltageState == Ina2xxLimitState::AbsoluteUnder ||
-            nextCurrentState == Ina2xxLimitState::AbsoluteUnder) {
-            return ERR(CoreError, Underflow);
-        }
-        if (nextBusVoltageState == Ina2xxLimitState::AbsoluteOver ||
-            nextCurrentState == Ina2xxLimitState::AbsoluteOver) {
-            return ERR(CoreError, Overflow);
-        }
         return OK();
     }
 
@@ -651,8 +683,6 @@ class Ina2xx : public HasLifecycle<Ina2xx, Ina2xxConfig> {
             const Ina2xxAlertEvent event{
                 .function = alertConfig.function,
                 .sample = _latestSample,
-                .maskEnable = maskEnable,
-                .sampleValid = _hasSample,
             };
             (*_alertCallback)(event);
         }
@@ -701,6 +731,7 @@ class Ina2xx : public HasLifecycle<Ina2xx, Ina2xxConfig> {
     std::atomic<bool> _alertPending{false};
     std::optional<Ina2xxLimitCallback> _limitCallback{};
     std::optional<Ina2xxAlertCallback> _alertCallback{};
+    std::optional<Ina2xxSampleCallback> _sampleCallback{};
 
     Ina2xxSample _latestSample{};
     uint32_t _lastSampleAttemptMs = 0;

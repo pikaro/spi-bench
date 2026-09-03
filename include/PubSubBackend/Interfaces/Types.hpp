@@ -5,8 +5,8 @@
 namespace Totem::PubSubBackend {
 
 using MessageId = uint32_t;
-using NodeId = uint8_t;
-using PeerId = uint8_t;
+using NodeId = uint16_t;
+using PeerId = uint16_t;
 using TopicId = uint32_t;
 using SubscriberKey = uintptr_t;
 

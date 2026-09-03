@@ -10,53 +10,64 @@ and beat outcome events; four ESP32-S3 GPU nodes render LED frame segments; side
 nodes over RS485, I2C, and BLE provide sensors, bulbs, and future peripherals.
 
 The system is event-driven because full LED frame data is too expensive to
-publish at the target 125 fps. Nodes publish compact events such as FFT frames,
+publish at the target 100 fps. Nodes publish compact events such as FFT frames,
 peaks, beat outcomes, bell strikes, warnings, errors, and metrics. GPU nodes
 subscribe to those events and render their own LED segment locally.
 
 ## Current Scope
 
-- `env:master`, `env:media`, `env:gpu0`, `env:gpu1`, and `env:io` are active
-    targets for the current hardware PubSub network. The master owns a
-    low-speed SPI bus currently wired to media, a high-speed SPI bus shared by
-    GPU0 and GPU1, and one RS485 link to IO.
+- `env:master`, `env:media`, `env:power`, `env:gpu0`, `env:gpu1`, and `env:io`
+    are active targets for the current hardware PubSub network. The master owns
+    a low-speed SPI bus shared by Media and Power, a high-speed SPI bus shared
+    by GPU0 and GPU1, and one RS485 link to IO.
 - `env:ai` is an explicit standalone prototype target outside the current
     PubSub network. It runs the SPH0645 microphone through ESP-SR noise
     suppression, neural VAD, Alexa/Computer WakeNet models, and WakeNet AGC;
     the detected wake profile selects the assistant voice, wake/VAD session
     state drives its status LED, cleaned command PCM is uploaded through an
     authenticated WebSocket turn, and response PCM plays through MAX98357.
-- `env:scratch` is the ESP32-C3 SuperMini test board. It exercises the reusable
-    input components with a GPIO1/GPIO0 CLK/DT rotary encoder, its active-low
-    GPIO3 switch, and a separate active-low GPIO21 gesture button. It also
-    verifies and samples an INA226 at I2C address `0x40`, with SDA on GPIO10
-    and SCL on GPIO20. Its 100 ms samples publish bus-voltage/current metrics
-    and evaluate separate practical/absolute operating windows.
+- `env:scratch` is temporarily an ESP32-S3 Zero wired as GPU1 for isolated LED
+    output bring-up. Its throwaway application sends a hand-built flat-color
+    SK9822 frame directly through SPI3, bypassing the display pipeline.
+- `env:power` is the ESP32-C3 monitoring node. It is a low-speed SPI PubSub
+    slave and I2C master for the 24 V INA226 at `0x40` and the common 5 V
+    INA226 at `0x41`, both using 2 mOhm shunts. Only the 24 V monitor feeds the
+    BatteryMonitor behavior; both monitors publish their normal INA metrics.
 - Production node entrypoints use `include/Setups/PubSubNetwork.hpp`, which
     registers the real transports and exposes `PubSubService` without starting
     synthetic test publishers or subscribers. The synthetic multi-board
     regression harness remains in `include/Setups/PubSubStarTest.hpp`.
-- The master firmware has optional WiFi enabled through the `Wifi` component.
-    Current operation is either station mode or access-point mode, selected by
-    ignored local master credentials/config; combined AP+STA mode is not part
-    of the active runtime shape. Access-point mode is a single-client control
-    link, and the master ESP-IDF network pools are sized around that constraint.
+- Power owns the configurable WiFi runtime and UDP PubSub edge, bridging its
+    active network mode to the low-speed SPI bus. Both AP and station
+    credentials remain configured; `wifiConfig.mode` selects one, with AP mode
+    active initially. Master is SPI/RS485-only because WiFi caused unacceptable
+    SPI disruption under load on that timing-critical node.
 - Hardware SPI now supports multiple logical master links sharing the same
     ESP32 SPI bus. The active high-speed bus uses one PubSub SPI router
-    transport with GPU0 and GPU1 peers. The low-speed bus remains a
-    point-to-point media link for this prototype stage; the target topology
-    still needs four GPU peers on high-speed SPI and media, LoRA radio, and GPS
-    on the low-speed bus.
-- GPU LED presentation is currently synchronized by a master-driven GPIO
-    present strobe: master GPIO6 produces a 125 Hz rising-edge cadence and GPU
-    nodes receive it on GPIO10. GPU LED ownership is explicit per firmware
-    image so interleaved wiring can map `gpu0` to groups 0 and 2 and `gpu1` to
-    groups 1 and 3.
+    transport with GPU0 and GPU1 peers. The low-speed bus uses a second PubSub
+    SPI router with Media and Power peers.
+- Master, Media, and Power normally run their SPI transports and application
+    services. An opt-in v2 SPI0 GPIO signal bring-up profile can disable those
+    services and fingerprint every low-speed SPI net with a distinct PWM
+    frequency. The reusable producer and edge-measuring consumer are documented
+    in [gpio-signal-test.md](gpio-signal-test.md).
+- GPU LED presentation is synchronized by a master-driven 100 Hz GPIO present
+    strobe. The v2 master drives GPIO10; GPU0 receives it on GPIO10 and GPU1 on
+    GPIO4. The production surface has 32 spokes with 60 LEDs each. GPU0 owns
+    spokes 0..15 and GPU1 owns spokes 16..31, with one 960-pixel SK9822 chain
+    per GPU.
+- Each GPU remains an ESP-IDF SPI2 PubSub slave and drives its LEDs from the
+  independent SPI3 master peripheral at 4 MHz. GPU1 GPIO9 owns
+  the shared active-low 74AHCT125 output gate; a 10 kΩ hardware pull-up keeps
+  both clock/data pairs isolated through reset. Each GPU initializes its local
+  LED output and publishes readiness through PubSub. After master has received
+  readiness from both GPUs, it publishes the shared output-enable command and
+  then the boot animation. The gate is signal isolation, not display blanking.
 - There is no `env:slave` in this checkout. Historical RS485 slave
     documentation may refer to that environment, but `platformio.ini` no
     longer defines it.
 - When a task touches shared wire, PubSub, Clock, or platform abstractions,
-    build `master`, `media`, `gpu0`, `gpu1`, and `io` unless the task is
+    build `master`, `media`, `power`, `gpu0`, `gpu1`, and `io` unless the task is
     explicitly scoped to one environment.
 
 ## Design Intent
@@ -64,8 +75,9 @@ subscribe to those events and render their own LED segment locally.
 - Platform-agnostic embedded abstractions where practical
 - Header-heavy organization with small focused components
 - Preference for deterministic behavior and low runtime overhead
-- No desktop test harness at present; correctness is currently validated by
-    successful compilation and careful code review in context
+- Platform-independent host tests cover LED topology, ownership, SK9822
+    encoding, and dense full/half trace reconstruction; hardware behavior still
+    requires explicit bench validation
 
 ## Metrics Initialization
 
@@ -120,6 +132,9 @@ organized as follows:
 - `include/DigitalInput/`: one-GPIO physical inputs with ISR edge handling,
     atomic ISR/poll reconciliation, optional stable-state debouncing, and rich
     edge callbacks suitable for semantic adapters and state machines
+- `include/GpioSignalTest/`: configurable timer-driven GPIO PWM producer or
+    interrupt-based frequency/duty/edge consumer for wiring and pin-matrix
+    diagnostics; see [gpio-signal-test.md](gpio-signal-test.md)
 - `include/Button/`: the thin active-polarity and pressed/released semantic
     adapter over `DigitalInput`; the concrete class owns a bounded inline
     callback instead of exposing its callback type in the class API, while
@@ -147,20 +162,24 @@ organized as follows:
     first-pass tempo tracking, wire payloads, and the media debug display; see
     [audio.md](audio.md)
 - `include/LedTopology/` and `include/LedDisplay/`: GPU-node logical LED
-    topology, compile-time ownership, FastLED-backed output, local animation
-    playback, primitive drawing helpers, and PubSub animation commands; see
+    topology, compile-time ownership, compile-time-selected legacy FastLED or
+    direct ESP-IDF SK9822 output, local animation playback, primitive drawing
+    helpers, and PubSub animation commands; see
     [animation-pipeline.md](animation-pipeline.md)
 - `include/Generated/Wire/`: generated wire-format support code
 - `include/Wire/Rs485/`: point-to-point RS485 wire layer; see
     [wire-rs485.md](wire-rs485.md)
 - `include/Wire/I2C/`: ESP32 I2C master bus, fixed-capacity device registry,
-    and low-speed peripheral drivers including model-selected INA219/INA226
-    power monitors; see [wire-i2c.md](wire-i2c.md)
+  and low-speed peripheral drivers including model-selected INA219/INA226
+  power monitors; see [wire-i2c.md](wire-i2c.md)
+- `include/BatteryMonitor/`: sensor-independent discharge integration, battery
+  budget/TTE estimation, and CRC-protected LittleFS calibration profiles; see
+  [battery-monitor.md](battery-monitor.md)
 - `include/Wire/Spi/`: in-progress DMA-oriented SPI wire layer with a
     component-owned ESP32 platform abstraction; see
     [spi-transport-plan.md](spi-transport-plan.md)
-- `src/master/`, `src/media/`, `src/gpu/`, `src/io/`, `src/ai/`, and
-    `src/scratch/`:
+- `src/master/`, `src/media/`, `src/power/`, `src/gpu/`, `src/io/`, `src/ai/`,
+    and `src/scratch/`:
     environment-specific execution roots selected by build configuration.
     Both GPU PlatformIO environments currently map to `src/gpu/`.
 - `src/master/orchestration.hpp`: master-local show orchestration. It
@@ -195,9 +214,10 @@ through the tiny `StatusLed::Directory` handle and flip the returned
 `StateHandle`. Activating
 an informational state replaces the prior informational state; active warning,
 error, and critical conditions retain their masks and cycle at the highest
-severity every 500 ms. The current no-FastLED backend drives one WS2812B with
-ESP-IDF RMT and only writes the retained LED color when the selected RGB value
-changes.
+severity every 500 ms. `StatusLed::Config::brightness` linearly scales each RGB
+channel before output and defaults to 30%. The current no-FastLED backend drives
+one WS2812B with ESP-IDF RMT and only writes the retained LED color when the
+selected RGB value changes.
 
 Logging and status indication are intentionally separate. Error-level records
 remain available for failures that are subsequently handled, retried, or
@@ -216,7 +236,7 @@ callers can only address LEDs present in the node configuration.
 `PeripheralLedConfig::configured` marks populated static slots; unconfigured
 slots are ignored so nodes can own fewer LEDs than `LedPwmConfig::maxLeds`
 without creating dummy GPIO outputs. The media node uses the same `LedPwm`
-component for the active-high GPIO26 FFT peak indicator.
+component for the active-low GPIO44 FFT peak indicator.
 The same node owns the ship's bell input as an active-high GPIO button with an
 external pulldown, plus a separate calibration button. Each `Button` composes a
 `DigitalInput` and only maps its electrical level to pressed/released semantics.
@@ -250,19 +270,40 @@ then emits `LongPress` for the second gesture.
 
 `RotaryEncoder` composes two non-debounced, non-polled `DigitalInput` channels
 because quadrature decoding depends on raw edge order. Its 16-entry Gray-code
-transition table lets contact bounce cancel naturally, rejects skipped diagonal
+transition table prevents alternating contact bounce from completing a detent,
+restarts partial accumulation on direction changes, rejects skipped diagonal
 states, and calls its owner with only `Clockwise` or `Counterclockwise` once per
 configured detent. `PositionConfig` optionally bounds its counter and selects
 its initial value; an increment at a bound is discarded without invoking the
 callback. With no bounds the counter starts at zero. The hardware class has no
 PubSub, brightness, or menu vocabulary.
 `RotaryEncoder::Behavior::ButtonMenu` separately combines those direction
-callbacks with a button's pressed/released callbacks. Rotation is forwarded
-normally when the button is not held; while held it updates an atomic signed
-menu position, and release always forwards the resulting position, including
-zero. It accepts its own `PositionConfig`; leave the physical encoder unbounded
-when the menu must receive every detent. Caller-supplied producer callbacks
-decide which concrete brightness or menu event to construct and publish.
+callbacks with a button's pressed/released callbacks. Rotation reaches the
+bounded `Dial` behavior when the button is not held; while held, it updates an
+atomic signed menu position and emits absolute `Shown`, `Moved*`, and `Selected`
+snapshots. The IO node publishes those as distinct `Dial` and `Menu` topics and
+keeps the rotary switch's pressed/released transitions local to `ButtonMenu`.
+GPIO8 is not classified or published as an independent `ButtonEvent`, because
+its application meaning is the radial menu's show/select lifecycle.
+The IO encoder uses GPIO2 for CLK and GPIO3 for DT with pull-ups and raw
+any-edge interrupts. Its active-low GPIO8 switch uses 20 ms debounce. The
+brightness dial is bounded to `0..31` with initial position 16; the main menu is
+bounded to `-3..4` with Reset at -3, Next at -1, Toggle at 0, Calibrate at 1,
+Debug at 2, Battery at 3, and `None` in the other two slots. Selecting Next
+starts the fade to the next FFT/background animation. Master consumes the main
+dial's normalized `value` as the GPU display brightness and uses its exact
+`position` to start a 500 ms full-white radial gauge. The power node publishes
+a compact battery-status snapshot once per second. Selecting the main menu's
+Battery item uses its latest fresh estimate to start the same gauge with a
+red-to-green `0..100%` spectrum. `Shown` and `Moved*` events drive a
+configurable radial menu on the topmost `UI` layer; `Selected` stops it before
+dispatching the implemented action. UI pixels retained after an animation stops
+decay over roughly two seconds.
+Selecting `Debug`, or running the master-only `/debug` command, toggles the
+master's debug mode. Its current start hook enables the `Wheel` layer and starts
+the persistent full-brightness one-spoke Wheel animation; its stop hook stops
+that animation and disables the layer. Future debug features extend those two
+lifecycle hooks rather than adding another toggle state.
 
 `LedPwm` separates direct electrical duty from human-oriented brightness:
 `setDuty()` writes linear PWM duty and clears any active brightness animation
@@ -316,12 +357,11 @@ failures, queued/handled command counts, and opt-in task-step profiling.
     selected ESP-SR models and flashes the resulting image to the dedicated
     `model` partition in addition to the normal bootloader, partition table,
     and app images.
-- Master WiFi network selection is not tracked. Create
-    `src/master/wifi_credentials.hpp` from
-    `src/master/wifi_credentials.example.hpp` for local station/AP SSIDs and
-    mode; provision passwords into the `wifi-sta-pass` or `wifi-ap-pass` secret
-    keys. The firmware falls back to disabled WiFi when the ignored config file
-    is absent.
+- Power owns WiFi network selection. Its tracked `wifiConfig` retains both the
+    station and access-point credential records, and `wifiConfig.mode` selects
+    which one is active. Provision both passwords into the Power node's
+    `wifi-sta-pass` and `wifi-ap-pass` secret keys before switching freely
+    between modes; only the selected secret is read during WiFi startup.
 - Top-level `CMakeLists.txt` requires `SRC_ROOT` and maps it to the selected
     source subtree
 - `src/CMakeLists.txt` maps PlatformIO environments to source roots through
@@ -379,12 +419,10 @@ it also reports matching firmware symbols. The logging aggregator ring buffer al
 supports static or dynamic allocation; static storage is selected by the
 constexpr `LoggingConfig::aggregatorRingBufferStatic` flag.
 
-The current master board wiring uses GPIO36/GPIO37 for the low-speed SPI bus.
-Those pins overlap the ESP32-S3 OPI PSRAM signal set on the devkit-style board,
-so `env:master` deliberately disables PSRAM through `sdkconfig.stack.master`.
-Changing this requires changing the board wiring or the SPI pin configuration;
-otherwise the SPI driver can wedge external memory access and trigger a system
-watchdog reset instead of a normal panic.
+The v2 Master low-speed SPI bus uses GPIO1/GPIO2/GPIO3, so its former
+GPIO36/GPIO37 PSRAM conflict no longer exists. Master and Media enable the
+ESP32-S3 Zero's PSRAM and use USB Serial/JTAG for their consoles, leaving
+GPIO43/GPIO44 available to the board signals.
 
 The ESP32-S3 master has also shown a practical MISO sample-point quirk during
 SPI bring-up: slower clocks can produce a stable one-bit-late receive stream,

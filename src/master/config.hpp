@@ -2,20 +2,19 @@
 
 #include "Platform/Hardware.hpp"
 #include "StaticConfig/Stacks.hpp"
-#include "StaticConfig/Wifi.hpp"
 #include "StatusLed/Interfaces/Config.hpp"
 #include "TaskController/Interfaces/Config.hpp"
-#include "Wifi/Facade.hpp"
 #include "Wire/Rs485/Interfaces/MasterConfig.hpp"
 #include "Wire/Spi/Interfaces/MasterConfig.hpp"
 #include "Wire/Spi/Interfaces/Types.hpp"
+#include <array>
 
 #ifndef PUBSUB_STAR_MASTER_HIGH_SPI_CLOCK_HZ
-#define PUBSUB_STAR_MASTER_HIGH_SPI_CLOCK_HZ 10000000
+#define PUBSUB_STAR_MASTER_HIGH_SPI_CLOCK_HZ 40'000'000
 #endif
 
 #ifndef PUBSUB_STAR_MASTER_LOW_SPI_CLOCK_HZ
-#define PUBSUB_STAR_MASTER_LOW_SPI_CLOCK_HZ 10000000
+#define PUBSUB_STAR_MASTER_LOW_SPI_CLOCK_HZ 40'000'000
 #endif
 
 inline Totem::Wire::Rs485::MasterConfig rs485MasterConfig{
@@ -24,8 +23,8 @@ inline Totem::Wire::Rs485::MasterConfig rs485MasterConfig{
             .uartNumber = 1,
             .pins =
                 {
-                    .txPin = Pin::GPIO1,
-                    .rxPin = Pin::GPIO2,
+                    .txPin = Pin::PadGPIO15,
+                    .rxPin = Pin::PadGPIO14,
                 },
         },
     .task =
@@ -40,7 +39,7 @@ inline Totem::Wire::Rs485::MasterConfig rs485MasterConfig{
             .notifyExpectTimeout = false,
             .notifyTimeoutMs = 10,
         },
-    .attentionPin = Pin::GPIO14,
+    .attentionPin = Pin::PadGPIO16,
 };
 
 inline Totem::Wire::Spi::MasterConfig spiMasterBusHighSpeedConfig{
@@ -49,15 +48,15 @@ inline Totem::Wire::Spi::MasterConfig spiMasterBusHighSpeedConfig{
             .busId = Totem::Wire::Spi::BusId::Bus2,
             .pins =
                 {
-                    .mosiPin = Pin::GPIO15,
-                    .misoPin = Pin::GPIO16,
-                    .sclkPin = Pin::GPIO17,
+                    .mosiPin = Pin::GPIO11,
+                    .misoPin = Pin::GPIO13,
+                    .sclkPin = Pin::GPIO12,
                 },
             .maxTransferSize = 4096,
         },
     .device =
         {
-            .csPin = Pin::GPIO4,
+            .csPin = Pin::GPIO8,
             .clockHz = PUBSUB_STAR_MASTER_HIGH_SPI_CLOCK_HZ,
             .mode = Totem::Wire::Spi::Mode::Mode0,
             .bitOrder = Totem::Wire::Spi::BitOrder::MsbFirst,
@@ -83,14 +82,14 @@ inline Totem::Wire::Spi::MasterConfig spiMasterBusHighSpeedConfig{
     .attentionReceiveWindowBytes = 256,
     .localWriteCoalesceUs = 1000,
     .noSlotBackoffUs = 1000,
-    .attentionPin = Pin::GPIO5,
+    .attentionPin = Pin::GPIO7,
 };
 
 inline Totem::Wire::Spi::MasterConfig spiMasterBusHighSpeedGpu1Config = [] {
     auto config = spiMasterBusHighSpeedConfig;
-    config.device.csPin = Pin::GPIO11;
+    config.device.csPin = Pin::RX;
     config.task.name = "SpiGpu1Task";
-    config.attentionPin = Pin::GPIO10;
+    config.attentionPin = Pin::TX;
     return config;
 }();
 
@@ -100,16 +99,15 @@ inline Totem::Wire::Spi::MasterConfig spiMasterBusLowSpeedConfig{
             .busId = Totem::Wire::Spi::BusId::Bus3,
             .pins =
                 {
-                    .mosiPin = Pin::GPIO21,
-                    // PSRAM disabled
-                    .misoPin = Pin::PsramGPIO36,
-                    .sclkPin = Pin::PsramGPIO37,
+                    .mosiPin = Pin::StrappingGPIO3,
+                    .misoPin = Pin::GPIO1,
+                    .sclkPin = Pin::GPIO2,
                 },
             .maxTransferSize = 4096,
         },
     .device =
         {
-            .csPin = Pin::GPIO38,
+            .csPin = Pin::GPIO4,
             .clockHz = PUBSUB_STAR_MASTER_LOW_SPI_CLOCK_HZ,
             .mode = Totem::Wire::Spi::Mode::Mode0,
             .bitOrder = Totem::Wire::Spi::BitOrder::MsbFirst,
@@ -135,47 +133,30 @@ inline Totem::Wire::Spi::MasterConfig spiMasterBusLowSpeedConfig{
     .attentionReceiveWindowBytes = 256,
     .localWriteCoalesceUs = 1000,
     .noSlotBackoffUs = 1000,
-    .attentionPin = Pin::GPIO39,
+    .attentionPin = Pin::GPIO5,
 };
 
-inline constexpr Pin ledLevelShifterOutputEnablePin = Pin::GPIO13;
-// The current 74AHCT124 LED output-enable line is active-low.
-inline constexpr bool ledLevelShifterOutputEnabledLevel = false;
+inline Totem::Wire::Spi::MasterConfig spiMasterBusLowSpeedPowerConfig = [] {
+    auto config = spiMasterBusLowSpeedConfig;
+    config.device.csPin = Pin::GPIO6;
+    config.task.name = "SpiPowerTask";
+    config.attentionPin = Pin::GPIO9;
+    return config;
+}();
+
+inline constexpr std::array<Pin, 4> spiChipSelectPins{
+    Pin::GPIO4,
+    Pin::GPIO6,
+    Pin::GPIO8,
+    Pin::RX,
+};
 
 inline constexpr Totem::StatusLed::Config statusLedConfig{
     .configured = true,
     .pin = Pin::StatusLed,
 };
 
-inline constexpr Totem::Wifi::Config wifiConfig{
-    .mode = Totem::Wifi::Mode::Station,
-    .station =
-        Totem::Wifi::StationConfig{
-            .credentials =
-                {
-                    .ssid = "dre-guest",
-                    .passwordSecretName = "wifi-sta-pass",
-                },
-            .reconnect = Totem::StaticConfig::Wifi::defaultStationReconnect,
-            .maxReconnectAttempts =
-                Totem::StaticConfig::Wifi::defaultStationMaxReconnectAttempts,
-        },
-    .accessPoint =
-        Totem::Wifi::AccessPointConfig{
-            .credentials =
-                {
-                    .ssid = "totem",
-                    .passwordSecretName = "wifi-ap-pass",
-                },
-            .channel = Totem::StaticConfig::Wifi::defaultApChannel,
-            .hidden = false,
-            .maxConnections =
-                Totem::StaticConfig::Wifi::defaultApMaxConnections,
-        },
-    .disableNvsStorage = true,
-};
-
-inline constexpr Pin ledPresentStrobeOutputPin = Pin::GPIO6;
-inline constexpr uint32_t ledPresentStrobeFps = 125;
+inline constexpr Pin ledPresentStrobeOutputPin = Pin::GPIO10;
+inline constexpr uint32_t ledPresentStrobeFps = 100;
 inline constexpr uint64_t ledPresentStrobeHalfPeriodUs =
     1000000ULL / (static_cast<uint64_t>(ledPresentStrobeFps) * 2ULL);

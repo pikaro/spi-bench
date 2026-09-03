@@ -8,9 +8,25 @@
 #include <bit>
 #include <cstdint>
 #include <optional>
+#include <type_traits>
 #include <utility>
 
 namespace Totem::RotaryEncoder::Behavior {
+
+enum class ButtonMenuEventType : uint8_t {
+    Shown,
+    MovedClockwise,
+    MovedCounterclockwise,
+    Selected,
+};
+
+struct ButtonMenuEvent {
+    int32_t position;
+    ButtonMenuEventType event;
+};
+
+static_assert(sizeof(ButtonMenuEvent) == 8);
+static_assert(std::is_trivially_copyable_v<ButtonMenuEvent>);
 
 /**
  * Routes ordinary rotation directly while reserving a held-button gesture for
@@ -18,9 +34,10 @@ namespace Totem::RotaryEncoder::Behavior {
  *
  * Button-down starts a menu gesture at the configured initial position.
  * Rotation while held updates a signed position without invoking the ordinary
- * callback. Button-up always invokes the menu callback, including when the
- * selected position is zero. The packed atomic state keeps button callbacks
- * from task context and encoder callbacks from GPIO ISR context coherent.
+ * callback. The menu callback receives absolute show, movement, and selection
+ * snapshots. Button-up always selects, including when the position is zero.
+ * The packed atomic state keeps button callbacks from task context and encoder
+ * callbacks from GPIO ISR context coherent.
  */
 class ButtonMenu {
   public:
@@ -38,8 +55,14 @@ class ButtonMenu {
 
     void onButton(Button::Event event) {
         if (event == Button::Event::Pressed) {
-            _state.store(activeMask |
-                             _encodedPosition(_positionConfig.initialValue),
+            const auto initialPosition = _positionConfig.initialValue;
+            _state.store(openingMask | _encodedPosition(initialPosition),
+                         std::memory_order_release);
+            _menuCallback(ButtonMenuEvent{
+                .position = initialPosition,
+                .event = ButtonMenuEventType::Shown,
+            });
+            _state.store(activeMask | _encodedPosition(initialPosition),
                          std::memory_order_release);
             return;
         }
@@ -50,12 +73,18 @@ class ButtonMenu {
         const uint32_t completed =
             _state.exchange(0, std::memory_order_acq_rel);
         if ((completed & activeMask) != 0) {
-            _menuCallback(_position(completed));
+            _menuCallback(ButtonMenuEvent{
+                .position = _position(completed),
+                .event = ButtonMenuEventType::Selected,
+            });
         }
     }
 
     void onRotation(Direction direction) {
         uint32_t current = _state.load(std::memory_order_acquire);
+        if ((current & openingMask) != 0) {
+            return;
+        }
         while ((current & activeMask) != 0) {
             const int32_t position = _position(current);
             const auto nextPosition = _advance(position, direction);
@@ -66,6 +95,15 @@ class ButtonMenu {
             if (_state.compare_exchange_weak(current, next,
                                              std::memory_order_acq_rel,
                                              std::memory_order_acquire)) {
+                _menuCallback(ButtonMenuEvent{
+                    .position = *nextPosition,
+                    .event = direction == Direction::Clockwise
+                                 ? ButtonMenuEventType::MovedClockwise
+                                 : ButtonMenuEventType::MovedCounterclockwise,
+                });
+                return;
+            }
+            if ((current & openingMask) != 0) {
                 return;
             }
         }
@@ -97,13 +135,14 @@ class ButtonMenu {
     }
 
     Generic::InlineCallback<Direction> _rotationCallback;
-    Generic::InlineCallback<int32_t> _menuCallback;
+    Generic::InlineCallback<ButtonMenuEvent> _menuCallback;
     PositionConfig _positionConfig;
     std::atomic<uint32_t> _state{0};
 
     static constexpr uint32_t activeMask = 1U << 31U;
-    static constexpr uint32_t positionMask = activeMask - 1U;
-    static constexpr uint32_t positionSignMask = 1U << 30U;
+    static constexpr uint32_t openingMask = 1U << 30U;
+    static constexpr uint32_t positionMask = openingMask - 1U;
+    static constexpr uint32_t positionSignMask = 1U << 29U;
     static constexpr int32_t maxPosition =
         static_cast<int32_t>(positionSignMask - 1U);
     static constexpr int32_t minPosition = -maxPosition - 1;

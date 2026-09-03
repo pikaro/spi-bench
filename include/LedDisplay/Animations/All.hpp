@@ -10,6 +10,7 @@
 #include "LedDisplay/Animations/OrbitSparks/Animation.hpp" // IWYU pragma: export
 #include "LedDisplay/Animations/PolarLattice/Animation.hpp" // IWYU pragma: export
 #include "LedDisplay/Animations/RadialCurtain/Animation.hpp" // IWYU pragma: export
+#include "LedDisplay/Animations/RadialMenu/Animation.hpp" // IWYU pragma: export
 #include "LedDisplay/Animations/Shutter/Animation.hpp"  // IWYU pragma: export
 #include "LedDisplay/Animations/SineWave/Animation.hpp" // IWYU pragma: export
 #include "LedDisplay/Animations/Sinelon/Animation.hpp"  // IWYU pragma: export

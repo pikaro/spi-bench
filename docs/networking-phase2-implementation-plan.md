@@ -406,8 +406,8 @@ Preferred order:
 
 1. Core setup.
 2. Clock service binding.
-3. WiFi setup.
-4. WiFi command and network diagnostic command registration.
+3. WiFi setup, including lifecycle-owned WiFi command registration.
+4. Network diagnostic command registration.
 5. Existing RS485/SPI setup.
 6. PubSub network setup, including UDP PubSub transport when configured.
 7. UDP receive task start as part of UDP transport begin, after metrics prewarm

@@ -22,6 +22,15 @@ class FastLedOutput {
 
     FastLedOutput() = default;
 
+    static_assert(Config::dataLineCount > 0,
+                  "FastLED requires at least one output data line");
+    static_assert(Config::dataLineCount <= Config::outputPins.size(),
+                  "Add more FastLED output pins before increasing line count");
+    static_assert(Config::dataLineCount >= Config::nodeGroupCount,
+                  "FastLED data lines must cover every owned LED group");
+    static_assert(Config::dataLineCount % Config::nodeGroupCount == 0,
+                  "FastLED line count must divide across owned groups");
+
     ReturnCode begin(const Config &config) {
         ::fl::FastLED.clearData();
         ::fl::FastLED.setBrightness(config.globalBrightness);
@@ -99,7 +108,7 @@ class FastLedOutput {
     }
 
     void _addControllers() {
-        constexpr auto lines = LedTopology::OwnedPixels::dataLines();
+        constexpr auto lines = _dataLines();
 
         if constexpr (Config::dataLineCount >= 1) {
             constexpr auto pin = static_cast<uint8_t>(Config::outputPins[0]);
@@ -109,6 +118,39 @@ class FastLedOutput {
             constexpr auto pin = static_cast<uint8_t>(Config::outputPins[1]);
             _addLine<pin>(lines[1].localStart, lines[1].count);
         }
+    }
+
+    static constexpr size_t dataLinesPerNodeGroup =
+        Config::dataLineCount / Config::nodeGroupCount;
+    static_assert(Config::groupPixelCount % dataLinesPerNodeGroup == 0,
+                  "Owned LED groups must split evenly across FastLED lines");
+    static constexpr size_t dataLinePixelCount =
+        Config::groupPixelCount / dataLinesPerNodeGroup;
+
+    [[nodiscard]] static consteval LedTopology::DataLineSpan
+    _dataLine(uint8_t line) {
+        const auto groupSlot =
+            static_cast<size_t>(line) / dataLinesPerNodeGroup;
+        const auto groupLine =
+            static_cast<size_t>(line) % dataLinesPerNodeGroup;
+        const auto localStart = static_cast<LedTopology::LocalPixelIndex>(
+            (groupSlot * Config::groupPixelCount) +
+            (groupLine * dataLinePixelCount));
+        return {
+            .line = line,
+            .physicalStart =
+                LedTopology::OwnedPixels::physicalIndex(localStart),
+            .localStart = localStart,
+            .count = static_cast<uint16_t>(dataLinePixelCount),
+        };
+    }
+
+    [[nodiscard]] static consteval auto _dataLines() {
+        std::array<LedTopology::DataLineSpan, Config::dataLineCount> lines{};
+        for (size_t i = 0; i < lines.size(); ++i) {
+            lines[i] = _dataLine(static_cast<uint8_t>(i));
+        }
+        return lines;
     }
 
     [[nodiscard]] static constexpr uint8_t

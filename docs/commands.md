@@ -6,16 +6,36 @@ These are the primary project commands currently used in practice.
 
 - Build the active master target: `bin/build -e master`
 - Build the active media SPI target: `bin/build -e media`
+- Build the active Power SPI/I2C target: `bin/build -e power`
 - Build the active GPU0 SPI target: `bin/build -e gpu0`
 - Build the active GPU1 SPI target: `bin/build -e gpu1`
 - Build the active IO RS485 target: `bin/build -e io`
 - Build the standalone AI assistant target: `bin/build -e ai`
-- Build the ESP32-C3 input test board: `bin/build -e scratch`
+- Build the temporary ESP32-S3 LED output test: `bin/build -e scratch`
+- Build and run the platform-independent rotary dial/menu behavior tests:
+    `bin/test-rotary-input`
+- Build and run the master debug-mode lifecycle tests:
+    `bin/test-master-debug-mode`
+- Build and run the platform-independent GPIO signal timing tests:
+    `bin/test-gpio-signal-test`
+- Build and run the platform-independent status LED brightness tests:
+    `bin/test-status-led`
+- Build and run the platform-independent BatteryMonitor logic and calibration
+  validator tests:
+    `bin/test-battery-monitor`
+- Build and run the standalone 16-bit PubSub wire compatibility test:
+    `bin/test-pubsub-wire`
+- Build and run the platform-independent LED topology/ownership/encoder tests
+  for legacy-full, dense-full, dense-gpu0, and dense-gpu1 profiles:
+    `bin/test-led-display`
+- Render every animation under dense-full, dense-gpu0, and dense-gpu1 and
+  verify exact half ownership and full-surface reconstruction:
+    `bin/test-led-render-stitch`
 - Build, pack the selected ESP-SR models, and upload the complete AI image:
     `bin/build -e ai -t upload`
 - Build and emit a compilation database: `pio run -e master -t compiledb`
 - Build LittleFS images for all active devices:
-    `.venv/bin/pio run -e master -e media -e gpu0 -e gpu1 -e io -t buildfs`
+    `.venv/bin/pio run -e master -e media -e power -e gpu0 -e gpu1 -e io -t buildfs`
 
 Build output notes:
 
@@ -145,10 +165,10 @@ Runtime command discovery:
     joins all value tokens with single spaces and stores the resulting bytes;
     keys follow NVS's 15-character limit. WiFi expects `wifi-sta-pass` in
     station mode or `wifi-ap-pass` in access-point mode:
-    `!master /secret set wifi-sta-pass example-password`
-    `!master /secret get wifi-sta-pass`
-    `!master /secret delete obsolete-key`
-    `!master /secret list`
+    `!power /secret set wifi-sta-pass example-password`
+    `!power /secret get wifi-sta-pass`
+    `!power /secret delete obsolete-key`
+    `!power /secret list`
 - `/secret seal` disables every `/secret` console command except `list` and
     `unseal` until `/secret unseal <token>` receives the exact value stored under
     the `seal` key. The `seal` value must contain at least eight characters
@@ -292,20 +312,49 @@ Useful LED animation commands:
     `!master /anim wheel-update 160 96 3 1 1`
     Wheel-update arguments are `hue`, `value`, `spokes`, `falloff`,
     `requestId`.
+    `!master /anim gauge`
+    `!master /anim gauge 500 750 1000 0 255 255 96 255 255 255 3`
+    Gauge arguments are `durationMs`, `value`, `maximumValue`, `startHue`,
+    `startSaturation`, `startValue`, `endHue`, `endSaturation`, `endValue`,
+    `centerRing`, `ringWidth`. Value zero lights the first spoke and the
+    maximum fills all spokes. Colors are interpolated over the complete ring,
+    so a partially filled gauge shows the corresponding prefix of the fixed
+    spectrum. `centerRing=255` selects the topology's outermost ring. Wider
+    bands are shifted inward or outward at a surface boundary to preserve the
+    requested width.
+    `!master /anim menu`
+    `!master /anim menu 0 3 8 125 4 2 2 2 4 6 2 2 160 6`
+    Menu arguments are `durationMs`, `selectedItem`, `itemCount`,
+    `populatedItems`, `baseSpokeWidth`, `baseRingDepth`,
+    `baseTipSpokeWidth`, `baseTipRingDepth`, `unfurledSpokeWidth`,
+    `unfurledRingDepth`, `unfurledTipSpokeWidth`,
+    `unfurledTipRingDepth`, `unfurlDurationMs`, and `requestId`.
+    `populatedItems` is a low-eight-bit mask; clear bits render dim-white
+    placeholders. Bar ring depth is measured outward from the innermost ring,
+    and tip ring depth is additional radial length after the bar. The two
+    shapes make radial unfolding and optional angular widening independent.
     `!gpu0 /anim stop`
 - Publish global LED display controls over PubSub:
     `!master /disp hue 32`
     `!master /disp rot 90`
     `!master /disp brightness 96`
     Hue offset is the raw `Angle<uint8_t>` value, 0-255. Rotation offset is in
-    degrees; with the current 16 spokes, about 23 degrees advances one spoke.
-    Brightness is the FastLED global brightness value, 0-255.
-    Automatic master runtime orchestration is gated until the bring-up spoke
-    sweep has finished. Manual commands remain direct diagnostics.
+    degrees; with 32 spokes, about 11.25 degrees advances one spoke. Brightness
+    is the hardware-neutral display value, 0-255. Ordinary SK9822 output maps
+    it to `floor(value * 31 / 255)`, except every nonzero value that would map
+    to zero uses hardware level 1. RGB bytes are not scaled a second time.
+    Automatic master runtime orchestration is gated until both GPUs report LED
+    output readiness and the master-triggered boot sweep has finished. Manual
+    commands remain direct diagnostics.
     Master no longer publishes center waves for every peak event. Peak events
     feed the active FFT visual and IO bulb flicker; after at least two seconds
     with no peak in any band, the first following peak publishes one short
     center wave as a primitive drop marker.
+- SK9822 output-gate startup is automatic. GPU0 and GPU1 initialize their local
+    output and publish readiness over PubSub. Master waits for both readiness
+    events, publishes the remote output-enable command handled by GPU1, then
+    publishes the boot sweep. There is no GPU-local release command and the
+    display does not start at brightness zero.
 - Publish LED layer controls over PubSub:
     `!master /layer active FftAlt on`
     `!master /layer opacity FftAlt 0`
@@ -327,6 +376,13 @@ Useful LED animation commands:
     Master startup publishes per-layer active commands from
     `src/master/orchestration.hpp`; by default it disables `Background`,
     `FftAlt`, and `Wheel`.
+- Toggle master debug mode:
+    `!master /debug`
+    The command and the main rotary menu's `Debug` item share the same toggle.
+    Starting debug mode enables the `Wheel` layer and starts the persistent,
+    full-brightness one-spoke Wheel animation. Stopping it stops that animation
+    and disables the layer. The master owns the mode state and its start/stop
+    lifecycle hooks.
 
 Useful filesystem validation command:
 
@@ -340,13 +396,24 @@ Useful filesystem validation command:
     `!master /rm /errors.log`
 - Download a node's LittleFS partition and unpack it outside the upload tree:
     `bin/littlefs-download master`
+- Validate an extracted BatteryMonitor journal, optionally against its
+  timestamped monitor capture:
+    `bin/validate-battery-calibration path/to/battery.bin --log path/to/capture.log`
 
 `bin/littlefs-download` writes to
 `data/<env>/downloaded-littlefs/<timestamp>/`, not `data/<env>/littlefs`, so
 retrieved logs are not included in later `uploadfs` images. The tool keeps the
-raw partition image as `image.bin`, attempts an `mklittlefs` unpack into
-`files/`, and writes printable-string fallback extracts if the host unpacker
-cannot mount the raw image.
+raw partition image as `image.bin` and unpacks it into `files/` with the same
+LittleFS implementation and geometry as the firmware. It falls back to
+`mklittlefs`, then to printable-string extracts, if the firmware-matched host
+reader cannot be built or cannot mount the image.
+
+`bin/validate-battery-calibration` is standard-library-only commissioning
+tooling for the BatteryMonitor v2 journal. It checks record CRCs and sequence,
+footer/session checksums, interval cadence and monotonic totals, fixed-load
+current and power consistency, independently reconstructed charge/energy, the
+101-point profile, and optional automatic progress-log agreement. See
+[the initial validation plan](battery-monitor-initial-test-plan.md).
 
 Useful audio-source validation command:
 
@@ -384,6 +451,10 @@ A normal AI upload includes `build/ai/srmodels/srmodels.bin` at the offset from
 
 Useful host PubSub UDP bridge commands:
 
+These tools connect to the WiFi/UDP PubSub edge hosted by the Power node. They
+are not available through the Master image, whose PubSub transports are the
+hardware buses only.
+
 - Check route, local socket source, UDP send, and MCU keepalive response with a
     verbose one-shot diagnostic:
     `bin/pubsub-check 192.168.4.1`
@@ -398,7 +469,7 @@ Useful host PubSub UDP bridge commands:
     `bin/pubsub-audio-view --socket /tmp/totem-pubsub.sock`
     Press `c` in the viewer to publish the same calibration button event as the
     IO GPIO input (`Button` topic, `Pressed`, `PeripheralButton::Calibration`).
-    The current IO placeholder input is active-high GPIO3 with pulldown; GPIO0
+    The current IO calibration input is active-high GPIO9 with pulldown; GPIO0
     is already the IO RS485 RX pin.
 - Local socket clients use newline-delimited JSON. Subscribe to a topic mask:
     `{"op":"subscribe","topic":16}`
@@ -433,10 +504,12 @@ Implementation notes:
 
 ## Environment Notes
 
-- `master`, `media`, `gpu0`, `gpu1`, and `io` are the active environments for
-    the current hardware PubSub star loop.
+- `master`, `media`, `power`, `gpu0`, `gpu1`, and `io` are the active
+    environments for the current hardware PubSub network.
 - The high-speed SPI star leg uses `gpu0` and `gpu1` as peers on one physical
     bus; build both GPU environments when touching shared SPI or PubSub code.
+- The low-speed SPI star leg uses `media` and `power` as peers on one physical
+    bus; build both environments when touching that shared transport.
 - PubSub stress profiles are available as `*-cross-stress`, `*-spi-stress`,
     and `*-spi-fast-stress` variants for the same active environments.
 - `slave` is not defined in the current `platformio.ini`

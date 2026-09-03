@@ -23,6 +23,7 @@ CLANG_UNSUPPORTED_FLAGS = {
     "-fno-shrink-wrap",
     "-fno-tree-switch-conversion",
     "-fstrict-volatile-bitfields",
+    "-mdisable-hardware-atomics",
     "-mlongcalls",
     "-mtext-section-literals",
 }

@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+# ruff: noqa: CPY001
+
+from __future__ import annotations
+
+import pathlib
+import sys
+import tempfile
+
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'tools' / 'led_render_py'))
+
+from led_render import Trace, run_render  # noqa: E402
+
+DENSE_SPOKE_COUNT = 32
+DENSE_RING_COUNT = 60
+HALF_SPOKE_COUNT = DENSE_SPOKE_COUNT // 2
+
+
+class StitchMismatchError(RuntimeError):
+    """Raised when owned GPU traces do not reconstruct the full surface."""
+
+
+def verify_plane(fixture: pathlib.Path, plane: str, full: Trace, gpu0: Trace, gpu1: Trace) -> None:
+    full_frames = full.frames(plane)
+    gpu0_frames = gpu0.frames(plane)
+    gpu1_frames = gpu1.frames(plane)
+    if np.any(gpu0_frames[:, HALF_SPOKE_COUNT:, :, :]):
+        message = f'{fixture.name}/{plane}: GPU0 wrote outside its half'
+        raise StitchMismatchError(message)
+    if np.any(gpu1_frames[:, :HALF_SPOKE_COUNT, :, :]):
+        message = f'{fixture.name}/{plane}: GPU1 wrote outside its half'
+        raise StitchMismatchError(message)
+    stitched = np.bitwise_or(gpu0_frames, gpu1_frames)
+    if not np.array_equal(full_frames, stitched):
+        message = f'{fixture.name}/{plane}: halves do not stitch to full'
+        raise StitchMismatchError(message)
+
+
+def verify_trace_set(fixture: pathlib.Path, traces: dict[str, pathlib.Path]) -> None:
+    with (
+        Trace(traces['dense-full']) as full,
+        Trace(traces['dense-gpu0']) as gpu0,
+        Trace(traces['dense-gpu1']) as gpu1,
+    ):
+        if full.plane_names != gpu0.plane_names or full.plane_names != gpu1.plane_names:
+            message = f'{fixture.name}: trace plane mismatch'
+            raise StitchMismatchError(message)
+        if (
+            full.header.spoke_count != DENSE_SPOKE_COUNT
+            or full.header.ring_count != DENSE_RING_COUNT
+        ):
+            message = f'{fixture.name}: non-production dense geometry'
+            raise StitchMismatchError(message)
+
+        for plane in full.plane_names:
+            verify_plane(fixture, plane, full, gpu0, gpu1)
+
+
+def render_and_verify(fixture: pathlib.Path, temp_path: pathlib.Path) -> None:
+    traces: dict[str, pathlib.Path] = {}
+    for profile in ('dense-full', 'dense-gpu0', 'dense-gpu1'):
+        output = temp_path / f'{fixture.stem}-{profile}.tled'
+        traces[profile] = run_render(
+            fixture,
+            output,
+            profile=profile,
+            root=ROOT,
+        )
+    verify_trace_set(fixture, traces)
+
+
+def main() -> int:
+    if np is None:
+        print('NumPy is required for LED stitch regression', file=sys.stderr)
+        return 2
+
+    fixtures = sorted((ROOT / 'tools' / 'led-render' / 'examples').glob('*.json'))
+    if not fixtures:
+        print('No LED render fixtures found', file=sys.stderr)
+        return 2
+
+    with tempfile.TemporaryDirectory(prefix='led-render-stitch-') as temp:
+        temp_path = pathlib.Path(temp)
+        for fixture in fixtures:
+            render_and_verify(fixture, temp_path)
+            print(f'PASS {fixture.name}')
+
+    print(f'Dense LED stitch regression passed for {len(fixtures)} fixtures')
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

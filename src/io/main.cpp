@@ -2,6 +2,8 @@
 #include "Button/Facade.hpp"
 #include "Clock/Facade.hpp"
 #include "Data/ButtonEvent.hpp"
+#include "Data/DialEvent.hpp"
+#include "Data/MenuEvent.hpp"
 #include "Data/Peripherals.hpp"
 #include "LedPwm/Facade.hpp"
 #include "LedPwm/Interfaces/CommandEvent.hpp"
@@ -10,6 +12,9 @@
 #include "Platform/PlatformSelect.hpp"
 #include "PubSubBackend/Interfaces/Envelope.hpp"
 #include "PubSubEventProducer/Facade.hpp"
+#include "RotaryEncoder/Behavior/ButtonMenu.hpp"
+#include "RotaryEncoder/Behavior/Dial.hpp"
+#include "RotaryEncoder/Facade.hpp"
 #include "Services/PubSub.hpp"
 #include "Setups/ClockSync.hpp"
 #include "Setups/Core.hpp"
@@ -18,7 +23,6 @@
 #include "Wheel/Facade.hpp"
 #include "Wire/Rs485/Facade.hpp"
 #include "config.hpp"
-#include <cstdint>
 
 CoreSetup core{};
 
@@ -39,6 +43,72 @@ static auto makeButtonEventCallback(PeripheralButton button) {
             };
         });
 }
+
+namespace {
+
+using Totem::RotaryEncoder::Behavior::ButtonMenuEvent;
+using Totem::RotaryEncoder::Behavior::ButtonMenuEventType;
+
+[[nodiscard]] constexpr Totem::Data::MenuEventType
+toMenuEventType(ButtonMenuEventType event) {
+    switch (event) {
+    case ButtonMenuEventType::Shown:
+        return Totem::Data::MenuEventType::Shown;
+    case ButtonMenuEventType::MovedClockwise:
+        return Totem::Data::MenuEventType::MovedClockwise;
+    case ButtonMenuEventType::MovedCounterclockwise:
+        return Totem::Data::MenuEventType::MovedCounterclockwise;
+    case ButtonMenuEventType::Selected:
+        return Totem::Data::MenuEventType::Selected;
+    }
+    return Totem::Data::MenuEventType::Shown;
+}
+
+auto dialEventPublisher = eventProducer.makeCallback<Totem::Data::DialEvent>(
+    PubSubService::Topic::Dial,
+    [](Totem::Data::DialEvent event) { return event; });
+
+void publishBrightnessDialEvent(
+    Totem::RotaryEncoder::Behavior::DialEvent event) {
+    (void)dialEventPublisher(Totem::Data::DialEvent{
+        .position = event.position,
+        .event = event.direction,
+        .dial = PeripheralDial::Main,
+        .value = event.value,
+    });
+}
+
+Totem::RotaryEncoder::Behavior::Dial brightnessDial{publishBrightnessDialEvent,
+                                                    brightnessDialConfig};
+
+auto menuEventPublisher = eventProducer.makeCallback<Totem::Data::MenuEvent>(
+    PubSubService::Topic::Menu,
+    [](Totem::Data::MenuEvent event) { return event; });
+
+void publishMainMenuEvent(ButtonMenuEvent event) {
+    (void)menuEventPublisher(Totem::Data::MenuEvent{
+        .position = event.position,
+        .event = toMenuEventType(event.event),
+        .item = Totem::Data::mainMenuItemAt(event.position),
+        .menu = PeripheralMenu::Main,
+    });
+}
+
+Totem::RotaryEncoder::Behavior::ButtonMenu mainMenu{
+    [](Totem::RotaryEncoder::Direction direction) {
+        brightnessDial.onRotation(direction);
+    },
+    publishMainMenuEvent, mainMenuPositionConfig};
+
+Totem::RotaryEncoder::RotaryEncoder rotaryEncoder{
+    [](Totem::RotaryEncoder::Direction direction) {
+        mainMenu.onRotation(direction);
+    }};
+
+Totem::Button::Button rotarySwitch{
+    [](Totem::Button::Event event) { mainMenu.onButton(event); }};
+
+} // namespace
 
 Totem::Button::Button bellButton{
     makeButtonEventCallback(PeripheralButton::Bell)};
@@ -78,6 +148,8 @@ void setup() {
     ABORT_IF_ERR_BEGIN(eventProducer.begin());
     ABORT_IF_ERR_BEGIN(bellButton.begin(bellButtonConfig));
     ABORT_IF_ERR_BEGIN(calibrationButton.begin(calibrationButtonConfig));
+    ABORT_IF_ERR_BEGIN(rotaryEncoder.begin(rotaryEncoderConfig));
+    ABORT_IF_ERR_BEGIN(rotarySwitch.begin(rotarySwitchConfig));
 
     _log_i("Setup complete");
     ABORT_IF_ERR(StatusLedService::setTargetsReady(),
@@ -133,6 +205,8 @@ void app_main() {
         REPORT_IF_ERR(bellButton.work(nowMs), "Bell button work failed");
         REPORT_IF_ERR(calibrationButton.work(nowMs),
                       "Calibration button work failed");
+        REPORT_IF_ERR(rotaryEncoder.work(nowMs), "Rotary encoder work failed");
+        REPORT_IF_ERR(rotarySwitch.work(nowMs), "Rotary switch work failed");
 
         ::platform::delay(::platform::ms_to_ticks(1));
     }

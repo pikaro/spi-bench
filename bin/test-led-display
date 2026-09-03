@@ -1,0 +1,57 @@
+#!/bin/bash
+
+set -euo pipefail
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+cd "$REPO_ROOT"
+
+BUILD_DIR="$REPO_ROOT/build/host-tests"
+mkdir -p "$BUILD_DIR"
+
+build_and_run() {
+    local profile=$1
+    shift
+    local output="$BUILD_DIR/led_display_$profile"
+    "${CXX:-c++}" \
+        -std=c++23 \
+        -Wall \
+        -Wextra \
+        -Werror \
+        -DPLATFORM_HOST=1 \
+        -DLED_DISPLAY_GENERIC_RENDERER=1 \
+        -Itools/led-render/host_include \
+        -Iinclude \
+        -I.pio/libdeps/scratch/magic_enum/include \
+        "$@" \
+        test/led_display_logic.cpp \
+        -o "$output"
+    "$output"
+}
+
+build_and_run legacy-full \
+    -DLED_GROUP_COUNT=1 \
+    -DLED_NODE_GROUP_COUNT=1 \
+    -DLED_NODE_GROUP0=0 \
+    -DLED_DATA_LINE_COUNT=1 \
+    -DLED_TOPOLOGY_DENSE_UMBRELLA=0
+
+build_and_run dense-full \
+    -DLED_GROUP_COUNT=1 \
+    -DLED_NODE_GROUP_COUNT=1 \
+    -DLED_NODE_GROUP0=0 \
+    -DLED_DATA_LINE_COUNT=1 \
+    -DLED_TOPOLOGY_DENSE_UMBRELLA=1
+
+build_and_run dense-gpu0 \
+    -DLED_GROUP_COUNT=2 \
+    -DLED_NODE_GROUP_COUNT=1 \
+    -DLED_NODE_GROUP0=0 \
+    -DLED_DATA_LINE_COUNT=1 \
+    -DLED_TOPOLOGY_DENSE_UMBRELLA=1
+
+build_and_run dense-gpu1 \
+    -DLED_GROUP_COUNT=2 \
+    -DLED_NODE_GROUP_COUNT=1 \
+    -DLED_NODE_GROUP0=1 \
+    -DLED_DATA_LINE_COUNT=1 \
+    -DLED_TOPOLOGY_DENSE_UMBRELLA=1

@@ -327,13 +327,35 @@ class NimbleCentral {
         case BLE_GAP_EVENT_CONNECT:
             return _handleConnect(event);
         case BLE_GAP_EVENT_DISCONNECT:
-            _log_w("BLE disconnected: reason=%d",
-                   event.disconnect.reason);
+            _log_w(
+                "BLE disconnected: reason=%d state=%u conn=%u notifications=%lu "
+                "silenceMs=%lu",
+                event.disconnect.reason, static_cast<unsigned>(_state),
+                _connection.connHandle,
+                static_cast<unsigned long>(_connectionNotificationCount),
+                static_cast<unsigned long>(_notificationSilenceMs()));
             metrics().addDisc();
             _clearConnection(true, event.disconnect.reason);
             if (!_stopping) {
                 _startScan();
             }
+            return 0;
+        case BLE_GAP_EVENT_CONN_UPDATE:
+            if (event.conn_update.status != 0) {
+                _log_w("BLE connection update failed: conn=%u status=%d",
+                       event.conn_update.conn_handle,
+                       event.conn_update.status);
+                metrics().addFail();
+                return 0;
+            }
+            _logConnectionParameters(event.conn_update.conn_handle,
+                                     "connection-update");
+            return 0;
+        case BLE_GAP_EVENT_TERM_FAILURE:
+            _log_e("BLE termination failed: conn=%u status=%d state=%u",
+                   event.term_failure.conn_handle, event.term_failure.status,
+                   static_cast<unsigned>(_state));
+            metrics().addFail();
             return 0;
         case BLE_GAP_EVENT_NOTIFY_RX:
             return _handleNotify(event);
@@ -345,6 +367,18 @@ class NimbleCentral {
             _log_i("BLE subscribe event: conn=%u attr=%u notify=%u indicate=%u",
                    event.subscribe.conn_handle, event.subscribe.attr_handle,
                    event.subscribe.cur_notify, event.subscribe.cur_indicate);
+            return 0;
+        case BLE_GAP_EVENT_PHY_UPDATE_COMPLETE:
+            if (event.phy_updated.status != 0) {
+                _log_w("BLE PHY update failed: conn=%u status=%d",
+                       event.phy_updated.conn_handle,
+                       event.phy_updated.status);
+                metrics().addFail();
+                return 0;
+            }
+            _log_i("BLE PHY updated: conn=%u tx=%u rx=%u",
+                   event.phy_updated.conn_handle, event.phy_updated.tx_phy,
+                   event.phy_updated.rx_phy);
             return 0;
         default:
             return 0;
@@ -435,6 +469,7 @@ class NimbleCentral {
         _pendingDriverSlot = nullptr;
         metrics().addConn();
         _activeDriver->onConnected(_connection);
+        _logConnectionParameters(_connection.connHandle, "connected");
         _discoverService();
         return 0;
     }
@@ -645,6 +680,9 @@ class NimbleCentral {
         }
 
         _setState(State::Subscribed);
+        _subscribedAtMs = ::platform::get_time();
+        _lastNotificationMs = _subscribedAtMs;
+        _connectionNotificationCount = 0;
         metrics().addSub();
         _activeDriver->onSubscribed({
             .connection = _connection,
@@ -671,6 +709,15 @@ class NimbleCentral {
             return 0;
         }
 
+        const auto nowMs = ::platform::get_time();
+        const auto silenceMs = nowMs - _lastNotificationMs;
+        if (_connectionNotificationCount > 0 &&
+            silenceMs >= notificationResumeLogThresholdMs) {
+            _log_i("BLE notifications resumed: conn=%u silenceMs=%lu count=%lu",
+                   notify.conn_handle, static_cast<unsigned long>(silenceMs),
+                   static_cast<unsigned long>(_connectionNotificationCount));
+        }
+
         QueuedNotification queued{
             .driver = _activeDriver,
             .connection = _connection,
@@ -693,8 +740,33 @@ class NimbleCentral {
             metrics().addDrop();
             return 0;
         }
+        _lastNotificationMs = nowMs;
+        ++_connectionNotificationCount;
         metrics().addNotif();
         return 0;
+    }
+
+    void _logConnectionParameters(uint16_t connHandle, const char *eventName) {
+        ble_gap_conn_desc desc{};
+        const auto ret = ble_gap_conn_find(connHandle, &desc);
+        if (ret != 0) {
+            _log_w("BLE connection details unavailable: event=%s conn=%u rc=%d",
+                   eventName, connHandle, ret);
+            metrics().addFail();
+            return;
+        }
+        _log_i(
+            "BLE connection details: event=%s conn=%u intervalUnits=%u "
+            "latency=%u supervisionUnits=%u",
+            eventName, connHandle, desc.conn_itvl, desc.conn_latency,
+            desc.supervision_timeout);
+    }
+
+    [[nodiscard]] uint32_t _notificationSilenceMs() const {
+        if (_subscribedAtMs == 0) {
+            return 0;
+        }
+        return ::platform::get_time() - _lastNotificationMs;
     }
 
     [[nodiscard]] bool _sameConnection(uint16_t connHandle) const {
@@ -739,6 +811,9 @@ class NimbleCentral {
         _cccdHandle = 0;
         _serviceFound = false;
         _characteristicFound = false;
+        _subscribedAtMs = 0;
+        _lastNotificationMs = 0;
+        _connectionNotificationCount = 0;
     }
 
     void _startScan() {
@@ -802,6 +877,11 @@ class NimbleCentral {
     uint16_t _cccdHandle = 0;
     bool _serviceFound = false;
     bool _characteristicFound = false;
+    uint32_t _subscribedAtMs = 0;
+    uint32_t _lastNotificationMs = 0;
+    uint32_t _connectionNotificationCount = 0;
+
+    static constexpr uint32_t notificationResumeLogThresholdMs = 10'000;
 
     static inline NimbleCentral *_active = nullptr;
 

@@ -2,9 +2,54 @@
 set -euo pipefail
 
 ROOT=$(git rev-parse --show-toplevel)
-OUT_DIR="$ROOT/.build/led-render"
+PROFILE=${1:-legacy-full}
+OUT_DIR="$ROOT/.build/led-render/$PROFILE"
 OUT="$OUT_DIR/led-render"
 REGISTRY="$ROOT/tools/led-render/generated/AnimationRegistry.hpp"
+
+PROFILE_FLAGS=()
+case "$PROFILE" in
+legacy-full)
+    PROFILE_FLAGS=(
+        -DLED_GROUP_COUNT=1
+        -DLED_NODE_GROUP_COUNT=1
+        -DLED_NODE_GROUP0=0
+        -DLED_DATA_LINE_COUNT=1
+        -DLED_TOPOLOGY_DENSE_UMBRELLA=0
+    )
+    ;;
+dense-full)
+    PROFILE_FLAGS=(
+        -DLED_GROUP_COUNT=1
+        -DLED_NODE_GROUP_COUNT=1
+        -DLED_NODE_GROUP0=0
+        -DLED_DATA_LINE_COUNT=1
+        -DLED_TOPOLOGY_DENSE_UMBRELLA=1
+    )
+    ;;
+dense-gpu0)
+    PROFILE_FLAGS=(
+        -DLED_GROUP_COUNT=2
+        -DLED_NODE_GROUP_COUNT=1
+        -DLED_NODE_GROUP0=0
+        -DLED_DATA_LINE_COUNT=1
+        -DLED_TOPOLOGY_DENSE_UMBRELLA=1
+    )
+    ;;
+dense-gpu1)
+    PROFILE_FLAGS=(
+        -DLED_GROUP_COUNT=2
+        -DLED_NODE_GROUP_COUNT=1
+        -DLED_NODE_GROUP0=1
+        -DLED_DATA_LINE_COUNT=1
+        -DLED_TOPOLOGY_DENSE_UMBRELLA=1
+    )
+    ;;
+*)
+    echo "Unknown LED render profile: $PROFILE" >&2
+    exit 2
+    ;;
+esac
 
 mkdir -p "$OUT_DIR" "$(dirname "$REGISTRY")"
 
@@ -33,12 +78,8 @@ fi
     -Wall \
     -Wextra \
     -DPLATFORM_HOST=1 \
-    -DLED_GROUP_COUNT=1 \
-    -DLED_GROUP_INDEX=0 \
-    -DLED_NODE_GROUP_COUNT=1 \
-    -DLED_NODE_GROUP0=0 \
-    -DLED_DATA_LINE_COUNT=1 \
     -DLED_DISPLAY_GENERIC_RENDERER=1 \
+    "${PROFILE_FLAGS[@]}" \
     -I"$ROOT/tools/led-render/host_include" \
     -I"$ROOT/tools/led-render" \
     -I"$ROOT/include" \

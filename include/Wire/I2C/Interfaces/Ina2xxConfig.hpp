@@ -7,12 +7,14 @@
 #include <cstdint>
 #include <optional>
 #include <string_view>
+#include <type_traits>
 
 namespace Totem::Wire::I2C {
 
 enum class Ina2xxModel : uint8_t {
     Ina219,
     Ina226,
+    Ina228,
 };
 
 enum class Ina2xxCapability : uint32_t {
@@ -102,7 +104,7 @@ struct Ina2xxConfig {
     // Must be unique per live sensor instance. It is copied by the driver.
     const char *metricsGroupName = "ina2xx";
 
-    [[nodiscard]] bool validate() const {
+    [[nodiscard]] constexpr bool validate() const {
         return device.validate() && device.addressBits == AddressBits::Seven &&
                device.address >= 0x40 && device.address <= 0x4F &&
                sampleIntervalMs > 0 && shuntMicroOhms > 0 &&
@@ -120,8 +122,10 @@ struct Ina2xxSample {
     int32_t currentMicroamps = 0;
     int32_t powerMilliwatts = 0;
 
-    // Reserved semantic fields for a future INA228 backend. They remain zero
-    // and their capability bits remain clear on INA219 and INA226.
+    // INA219/INA226 leave these values zero and their validity bits clear.
+    // The protected INA228 backend will set each bit only when that individual
+    // sample contains a successfully acquired value; zero is otherwise data,
+    // not an availability sentinel.
     int32_t temperatureMillicelsius = 0;
     uint32_t energyMillijoules = 0;
     int32_t chargeMillicoulombs = 0;
@@ -129,6 +133,8 @@ struct Ina2xxSample {
     uint32_t capturedAtMs = 0;
     uint32_t validCapabilities = 0;
 };
+
+static_assert(std::is_trivially_copyable_v<Ina2xxSample>);
 
 struct Ina2xxLimitEvent {
     Ina2xxLimitMeasurement measurement = Ina2xxLimitMeasurement::BusVoltage;
@@ -141,12 +147,11 @@ struct Ina2xxLimitEvent {
 struct Ina2xxAlertEvent {
     Ina2xxAlertFunction function = Ina2xxAlertFunction::CurrentOver;
     Ina2xxSample sample{};
-    uint16_t maskEnable = 0;
-    bool sampleValid = false;
 };
 
 using Ina2xxLimitCallback = Generic::InlineCallback<const Ina2xxLimitEvent &>;
 using Ina2xxAlertCallback = Generic::InlineCallback<const Ina2xxAlertEvent &>;
+using Ina2xxSampleCallback = Generic::InlineCallback<const Ina2xxSample &>;
 
 [[nodiscard]] constexpr uint32_t
 ina2xx_capability_mask(Ina2xxCapability capability) {
@@ -166,6 +171,13 @@ ina2xx_capability_mask(Ina2xxCapability capability) {
         return measurements |
                ina2xx_capability_mask(Ina2xxCapability::HardwareAlert) |
                ina2xx_capability_mask(Ina2xxCapability::Identity);
+    case Ina2xxModel::Ina228:
+        return measurements |
+               ina2xx_capability_mask(Ina2xxCapability::HardwareAlert) |
+               ina2xx_capability_mask(Ina2xxCapability::Identity) |
+               ina2xx_capability_mask(Ina2xxCapability::Temperature) |
+               ina2xx_capability_mask(Ina2xxCapability::Energy) |
+               ina2xx_capability_mask(Ina2xxCapability::Charge);
     }
     return 0;
 }
@@ -182,5 +194,9 @@ static_assert(ina2xx_supports(Ina2xxModel::Ina226,
                               Ina2xxCapability::HardwareAlert));
 static_assert(!ina2xx_supports(Ina2xxModel::Ina226,
                                Ina2xxCapability::Temperature));
+static_assert(ina2xx_supports(Ina2xxModel::Ina228,
+                              Ina2xxCapability::Temperature));
+static_assert(ina2xx_supports(Ina2xxModel::Ina228, Ina2xxCapability::Energy));
+static_assert(ina2xx_supports(Ina2xxModel::Ina228, Ina2xxCapability::Charge));
 
 } // namespace Totem::Wire::I2C

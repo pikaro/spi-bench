@@ -83,6 +83,7 @@ class Master : public HasLifecycle<Master, MasterConfig>,
 
   private:
     ReturnCode _onBegin() {
+        _setAttentionArmed(false);
         prewarmMetrics();
 
         _log_i("SPI master initializing bus");
@@ -121,6 +122,7 @@ class Master : public HasLifecycle<Master, MasterConfig>,
     }
 
     ReturnCode _onEnd() {
+        _setAttentionArmed(false);
         auto ret = OK();
         ret.combine(_attention.deinit());
         _task = 0;
@@ -173,7 +175,8 @@ class Master : public HasLifecycle<Master, MasterConfig>,
                                  int64_t timestampUs) {
         auto *self = static_cast<Master *>(owner);
         if (self == nullptr ||
-            event != Totem::Wire::detail::AttentionLineEvent::Asserted) {
+            event != Totem::Wire::detail::AttentionLineEvent::Asserted ||
+            !self->_attentionArmed.load(std::memory_order_acquire)) {
             return;
         }
         self->_transceiver.recordAttentionAsserted(
@@ -197,6 +200,10 @@ class Master : public HasLifecycle<Master, MasterConfig>,
     }
 
     bool _consumeAttentionRequest() {
+        if (!_attentionArmed.load(std::memory_order_acquire)) {
+            _attentionRequested.store(false, std::memory_order_release);
+            return false;
+        }
         const bool edgeRequested =
             _attentionRequested.exchange(false, std::memory_order_acq_rel);
         if (edgeRequested) {
@@ -305,13 +312,13 @@ class Master : public HasLifecycle<Master, MasterConfig>,
                     _handshakeTransferFailures == 128 ||
                     (_handshakeTransferFailures > 128 &&
                      (_handshakeTransferFailures % 2048) == 0)) {
-                    _log_w("%s: SPI master hello transfer failed turn=%lu "
-                           "failures=%lu: " ERR_FMT,
-                           this->config().task.name,
-                           static_cast<unsigned long>(_turnCount),
-                           static_cast<unsigned long>(
-                               _handshakeTransferFailures),
-                           ERR_ARG(ret));
+                    _log_w(
+                        "%s: SPI master hello transfer failed turn=%lu "
+                        "failures=%lu: " ERR_FMT,
+                        this->config().task.name,
+                        static_cast<unsigned long>(_turnCount),
+                        static_cast<unsigned long>(_handshakeTransferFailures),
+                        ERR_ARG(ret));
                 }
                 if (_isRecoverableTransferError(ret)) {
                     return OK();
@@ -340,6 +347,9 @@ class Master : public HasLifecycle<Master, MasterConfig>,
         }
         auto parseRet = _transceiver.parseRx(rx, receivedAtUs);
         const bool helloResynced = _transceiver.consumeHelloResynced();
+        if (!_transceiver.ready() || helloResynced) {
+            _setAttentionArmed(false);
+        }
         if (!parseRet.ok()) {
             if (!_transceiver.ready() &&
                 (parseRet == ERR(WireError, Corrupted) ||
@@ -396,22 +406,21 @@ class Master : public HasLifecycle<Master, MasterConfig>,
                 if (_handshakeNoSlotTurns == 128 ||
                     (_handshakeNoSlotTurns > 128 &&
                      (_handshakeNoSlotTurns % 2048) == 0)) {
-                    _log_w("%s: SPI master handshake has no protocol slots "
-                           "turn=%lu noSlot=%lu txLen=%u txFirst=%02x "
-                           "txSecond=%02x rxLen=%u rxFirst=%02x "
-                           "rxSecond=%02x attention=%u",
-                           this->config().task.name,
-                           static_cast<unsigned long>(_turnCount),
-                           static_cast<unsigned long>(_handshakeNoSlotTurns),
-                           static_cast<unsigned>(tx.size()),
-                           std::to_integer<unsigned>(tx[0]),
-                           tx.size() > 1 ? std::to_integer<unsigned>(tx[1])
-                                         : 0U,
-                           static_cast<unsigned>(rx.size()),
-                           std::to_integer<unsigned>(rx[0]),
-                           rx.size() > 1 ? std::to_integer<unsigned>(rx[1])
-                                         : 0U,
-                           static_cast<unsigned>(attentionRequested));
+                    _log_w(
+                        "%s: SPI master handshake has no protocol slots "
+                        "turn=%lu noSlot=%lu txLen=%u txFirst=%02x "
+                        "txSecond=%02x rxLen=%u rxFirst=%02x "
+                        "rxSecond=%02x attention=%u",
+                        this->config().task.name,
+                        static_cast<unsigned long>(_turnCount),
+                        static_cast<unsigned long>(_handshakeNoSlotTurns),
+                        static_cast<unsigned>(tx.size()),
+                        std::to_integer<unsigned>(tx[0]),
+                        tx.size() > 1 ? std::to_integer<unsigned>(tx[1]) : 0U,
+                        static_cast<unsigned>(rx.size()),
+                        std::to_integer<unsigned>(rx[0]),
+                        rx.size() > 1 ? std::to_integer<unsigned>(rx[1]) : 0U,
+                        static_cast<unsigned>(attentionRequested));
                 }
             }
             if (this->config().noSlotBackoffUs > 0) {
@@ -438,8 +447,7 @@ class Master : public HasLifecycle<Master, MasterConfig>,
             _log_w("%s: SPI master link recovery reason=%s; dropping stale "
                    "pending operations",
                    this->config().task.name,
-                   link_recovery_reason_name(
-                       LinkRecoveryReason::HelloResync));
+                   link_recovery_reason_name(LinkRecoveryReason::HelloResync));
             FAIL_IF_ERR_FWD(_failQueuedWrites(ERR(WireError, SequenceError)),
                             "Failed to fail stale SPI master queued writes");
             FAIL_IF_ERR_FWD(_failPendingWrites(ERR(WireError, SequenceError)),
@@ -455,6 +463,9 @@ class Master : public HasLifecycle<Master, MasterConfig>,
             _log_i("%s: SPI master handshake complete",
                    this->config().task.name);
             _recordPeerProgress(nowMs);
+        }
+        if (_transceiver.ready()) {
+            _attentionArmed.store(true, std::memory_order_release);
         }
         if (!_transceiver.ready()) {
             FAIL_IF_ERR_FWD(_transceiver.queueHello(),
@@ -729,6 +740,7 @@ class Master : public HasLifecycle<Master, MasterConfig>,
     }
 
     ReturnCode _resetLink(ReturnCode error) {
+        _setAttentionArmed(false);
         metrics().addReset();
         const auto reason = link_recovery_reason_from_error(error);
         metrics().addLinkRecovery(reason);
@@ -803,8 +815,8 @@ class Master : public HasLifecycle<Master, MasterConfig>,
     static constexpr uint32_t pendingAckPollMs = 10;
     static constexpr uint32_t pendingWriteTimeoutMs = 250;
     static constexpr uint8_t heartbeatMissLimit = 3;
-    static constexpr size_t txQueueDepth = 8;
-    static constexpr size_t pendingWriteDepth = 8;
+    static constexpr size_t txQueueDepth = 16;
+    static constexpr size_t pendingWriteDepth = 16;
 
     [[nodiscard]] static bool _isRecoverableTransferError(ReturnCode error) {
         return error == ERR(CoreError, Timeout) ||
@@ -812,6 +824,13 @@ class Master : public HasLifecycle<Master, MasterConfig>,
                error == ERR(CoreError, OperationFailed) ||
                error == ERR(CoreError, NotFinished) ||
                error == ERR(CoreError, Unknown);
+    }
+
+    void _setAttentionArmed(bool armed) {
+        _attentionArmed.store(armed, std::memory_order_release);
+        if (!armed) {
+            _attentionRequested.store(false, std::memory_order_release);
+        }
     }
 
     Platform::SpiMasterBus _bus{};
@@ -825,6 +844,7 @@ class Master : public HasLifecycle<Master, MasterConfig>,
     std::array<PendingWrite, pendingWriteDepth> _pendingWrites{};
     Totem::Wire::detail::AttentionLine _attention{};
     Totem::TaskController::RunnerKey _task = 0;
+    std::atomic<bool> _attentionArmed{false};
     std::atomic<bool> _attentionRequested{false};
     std::atomic<int64_t> _queuedWriteSinceUs{0};
     int64_t _noSlotBackoffUntilUs = 0;

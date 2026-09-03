@@ -72,8 +72,8 @@ inline constexpr uint32_t spiMaster = 8192;
 inline constexpr uint32_t spiSlave = 8192;
 inline constexpr uint32_t rs485Master = 8192;
 inline constexpr uint32_t rs485Slave = 8192;
-inline constexpr uint32_t audioFft = 3072;
-inline constexpr uint32_t audioFftDisplay = 3072;
+inline constexpr uint32_t audioFft = 4096;
+inline constexpr uint32_t audioFftDisplay = 4096;
 inline constexpr uint32_t audioAfe = 8192;
 inline constexpr uint32_t pubSubUdp = 4096;
 

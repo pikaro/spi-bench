@@ -17,7 +17,12 @@ log
 .venv
 *.pyc
 __pycache__/
-data/
+/data/*
+!/data/power/
+/data/power/*
+!/data/power/littlefs/
+/data/power/littlefs/*
+!/data/power/littlefs/littlefs.txt
 telemetry/
 docs/wifi.md
 *.tled

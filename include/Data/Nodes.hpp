@@ -11,6 +11,7 @@ enum class NodeName : uint8_t {
     GPUNode1,
     GPUNode2,
     GPUNode3,
+    Power,
 };
 
 }

@@ -18,8 +18,9 @@ enum class Topic : uint32_t {
     PubSub = 1U << 1,
 };
 
-enum class NodeId : uint8_t {
-    Host = 1U << 7,
+enum class NodeId : uint16_t {
+    Power = 1U << 7,
+    Host = 1U << 15,
 };
 
 enum class TrafficClass : uint8_t {
@@ -37,7 +38,7 @@ struct Header {
     uint64_t timestampUs = 0;
     uint32_t messageId = 0;
     uint32_t topic = 0;
-    uint8_t source = 0;
+    uint16_t source = 0;
     uint8_t trafficClass = 0;
     uint16_t payloadSize = 0;
 };
@@ -52,12 +53,14 @@ struct Frame {
     std::span<const std::byte> payload{};
 };
 
-inline constexpr size_t headerSize = sizeof(uint32_t) + sizeof(uint64_t) +
-                                     sizeof(uint32_t) + sizeof(uint32_t) +
-                                     sizeof(uint8_t) + sizeof(uint8_t) +
-                                     sizeof(uint16_t);
+inline constexpr size_t headerSize =
+    sizeof(uint32_t) + sizeof(uint64_t) + sizeof(uint32_t) + sizeof(uint32_t) +
+    sizeof(uint16_t) + sizeof(uint8_t) + sizeof(uint16_t);
 inline constexpr size_t crcSize = sizeof(uint32_t);
 inline constexpr size_t maxPayloadSize = 2048;
+static_assert(headerSize == 25);
+static_assert(static_cast<uint16_t>(NodeId::Power) == 0x0080U);
+static_assert(static_cast<uint16_t>(NodeId::Host) == 0x8000U);
 inline constexpr std::array<std::byte, 8> keepalivePacket{
     std::byte{0x54}, std::byte{0x50}, std::byte{0x55}, std::byte{0x44},
     std::byte{0x50}, std::byte{0x4B}, std::byte{0x41}, std::byte{0x31},
@@ -94,7 +97,7 @@ inline void appendHeader(std::vector<std::byte> &out, const Header &header) {
     appendLe<uint64_t>(out, header.timestampUs);
     appendLe<uint32_t>(out, header.messageId);
     appendLe<uint32_t>(out, header.topic);
-    appendLe<uint8_t>(out, header.source);
+    appendLe<uint16_t>(out, header.source);
     appendLe<uint8_t>(out, header.trafficClass);
     appendLe<uint16_t>(out, header.payloadSize);
 }
@@ -108,7 +111,7 @@ inline bool readHeader(std::span<const std::byte> data, Header &header) {
            readLe<uint64_t>(data, offset, header.timestampUs) &&
            readLe<uint32_t>(data, offset, header.messageId) &&
            readLe<uint32_t>(data, offset, header.topic) &&
-           readLe<uint8_t>(data, offset, header.source) &&
+           readLe<uint16_t>(data, offset, header.source) &&
            readLe<uint8_t>(data, offset, header.trafficClass) &&
            readLe<uint16_t>(data, offset, header.payloadSize);
 }
@@ -218,7 +221,7 @@ inline Header makeHostHeader(uint32_t messageId, uint32_t topic,
         .timestampUs = 0,
         .messageId = messageId,
         .topic = topic,
-        .source = static_cast<uint8_t>(NodeId::Host),
+        .source = static_cast<uint16_t>(NodeId::Host),
         .trafficClass = static_cast<uint8_t>(trafficClass),
         .payloadSize = 0,
     };

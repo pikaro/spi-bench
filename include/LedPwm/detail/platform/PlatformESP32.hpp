@@ -183,6 +183,7 @@ struct Platform {
         channelConfig.timer_sel = timer;
         channelConfig.duty = config.initialDuty;
         channelConfig.hpoint = 0;
+        channelConfig.flags.output_invert = config.outputInverted;
 
         auto err = ledc_channel_config(&channelConfig);
         if (err != ESP_OK) {

@@ -18,17 +18,16 @@ struct Contract {
     using TopicUnderlying = std::underlying_type_t<Topic>;
     using TransportUnderlying = std::underlying_type_t<Transport>;
 
-    static constexpr size_t kHeaderWireSize = sizeof(uint32_t) +
-                                              sizeof(MessageId) +
-                                              sizeof(TopicId) +
-                                              sizeof(PubSubBackend::NodeId) +
-                                              sizeof(uint16_t);
+    static constexpr size_t kHeaderWireSize =
+        sizeof(uint32_t) + sizeof(uint64_t) + sizeof(MessageId) +
+        sizeof(TopicId) + sizeof(PubSubBackend::NodeId) + sizeof(TrafficClass) +
+        sizeof(uint16_t);
     static constexpr size_t kMinSerializedFrameSize =
         kHeaderWireSize + sizeof(uint32_t);
 
     static_assert(std::is_enum_v<NodeId>, "Spec::NodeId must be an enum");
-    static_assert(std::same_as<std::underlying_type_t<NodeId>, uint8_t>,
-                  "Spec::NodeId must have uint8_t as underlying type");
+    static_assert(std::same_as<std::underlying_type_t<NodeId>, uint16_t>,
+                  "Spec::NodeId must have uint16_t as underlying type");
     static_assert(IsBitmaskEnum<NodeId>, "Spec::NodeId must be a bitmask enum");
 
     static_assert(std::is_enum_v<Topic>, "Spec::Topic must be an enum");

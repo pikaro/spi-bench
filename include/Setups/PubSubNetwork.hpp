@@ -72,15 +72,16 @@ struct PubSubNetworkMasterSetup {
         Totem::Data::PubSub::PubSubData<Totem::Data::NodeName::Master>;
     using Transport = MasterPubSub::Transport;
     using LowSpeedSpiTransport =
-        Totem::PubSubBackend::Transports::SpiTransport<LowSpeedSpiLink>;
+        Totem::PubSubBackend::Transports::SpiRouterTransport<LowSpeedSpiLink,
+                                                             2>;
     using HighSpeedSpiTransport =
         Totem::PubSubBackend::Transports::SpiRouterTransport<HighSpeedSpiLink,
                                                              2>;
     using Rs485Transport =
         Totem::PubSubBackend::Transports::Rs485Transport<Rs485Link>;
     using LowSpeedSpiDeps =
-        Totem::PubSubBackend::Transports::SpiTransportDependencies<
-            LowSpeedSpiLink>;
+        Totem::PubSubBackend::Transports::SpiRouterTransportDependencies<
+            LowSpeedSpiLink, 2>;
     using HighSpeedSpiDeps =
         Totem::PubSubBackend::Transports::SpiRouterTransportDependencies<
             HighSpeedSpiLink, 2>;
@@ -95,15 +96,15 @@ struct PubSubNetworkMasterSetup {
     };
 
     PubSubNetworkMasterSetup(Totem::TaskController::IRegistry &taskRegistry,
-                             LowSpeedSpiLink &lowSpeedSpiLink,
+                             LowSpeedSpiLink &mediaSpiLink,
+                             LowSpeedSpiLink &powerSpiLink,
                              HighSpeedSpiLink &gpu0SpiLink,
                              HighSpeedSpiLink &gpu1SpiLink,
                              Rs485Link &rs485Link, Config config = {})
-        : pubSubNode(
-              taskRegistry,
-              static_cast<Totem::Data::PubSub::NodeId>(MasterPubSub::nodeId)),
-          config(config), lowSpeedSpiTransport(
-                              makeLowSpeedSpiDeps(pubSubNode, lowSpeedSpiLink)),
+        : pubSubNode(taskRegistry, static_cast<Totem::Data::PubSub::NodeId>(
+                                       MasterPubSub::nodeId)),
+          config(config), lowSpeedSpiTransport(makeLowSpeedSpiDeps(
+                              pubSubNode, mediaSpiLink, powerSpiLink)),
           highSpeedSpiTransport(
               makeHighSpeedSpiDeps(pubSubNode, gpu0SpiLink, gpu1SpiLink)),
           rs485Transport(makeRs485Deps(pubSubNode, rs485Link)) {}
@@ -114,7 +115,8 @@ struct PubSubNetworkMasterSetup {
 
         ABORT_IF_ERR_BEGIN(lowSpeedSpiTransport.begin());
         ABORT_IF_ERR(lowSpeedSpiTransport.registerHandler(),
-                     "Failed to register low-speed SPI PubSub frame handler");
+                     "Failed to register low-speed SPI PubSub router frame "
+                     "handlers");
         ABORT_IF_UNEXPECTED(
             lowSpeedHandle, pubSubNode.registerTransport(lowSpeedSpiTransport),
             "Failed to register low-speed SPI PubSub transport");
@@ -147,12 +149,37 @@ struct PubSubNetworkMasterSetup {
   private:
     [[nodiscard]] static LowSpeedSpiDeps
     makeLowSpeedSpiDeps(PubSubNetwork::PubSubNode &node,
-                        LowSpeedSpiLink &link) {
+                        LowSpeedSpiLink &mediaLink,
+                        LowSpeedSpiLink &powerLink) {
+        using PeerDeps =
+            Totem::PubSubBackend::Transports::SpiRouterPeerDependencies<
+                LowSpeedSpiLink>;
+        using NodeId = Totem::Data::PubSub::NodeId;
         return LowSpeedSpiDeps{
-            .base = PubSubNetwork::makeBaseDeps(
-                node, static_cast<uint8_t>(Transport::LowSpeedSPI),
-                "PubSub-LowSpeedSPI"),
-            .link = link,
+            .pubSubNode = static_cast<void *>(&node),
+            .transportId = static_cast<uint8_t>(Transport::LowSpeedSPI),
+            .name = "PubSub-LowSpeedSPI",
+            .sendAckCallback = PubSubNetwork::PubSubNode::ack,
+            .availabilityObserver = &node,
+            .wakeCallback = PubSubNetwork::PubSubNode::wake,
+            .ingressDispatchCallback =
+                PubSubNetwork::PubSubNode::dispatchIngressFrame,
+            .ingress = &node.ingress(),
+            .peers =
+                {
+                    PeerDeps{
+                        .peerId = static_cast<Totem::PubSubBackend::PeerId>(
+                            NodeId::Media),
+                        .link = &mediaLink,
+                        .name = "media",
+                    },
+                    PeerDeps{
+                        .peerId = static_cast<Totem::PubSubBackend::PeerId>(
+                            NodeId::Power),
+                        .link = &powerLink,
+                        .name = "power",
+                    },
+                },
         };
     }
 
@@ -246,6 +273,8 @@ struct PubSubNetworkSpiEdgeSetup {
 
         _log_i("PubSub SPI edge setup ready");
     }
+
+    [[nodiscard]] PubSubNetwork::PubSubNode &node() { return pubSubNode; }
 
   private:
     [[nodiscard]] static constexpr Config defaultConfig() {

@@ -114,6 +114,24 @@ struct Metrics {
         .unit = MetricUnit::Microseconds,
         .gaugeIsMax = true,
     };
+    static constexpr MetricDesc encodeMaxUsDef = {
+        .name = "encMax",
+        .type = MetricType::Gauge,
+        .unit = MetricUnit::Microseconds,
+        .gaugeIsMax = true,
+    };
+    static constexpr MetricDesc spiQueueMaxUsDef = {
+        .name = "spiQMax",
+        .type = MetricType::Gauge,
+        .unit = MetricUnit::Microseconds,
+        .gaugeIsMax = true,
+    };
+    static constexpr MetricDesc spiWaitMaxUsDef = {
+        .name = "spiWMax",
+        .type = MetricType::Gauge,
+        .unit = MetricUnit::Microseconds,
+        .gaugeIsMax = true,
+    };
     static constexpr MetricDesc frameMaxUsDef = {
         .name = "stepMax",
         .type = MetricType::Gauge,
@@ -141,6 +159,9 @@ struct Metrics {
         REGISTER_METRIC("LedDisplay", activeAnimations, Gauge, group);
         REGISTER_METRIC("LedDisplay", renderMaxUs, Gauge, group);
         REGISTER_METRIC("LedDisplay", showMaxUs, Gauge, group);
+        REGISTER_METRIC("LedDisplay", encodeMaxUs, Gauge, group);
+        REGISTER_METRIC("LedDisplay", spiQueueMaxUs, Gauge, group);
+        REGISTER_METRIC("LedDisplay", spiWaitMaxUs, Gauge, group);
         REGISTER_METRIC("LedDisplay", frameMaxUs, Gauge, group);
 
         return Metrics{
@@ -163,6 +184,9 @@ struct Metrics {
             .activeAnimations = activeAnimations,
             .renderMaxUs = renderMaxUs,
             .showMaxUs = showMaxUs,
+            .encodeMaxUs = encodeMaxUs,
+            .spiQueueMaxUs = spiQueueMaxUs,
+            .spiWaitMaxUs = spiWaitMaxUs,
             .frameMaxUs = frameMaxUs,
         };
     }
@@ -179,15 +203,11 @@ struct Metrics {
     void addStop() const { METRIC_INCR(group, stops, 1); }
     void addFftInput() const { METRIC_INCR(group, fftInputs, 1); }
     void addWheelInput() const { METRIC_INCR(group, wheelInputs, 1); }
-    void addRepeatedPresent() const {
-        METRIC_INCR(group, repeatedPresents, 1);
-    }
+    void addRepeatedPresent() const { METRIC_INCR(group, repeatedPresents, 1); }
     void addMissedStrobes(uint32_t count) const {
         METRIC_INCR(group, missedStrobes, count);
     }
-    void addOverBudgetFrame() const {
-        METRIC_INCR(group, overBudgetFrames, 1);
-    }
+    void addOverBudgetFrame() const { METRIC_INCR(group, overBudgetFrames, 1); }
     void setActiveAnimations(uint32_t count) const {
         METRIC_SET(group, activeAnimations, count);
     }
@@ -206,6 +226,30 @@ struct Metrics {
         }
         showMaxUsValue = durationUs;
         METRIC_SET(group, showMaxUs, durationUs);
+    }
+
+    void recordEncodeDuration(uint32_t durationUs) {
+        if (durationUs <= encodeMaxUsValue) {
+            return;
+        }
+        encodeMaxUsValue = durationUs;
+        METRIC_SET(group, encodeMaxUs, durationUs);
+    }
+
+    void recordSpiQueueDuration(uint32_t durationUs) {
+        if (durationUs <= spiQueueMaxUsValue) {
+            return;
+        }
+        spiQueueMaxUsValue = durationUs;
+        METRIC_SET(group, spiQueueMaxUs, durationUs);
+    }
+
+    void recordSpiWaitDuration(uint32_t durationUs) {
+        if (durationUs <= spiWaitMaxUsValue) {
+            return;
+        }
+        spiWaitMaxUsValue = durationUs;
+        METRIC_SET(group, spiWaitMaxUs, durationUs);
     }
 
     void recordFrameDuration(uint32_t durationUs) {
@@ -235,9 +279,15 @@ struct Metrics {
     GaugeHandle activeAnimations;
     GaugeHandle renderMaxUs;
     GaugeHandle showMaxUs;
+    GaugeHandle encodeMaxUs;
+    GaugeHandle spiQueueMaxUs;
+    GaugeHandle spiWaitMaxUs;
     GaugeHandle frameMaxUs;
     uint32_t renderMaxUsValue = 0;
     uint32_t showMaxUsValue = 0;
+    uint32_t encodeMaxUsValue = 0;
+    uint32_t spiQueueMaxUsValue = 0;
+    uint32_t spiWaitMaxUsValue = 0;
     uint32_t frameMaxUsValue = 0;
 
     static constexpr auto component =

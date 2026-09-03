@@ -2,9 +2,12 @@
 
 #include "AudioFft/Interfaces/Types.hpp"
 #include "AudioFft/Interfaces/Wire.hpp"
+#include "BatteryMonitor/Interfaces/Wire.hpp"
 #include "Button/Interfaces/Types.hpp"
 #include "CommandBackend/Interfaces/CommandDesc.hpp"
 #include "Data/ButtonEvent.hpp"
+#include "Data/DialEvent.hpp"
+#include "Data/MenuEvent.hpp"
 #include "Data/Peripherals.hpp"
 #include "LedDisplay/Animations/Bolt/Command.hpp"
 #include "LedDisplay/Animations/Bolt/Config.hpp"
@@ -14,6 +17,10 @@
 #include "LedDisplay/Animations/PolarLattice/Config.hpp"
 #include "LedDisplay/Animations/RadialCurtain/Command.hpp"
 #include "LedDisplay/Animations/RadialCurtain/Config.hpp"
+#include "LedDisplay/Animations/RadialGauge/Command.hpp"
+#include "LedDisplay/Animations/RadialGauge/Config.hpp"
+#include "LedDisplay/Animations/RadialMenu/Command.hpp"
+#include "LedDisplay/Animations/RadialMenu/Config.hpp"
 #include "LedDisplay/Animations/SineWave/Command.hpp"
 #include "LedDisplay/Animations/SineWave/Config.hpp"
 #include "LedDisplay/Animations/Sinelon/Command.hpp"
@@ -39,6 +46,7 @@
 #include "Types/Angle.hpp"
 #include "Types/Error.hpp"
 #include "Wheel/Interfaces/Wire.hpp"
+#include "debug_mode.hpp"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -55,6 +63,88 @@ struct WheelMapping {
     float rotationTurnsPerWheelTurn = 1.0F;
     uint32_t publishMinIntervalMs = 20;
     Totem::LedDisplay::Animations::WheelIndicatorConfig indicator{};
+};
+
+struct BrightnessMapping {
+    bool publish = true;
+    int32_t minimumPosition = 0;
+    int32_t maximumPosition = 31;
+    Totem::LedDisplay::Animations::RadialGaugeConfig indicator{
+        .value = 16,
+        .maximumValue = 31,
+        .startHue = 0,
+        .startSaturation = 0,
+        .startValue = 255,
+        .endHue = 0,
+        .endSaturation = 0,
+        .endValue = 255,
+        .centerRing =
+            Totem::LedDisplay::Animations::RadialGaugeSpec::outermostRing,
+        .ringWidth = 1,
+    };
+    uint16_t indicatorLifetimeMs =
+        Totem::LedDisplay::Animations::RadialGaugeCommand::defaultLifetimeMs;
+    uint16_t indicatorRequestId =
+        Totem::LedDisplay::Animations::RadialGaugeCommand::defaultRequestId;
+};
+
+struct MenuMapping {
+    bool publish = true;
+    int32_t minimumPosition = Totem::Data::mainMenuMinimumPosition;
+    uint16_t requestId =
+        Totem::LedDisplay::Animations::RadialMenuCommand::defaultRequestId;
+    Totem::LedDisplay::Animations::RadialMenuConfig indicator{
+        .itemHues = {{0, 0, 224, 32, 128, 192, 96, 0}},
+        .populatedItems = 0x7D,
+        .itemCount = static_cast<uint8_t>(Totem::Data::mainMenuPositionCount),
+        .selectedItem =
+            Totem::LedDisplay::Animations::RadialMenuSpec::noSelectedItem,
+        .itemSaturation = 255,
+        .itemValue = 255,
+        .emptyItemValue = 32,
+        .baseSpokeWidth = 4,
+        .baseRingDepth = 2,
+        .baseTipSpokeWidth = 2,
+        .baseTipRingDepth = 2,
+        .unfurledSpokeWidth = 4,
+        .unfurledRingDepth = 6,
+        .unfurledTipSpokeWidth = 2,
+        .unfurledTipRingDepth = 2,
+        .unfurlDurationMs = 160,
+    };
+};
+
+struct DebugModeMapping {
+    uint16_t wheelRequestId =
+        Totem::LedDisplay::Animations::WheelIndicatorCommand::defaultRequestId;
+    Totem::LedDisplay::Animations::WheelIndicatorConfig wheelIndicator{
+        .hue = 0,
+        .saturation = 255,
+        .value = 255,
+        .spokes = 1,
+        .falloff = 0,
+    };
+};
+
+struct BatteryGaugeMapping {
+    bool publish = true;
+    Totem::LedDisplay::Animations::RadialGaugeConfig indicator{
+        .value = 0,
+        .maximumValue = 1'000,
+        .startHue = 0,
+        .startSaturation = 255,
+        .startValue = 255,
+        .endHue = 96,
+        .endSaturation = 255,
+        .endValue = 255,
+        .centerRing =
+            Totem::LedDisplay::Animations::RadialGaugeSpec::outermostRing,
+        .ringWidth = 1,
+    };
+    uint16_t lifetimeMs =
+        Totem::LedDisplay::Animations::RadialGaugeCommand::defaultLifetimeMs;
+    uint16_t requestId =
+        Totem::LedDisplay::Animations::RadialGaugeCommand::defaultRequestId;
 };
 
 struct PeakWaveMapping {
@@ -300,10 +390,15 @@ struct LayerMapping {
     bool transientEffectActive = true;
     bool wheelActive = false;
     bool debugActive = true;
+    bool uiActive = true;
 };
 
 struct Config {
     WheelMapping wheel{};
+    BrightnessMapping brightness{};
+    MenuMapping menu{};
+    DebugModeMapping debugMode{};
+    BatteryGaugeMapping batteryGauge{};
     FftVisualMapping fftVisuals{};
     DropWaveMapping dropWave{};
     TotalEnergyWaveMapping totalEnergyWave{};
@@ -315,11 +410,24 @@ struct Config {
 };
 
 inline constexpr Config config{};
+static_assert(Totem::Data::mainMenuPositionCount <=
+              Totem::LedDisplay::Animations::RadialMenuSpec::maximumItems);
+static_assert(config.menu.indicator.itemCount ==
+              Totem::Data::mainMenuPositionCount);
+static_assert(config.menu.requestId != config.brightness.indicatorRequestId,
+              "Menu and gauge animations need distinct request IDs");
+static_assert(config.brightness.indicatorRequestId ==
+                  config.batteryGauge.requestId,
+              "UI gauges must share one request ID so a new gauge replaces "
+              "the previous one");
 inline constexpr size_t wheelEventQueueSize = 8;
 inline constexpr size_t beatEventQueueSize = 8;
 inline constexpr size_t fftFrameQueueSize = 2;
 inline constexpr size_t peakEventQueueSize = 8;
 inline constexpr size_t buttonEventQueueSize = 4;
+inline constexpr size_t dialEventQueueSize = 4;
+inline constexpr size_t menuEventQueueSize = 8;
+inline constexpr size_t batteryStatusQueueSize = 2;
 
 namespace detail {
 
@@ -338,18 +446,34 @@ inline Totem::Queue::Platform::Storage<Totem::AudioFft::PeakEvent,
 inline Totem::Queue::Platform::Storage<Totem::Data::ButtonEvent,
                                        buttonEventQueueSize>
     buttonEventQueueStorage{};
+inline Totem::Queue::Platform::Storage<Totem::Data::DialEvent,
+                                       dialEventQueueSize>
+    dialEventQueueStorage{};
+inline Totem::Queue::Platform::Storage<Totem::Data::MenuEvent,
+                                       menuEventQueueSize>
+    menuEventQueueStorage{};
+inline Totem::Queue::Platform::Storage<
+    Totem::BatteryMonitor::BatteryStatusEvent, batteryStatusQueueSize>
+    batteryStatusQueueStorage{};
 inline Totem::Queue::Handle wheelEventQueue = nullptr;
 inline Totem::Queue::Handle beatEventQueue = nullptr;
 inline Totem::Queue::Handle fftFrameQueue = nullptr;
 inline Totem::Queue::Handle peakEventQueue = nullptr;
 inline Totem::Queue::Handle buttonEventQueue = nullptr;
+inline Totem::Queue::Handle dialEventQueue = nullptr;
+inline Totem::Queue::Handle menuEventQueue = nullptr;
+inline Totem::Queue::Handle batteryStatusQueue = nullptr;
 inline Totem::PubSubBackend::SubscriberKey wheelSubscription = 0;
 inline Totem::PubSubBackend::SubscriberKey beatSubscription = 0;
 inline Totem::PubSubBackend::SubscriberKey fftSubscription = 0;
 inline Totem::PubSubBackend::SubscriberKey peakSubscription = 0;
 inline Totem::PubSubBackend::SubscriberKey buttonSubscription = 0;
+inline Totem::PubSubBackend::SubscriberKey dialSubscription = 0;
+inline Totem::PubSubBackend::SubscriberKey menuSubscription = 0;
+inline Totem::PubSubBackend::SubscriberKey batteryStatusSubscription = 0;
 inline Totem::PubSubBackend::SubscriberKey animationSubscription = 0;
 inline bool calibrateAudioCommandRegistered = false;
+inline bool debugModeCommandRegistered = false;
 inline Angle<uint16_t> wheelOffset{};
 inline bool wheelOffsetDirty = false;
 inline bool wheelIndicatorDirty = false;
@@ -380,6 +504,8 @@ inline Totem::AudioFft::BeatEventKind lastBeatKind =
 inline std::array<uint32_t, Totem::AudioFft::peakGroupCount> lastPeakWaveMs{};
 inline std::array<uint32_t, Totem::AudioFft::peakGroupCount> lastIoPeakMs{};
 inline uint32_t randomState = 0xC0FFEE23UL;
+inline Totem::BatteryMonitor::BatteryStatusEvent latestBatteryStatus{};
+inline bool hasBatteryStatus = false;
 
 inline Angle<uint8_t> scaleToCommandAngle(Angle<uint16_t> angle,
                                           float turnsPerTurn) {
@@ -579,6 +705,59 @@ inline ReturnCode publishLayerOpacity(Totem::LedDisplay::Layer layer,
     return Totem::LedDisplay::publishAnimationCommand(cmd);
 }
 
+// Add future debug-mode startup effects at this lifecycle seam.
+inline ReturnCode onDebugModeStart() {
+    FAIL_IF_UNEXPECTED_FWD(
+        wheelCmd,
+        Totem::LedDisplay::Animations::WheelIndicatorCommand::makeCommand(
+            config.debugMode.wheelIndicator, config.debugMode.wheelRequestId),
+        "Failed to build debug-mode wheel animation");
+
+    auto ret = publishLayerActive(Totem::LedDisplay::Layer::Wheel, true);
+    ret.combine(Totem::LedDisplay::publishAnimationPlayCommand(wheelCmd));
+    return ret;
+}
+
+// Add future debug-mode shutdown effects at this lifecycle seam.
+inline ReturnCode onDebugModeStop() {
+    FAIL_IF_UNEXPECTED_FWD(stopCmd,
+                           Totem::LedDisplay::makeStopAnimationCommand(
+                               config.debugMode.wheelRequestId),
+                           "Failed to build debug-mode wheel stop command");
+
+    auto ret = Totem::LedDisplay::publishAnimationCommand(stopCmd);
+    ret.combine(publishLayerActive(Totem::LedDisplay::Layer::Wheel, false));
+    return ret;
+}
+
+inline MasterDebugMode::Mode<onDebugModeStart, onDebugModeStop> debugMode{};
+
+[[nodiscard]] inline bool debugModeActive() {
+    return debugMode.active();
+}
+
+inline ReturnCode startDebugMode() {
+    if (debugModeActive()) {
+        return OK();
+    }
+    FAIL_IF_ERR_FWD(debugMode.start(), "Failed to start master debug mode");
+    _log_i("Master debug mode started");
+    return OK();
+}
+
+inline ReturnCode stopDebugMode() {
+    if (!debugModeActive()) {
+        return OK();
+    }
+    FAIL_IF_ERR_FWD(debugMode.stop(), "Failed to stop master debug mode");
+    _log_i("Master debug mode stopped");
+    return OK();
+}
+
+inline ReturnCode toggleDebugMode() {
+    return debugModeActive() ? stopDebugMode() : startDebugMode();
+}
+
 inline ReturnCode publishLayerSwap(Totem::LedDisplay::Layer first,
                                    Totem::LedDisplay::Layer second,
                                    uint16_t durationMs) {
@@ -601,10 +780,13 @@ inline ReturnCode publishLayerStartupState() {
                                    config.layers.effectActive));
     ret.combine(publishLayerActive(Totem::LedDisplay::Layer::TransientEffect,
                                    config.layers.transientEffectActive));
-    ret.combine(publishLayerActive(Totem::LedDisplay::Layer::Wheel,
-                                   config.layers.wheelActive));
+    ret.combine(
+        publishLayerActive(Totem::LedDisplay::Layer::Wheel,
+                           config.layers.wheelActive || debugModeActive()));
     ret.combine(publishLayerActive(Totem::LedDisplay::Layer::Debug,
                                    config.layers.debugActive));
+    ret.combine(publishLayerActive(Totem::LedDisplay::Layer::UI,
+                                   config.layers.uiActive));
     if (!ret.ok()) {
         return ret;
     }
@@ -956,6 +1138,76 @@ onButtonEnvelope(void * /*unused*/,
 }
 
 inline ReturnCode
+onDialEnvelope(void * /*unused*/,
+               const Totem::PubSubBackend::Envelope &envelope) {
+    FAIL_IF_UNEXPECTED_FWD(event,
+                           envelope.getPayloadAs<Totem::Data::DialEvent>(),
+                           "Failed to decode orchestrated dial event");
+
+    if (dialEventQueue == nullptr) {
+        _log_w("Dropping dial event before orchestration queue is ready");
+        return OK();
+    }
+
+    auto ret = Totem::Queue::Platform::send(dialEventQueue, &event, 0);
+    if (!ret.ok()) {
+        _log_w("Dropping dial event: orchestration queue is full");
+    }
+    return OK();
+}
+
+inline ReturnCode
+onMenuEnvelope(void * /*unused*/,
+               const Totem::PubSubBackend::Envelope &envelope) {
+    FAIL_IF_UNEXPECTED_FWD(event,
+                           envelope.getPayloadAs<Totem::Data::MenuEvent>(),
+                           "Failed to decode orchestrated menu event");
+
+    if (menuEventQueue == nullptr) {
+        _log_w("Dropping menu event before orchestration queue is ready");
+        return OK();
+    }
+
+    auto ret = Totem::Queue::Platform::send(menuEventQueue, &event, 0);
+    if (!ret.ok()) {
+        _log_w("Dropping menu event: orchestration queue is full");
+    }
+    return OK();
+}
+
+inline ReturnCode
+onBatteryStatusEnvelope(void * /*unused*/,
+                        const Totem::PubSubBackend::Envelope &envelope) {
+    if (envelope.header.source !=
+        static_cast<uint16_t>(NodeData::PubSub::NodeId::Power)) {
+        _log_w("Ignoring battery status from non-power node=%u",
+               static_cast<unsigned>(envelope.header.source));
+        return OK();
+    }
+    FAIL_IF_UNEXPECTED_FWD(
+        event,
+        envelope.getPayloadAs<Totem::BatteryMonitor::BatteryStatusEvent>(),
+        "Failed to decode orchestrated battery status");
+
+    if (batteryStatusQueue == nullptr) {
+        _log_w("Dropping battery status before orchestration queue is ready");
+        return OK();
+    }
+
+    auto ret = Totem::Queue::Platform::send(batteryStatusQueue, &event, 0);
+    if (!ret.ok()) {
+        Totem::BatteryMonitor::BatteryStatusEvent discarded{};
+        (void)Totem::Queue::Platform::receive(batteryStatusQueue, &discarded,
+                                              0);
+        ret = Totem::Queue::Platform::send(batteryStatusQueue, &event, 0);
+    }
+    if (!ret.ok()) {
+        _log_w("Dropping battery status: orchestration queue is full");
+    }
+    return OK();
+}
+
+inline ReturnCode
 onAnimationStopEnvelope(void * /*unused*/,
                         const Totem::PubSubBackend::Envelope &envelope) {
     FAIL_IF_UNEXPECTED_FWD(
@@ -995,6 +1247,19 @@ inline CommandDesc calibrateAudioCmd = {
     .description = "Publish the audio calibration button event",
     .args = {},
     .handler = handleCalibrateAudioCommand,
+    .subcommands = {},
+};
+
+inline ReturnCode handleDebugModeCommand(CommandDesc::ParsedArgs /*args*/,
+                                         void * /*ctx*/) {
+    return toggleDebugMode();
+}
+
+inline CommandDesc debugModeCmd = {
+    .name = "debug",
+    .description = "Toggle master debug mode",
+    .args = {},
+    .handler = handleDebugModeCommand,
     .subcommands = {},
 };
 
@@ -1045,6 +1310,34 @@ inline ReturnCode begin() {
                          "Failed to create master orchestration button queue");
         }
         detail::buttonEventQueue = *queueResult;
+    }
+    if (detail::dialEventQueue == nullptr) {
+        auto queueResult =
+            Totem::Queue::Platform::create(detail::dialEventQueueStorage);
+        if (!queueResult) {
+            FAIL_ERR_FWD(queueResult.error(),
+                         "Failed to create master orchestration dial queue");
+        }
+        detail::dialEventQueue = *queueResult;
+    }
+    if (detail::menuEventQueue == nullptr) {
+        auto queueResult =
+            Totem::Queue::Platform::create(detail::menuEventQueueStorage);
+        if (!queueResult) {
+            FAIL_ERR_FWD(queueResult.error(),
+                         "Failed to create master orchestration menu queue");
+        }
+        detail::menuEventQueue = *queueResult;
+    }
+    if (detail::batteryStatusQueue == nullptr) {
+        auto queueResult =
+            Totem::Queue::Platform::create(detail::batteryStatusQueueStorage);
+        if (!queueResult) {
+            FAIL_ERR_FWD(
+                queueResult.error(),
+                "Failed to create master orchestration battery status queue");
+        }
+        detail::batteryStatusQueue = *queueResult;
     }
 
     FAIL_IF_NOT(PubSubService::configured(), ERR(CoreError, InvalidState),
@@ -1099,6 +1392,37 @@ inline ReturnCode begin() {
             "Failed to subscribe master orchestration to button events");
         detail::buttonSubscription = sub;
     }
+    if (detail::dialSubscription == 0) {
+        FAIL_IF_UNEXPECTED_FWD(
+            sub,
+            PubSubService::get().subscribe(
+                "master-orch-dial",
+                {.subscriber = nullptr, .callback = detail::onDialEnvelope},
+                PubSubService::Topic::Dial),
+            "Failed to subscribe master orchestration to dial events");
+        detail::dialSubscription = sub;
+    }
+    if (detail::menuSubscription == 0) {
+        FAIL_IF_UNEXPECTED_FWD(
+            sub,
+            PubSubService::get().subscribe(
+                "master-orch-menu",
+                {.subscriber = nullptr, .callback = detail::onMenuEnvelope},
+                PubSubService::Topic::Menu),
+            "Failed to subscribe master orchestration to menu events");
+        detail::menuSubscription = sub;
+    }
+    if (detail::batteryStatusSubscription == 0) {
+        FAIL_IF_UNEXPECTED_FWD(
+            sub,
+            PubSubService::get().subscribe(
+                "master-orch-battery",
+                {.subscriber = nullptr,
+                 .callback = detail::onBatteryStatusEnvelope},
+                PubSubService::Topic::Power),
+            "Failed to subscribe master orchestration to battery status");
+        detail::batteryStatusSubscription = sub;
+    }
     if (detail::animationSubscription == 0) {
         FAIL_IF_UNEXPECTED_FWD(
             sub,
@@ -1119,8 +1443,16 @@ inline ReturnCode begin() {
         (void)commandKey;
         detail::calibrateAudioCommandRegistered = true;
     }
+    if (!detail::debugModeCommandRegistered) {
+        FAIL_IF_UNEXPECTED_FWD(commandKey,
+                               CommandRegistrarService::get().registerCommand(
+                                   detail::debugModeCmd),
+                               "Failed to register /debug command");
+        (void)commandKey;
+        detail::debugModeCommandRegistered = true;
+    }
     _log_i("Master orchestration subscribed to wheel, beat, FFT, peak, button, "
-           "and animation events");
+           "dial, menu, battery, and animation events");
     return OK();
 }
 
@@ -1132,6 +1464,124 @@ inline ReturnCode handleWheel(const Totem::Wheel::WheelState &state) {
     detail::wheelOffsetDirty = true;
     detail::wheelIndicatorDirty = true;
     return OK();
+}
+
+inline ReturnCode handleDial(const Totem::Data::DialEvent &event) {
+    if (!config.brightness.publish || event.dial != PeripheralDial::Main) {
+        return OK();
+    }
+    if (event.position < config.brightness.minimumPosition ||
+        event.position > config.brightness.maximumPosition) {
+        _log_w("Ignoring brightness dial position outside configured range: "
+               "%ld",
+               static_cast<long>(event.position));
+        return OK();
+    }
+
+    FAIL_IF_UNEXPECTED_FWD(
+        brightnessCmd, Totem::LedDisplay::makeBrightnessCommand(event.value),
+        "Failed to build orchestrated display brightness command");
+    auto gaugeConfig = config.brightness.indicator;
+    gaugeConfig.value = static_cast<uint16_t>(
+        event.position - config.brightness.minimumPosition);
+    gaugeConfig.maximumValue = static_cast<uint16_t>(
+        config.brightness.maximumPosition - config.brightness.minimumPosition);
+    FAIL_IF_UNEXPECTED_FWD(
+        indicatorCmd,
+        Totem::LedDisplay::Animations::RadialGaugeCommand::makeCommand(
+            gaugeConfig, config.brightness.indicatorRequestId,
+            config.brightness.indicatorLifetimeMs),
+        "Failed to build orchestrated brightness gauge command");
+
+    auto ret = Totem::LedDisplay::publishAnimationCommand(brightnessCmd);
+    ret.combine(Totem::LedDisplay::publishAnimationPlayCommand(indicatorCmd));
+    if (ret.ok()) {
+        _log_i("Published display brightness=%u level=%ld",
+               static_cast<unsigned>(event.value),
+               static_cast<long>(event.position));
+    }
+    return ret;
+}
+
+inline ReturnCode handleMenu(const Totem::Data::MenuEvent &event,
+                             uint32_t nowMs) {
+    if (event.menu != PeripheralMenu::Main) {
+        return OK();
+    }
+
+    auto ret = OK();
+    if (config.menu.publish) {
+        if (event.event == Totem::Data::MenuEventType::Selected) {
+            FAIL_IF_UNEXPECTED_FWD(
+                stopCmd,
+                Totem::LedDisplay::makeStopAnimationCommand(
+                    config.menu.requestId),
+                "Failed to build radial menu stop command");
+            ret.combine(Totem::LedDisplay::publishAnimationCommand(stopCmd));
+        } else {
+            const auto itemIndex = static_cast<int64_t>(event.position) -
+                                   config.menu.minimumPosition;
+            if (itemIndex < 0 ||
+                itemIndex >= config.menu.indicator.itemCount) {
+                _log_w("Ignoring radial menu position outside configured "
+                       "range: %ld",
+                       static_cast<long>(event.position));
+            } else {
+                auto menuConfig = config.menu.indicator;
+                menuConfig.selectedItem = static_cast<uint8_t>(itemIndex);
+                FAIL_IF_UNEXPECTED_FWD(
+                    menuCmd,
+                    Totem::LedDisplay::Animations::RadialMenuCommand::
+                        makeCommand(menuConfig, config.menu.requestId),
+                    "Failed to build orchestrated radial menu command");
+                ret.combine(
+                    Totem::LedDisplay::publishAnimationPlayCommand(menuCmd));
+            }
+        }
+    }
+
+    if (event.event == Totem::Data::MenuEventType::Selected) {
+        switch (event.item) {
+        case Totem::Data::MenuItem::Next:
+            ret.combine(detail::stageNextFftVisual(nowMs));
+            break;
+        case Totem::Data::MenuItem::Debug:
+            ret.combine(detail::toggleDebugMode());
+            break;
+        default:
+            break;
+        }
+    }
+
+    if (!config.batteryGauge.publish ||
+        event.event != Totem::Data::MenuEventType::Selected ||
+        event.item != Totem::Data::MenuItem::Battery) {
+        return ret;
+    }
+    if (!detail::hasBatteryStatus ||
+        !Totem::BatteryMonitor::hasUsableStateOfCharge(
+            detail::latestBatteryStatus)) {
+        _log_w("Battery menu selected without a fresh usable estimate");
+        return ret;
+    }
+
+    auto gaugeConfig = config.batteryGauge.indicator;
+    gaugeConfig.value =
+        detail::latestBatteryStatus.stateOfChargePartsPerThousand;
+    FAIL_IF_UNEXPECTED_FWD(
+        gaugeCmd,
+        Totem::LedDisplay::Animations::RadialGaugeCommand::makeCommand(
+            gaugeConfig, config.batteryGauge.requestId,
+            config.batteryGauge.lifetimeMs),
+        "Failed to build orchestrated battery gauge command");
+    ret.combine(Totem::LedDisplay::publishAnimationPlayCommand(gaugeCmd));
+
+    const auto charge =
+        detail::latestBatteryStatus.stateOfChargePartsPerThousand;
+    _log_i("Published battery gauge=%u.%u%%",
+           static_cast<unsigned>(charge / 10U),
+           static_cast<unsigned>(charge % 10U));
+    return ret;
 }
 
 inline ReturnCode handleTotalEnergyWave(const Totem::AudioFft::FftFrame &frame,
@@ -1356,6 +1806,44 @@ inline ReturnCode handleButton(const Totem::Data::ButtonEvent &event,
 }
 
 inline ReturnCode work(uint32_t nowMs, bool allowNormalOperation = true) {
+    if (detail::batteryStatusQueue != nullptr) {
+        Totem::BatteryMonitor::BatteryStatusEvent event{};
+        while (Totem::Queue::Platform::receive(detail::batteryStatusQueue,
+                                               &event, 0)
+                   .ok()) {
+            detail::latestBatteryStatus = event;
+            detail::hasBatteryStatus = true;
+        }
+    }
+
+    if (detail::menuEventQueue != nullptr) {
+        Totem::Data::MenuEvent event{};
+        while (
+            Totem::Queue::Platform::receive(detail::menuEventQueue, &event, 0)
+                .ok()) {
+            if (allowNormalOperation) {
+                FAIL_IF_ERR_FWD(handleMenu(event, nowMs),
+                                "Failed to handle queued menu event");
+            }
+        }
+    }
+
+    if (detail::dialEventQueue != nullptr) {
+        Totem::Data::DialEvent event{};
+        Totem::Data::DialEvent latest{};
+        bool hasEvent = false;
+        while (
+            Totem::Queue::Platform::receive(detail::dialEventQueue, &event, 0)
+                .ok()) {
+            latest = event;
+            hasEvent = true;
+        }
+        if (allowNormalOperation && hasEvent) {
+            FAIL_IF_ERR_FWD(handleDial(latest),
+                            "Failed to handle queued dial event");
+        }
+    }
+
     if (detail::beatEventQueue != nullptr) {
         Totem::AudioFft::BeatEvent beat{};
         while (Totem::Queue::Platform::receive(detail::beatEventQueue, &beat, 0)

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Platform/Hardware.hpp"
+#include "StatusLed/Interfaces/Types.hpp"
 #include <cstdint>
 
 namespace Totem::StatusLed {
@@ -32,10 +33,15 @@ struct Config {
     ColorOrder colorOrder = ColorOrder::GRB;
     OutputBackend backend = OutputBackend::RmtWs2812;
     SplitRgbGpioConfig splitRgbGpio{};
+    BrightnessMultiplier brightness = BrightnessMultiplier::fromPercent(30);
 
     [[nodiscard]] constexpr bool validate() const {
         if (!configured) {
             return true;
+        }
+
+        if (!brightness.validate()) {
+            return false;
         }
 
         switch (backend) {

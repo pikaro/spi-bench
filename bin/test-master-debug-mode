@@ -1,0 +1,20 @@
+#!/bin/bash
+
+set -euo pipefail
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+cd "$REPO_ROOT"
+
+mkdir -p build/host-tests
+"${CXX:-c++}" \
+    -std=c++23 \
+    -Wall \
+    -Wextra \
+    -Werror \
+    -I. \
+    -Iinclude \
+    -I.pio/libdeps/scratch/magic_enum/include \
+    test/master_debug_mode_logic.cpp \
+    -o build/host-tests/master_debug_mode_logic
+
+build/host-tests/master_debug_mode_logic

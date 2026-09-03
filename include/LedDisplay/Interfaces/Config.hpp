@@ -1,5 +1,6 @@
 #pragma once
 
+#include "LedDisplay/Interfaces/OutputConfig.hpp"
 #include "StaticConfig/LedDisplay.hpp"
 #include "StaticConfig/Stacks.hpp"
 #include "TaskController/Interfaces/Config.hpp"
@@ -10,10 +11,11 @@ namespace Totem::LedDisplay {
 struct Config : LedDisplayConfig {
     uint8_t globalBrightness = 255;
     bool temporalDithering = true;
-    // Zero disables; interpreted after configured FastLED brightness.
-    uint8_t outputValueFloor = 10;
+    // Zero disables; evaluated against the effective output brightness.
+    uint8_t outputValueFloor = 0;
     uint8_t outputLumaFloor = 0;
     uint32_t frameBudgetUs = defaultFrameBudgetUs;
+    Sk9822OutputConfig sk9822{};
 
     Totem::TaskController::Config task{
         .name = "LedDisplay",
@@ -28,7 +30,8 @@ struct Config : LedDisplayConfig {
     };
 
     [[nodiscard]] bool validate() const {
-        return task.validate() && frameBudgetUs > 0;
+        return task.validate() && frameBudgetUs > 0 &&
+               (!sk9822SpiOutput || sk9822.validate());
     }
 };
 

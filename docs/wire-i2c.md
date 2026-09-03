@@ -33,10 +33,10 @@ The first concrete devices are:
 - `Pcf8574`: PCF8574-style 8-bit quasi-bidirectional GPIO expander.
 - `Mcp4661`: MCP4661 dual digital potentiometer with volatile wiper writes,
   EEPROM writes, increment/decrement commands, status reads, and TCON access.
-- `Ina2xx`: model-selected INA219/INA226 current and voltage monitoring with
-  periodic metrics, signed shunt/current/power values, independent bus-voltage
-  and current operating windows, and capability-checked INA226 ALERT-pin
-  support.
+- `Ina2xx`: model-selected INA219/INA226 current and voltage monitoring, with a
+  protected INA228 capability surface, periodic metrics, signed
+  shunt/current/power values, independent bus-voltage and current operating
+  windows, and capability-checked INA226 ALERT-pin support.
 
 These devices intentionally do not share the legacy API. They keep the working
 command sequences but replace singleton registries, `shared_ptr`, `unordered_map`,
@@ -50,9 +50,15 @@ identity behavior model-specific. INA226 startup verifies manufacturer and die
 IDs. INA219 has no identity register, so choosing INA219 states what is expected
 at the configured address rather than proving the silicon model.
 
+INA228 is the intended production target and is represented explicitly in the
+model and capability API. Its native 20-bit/24-bit/40-bit register backend is
+not implemented yet, so `begin()` with `Ina228` returns `NotSupported` instead
+of routing it through the incompatible INA219/INA226 16-bit helpers.
+
 The driver runs both devices in continuous shunt-and-bus conversion mode.
 `work(nowMs)` reads at `sampleIntervalMs`, using rollover-safe unsigned elapsed
-time. `sampleNow(nowMs)` forces a read. A failed transaction or device math
+time. `sampleNow(nowMs)` forces a read and returns the acquired sample through
+`std::expected<Ina2xxSample, ReturnCode>`. A failed transaction or device math
 overflow increments failure metrics and preserves the last valid sample;
 `latestSample()` returns `NotFinished` until the first valid sample exists.
 
@@ -84,14 +90,14 @@ model's calibration field. In particular, INA226 bit 15 is reserved, so its
 calibration value must fit `FS[14:0]`; the driver never relies on the device
 silently discarding an oversized high bit.
 
-Practical crossings in either window log a warning. Absolute crossings log an
-error and make the corresponding sample call return `Underflow` or `Overflow`.
+Practical crossings in either window log a warning and absolute crossings log
+an error. Both are successful measurements represented by `Ina2xxLimitState`;
+they do not turn `work()` or `sampleNow()` into repeated operational failures.
 Logs and the optional limit callback are emitted only when that measurement's
 classified state changes; `Ina2xxLimitEvent::measurement` distinguishes
-`BusVoltage` from `Current`. The error return remains present on every sample
-while an absolute excursion persists. Each measurement independently emits a
-`Normal` transition when it returns to its practical window. Raw shunt voltage
-remains available in samples and metrics, but is not an application limit.
+`BusVoltage` from `Current`. Each measurement independently emits a `Normal`
+transition when it returns to its practical window. Raw shunt voltage remains
+available in samples and metrics, but is not an application limit.
 
 The INA226 hardware ALERT facility is deliberately separate from that software
 window. The chip has one alert-limit register, so `hardwareAlert.function`
@@ -107,6 +113,13 @@ pending and I2C reads plus the user callback run from `work()` context.
 the callback must be installed before `begin()`, and the begin config must
 contain the matching hardware GPIO configuration. Limit callbacks are
 available on both models and must likewise be changed only while inactive.
+
+`setSampleCallback()` is available on both models for downstream semantic
+consumers such as `BatteryMonitor`. It runs exactly once for every successfully
+converted sample, after the latest sample, limit state, and metrics are updated.
+It runs for practical and absolute states but not after an I2C or device-math
+failure. The callback executes synchronously in `work()` context, must be
+bounded and non-blocking, and must never perform filesystem I/O.
 
 An abbreviated setup looks like this:
 
@@ -142,6 +155,12 @@ REPORT_IF_ERR(
             handleRailLimit(event);
         }),
     "Failed to set rail limit callback");
+REPORT_IF_ERR(
+    railMonitor.setSampleCallback(
+        [](const Totem::Wire::I2C::Ina2xxSample &sample) {
+            forwardSuccessfulSample(sample);
+        }),
+    "Failed to set rail sample callback");
 REPORT_IF_ERR(railMonitor.begin(railConfig), "Failed to start rail monitor");
 
 // Call from the owning task loop.
@@ -164,6 +183,17 @@ and at most eight characters. Current INA219/INA226 metrics are:
 | `busState`, `curState` | gauges | independent bus-voltage/current window states |
 | `ageMs` | gauge | last-sample age |
 | `samples`, `fail`, `ovf`, `alerts` | counters | sampling and alert health |
+
+Capability and validity semantics are:
+
+| Model | Implemented | Supported capability surface | Per-sample validity |
+| --- | --- | --- | --- |
+| INA219 | yes | shunt, bus, current, power | those four bits after a successful sample |
+| INA226 | yes | INA219 set plus identity and hardware ALERT | measurement bits after a successful sample; identity/ALERT are device capabilities |
+| INA228 | backend pending | INA226 set plus temperature, energy, and charge | each measurement/accumulator bit will be set only when that sample contains a valid native reading |
+
+Zero temperature, energy, or charge is therefore a legitimate future INA228
+value. Availability is determined from `validCapabilities`, never from zero.
 
 Metric storage remains 32-bit. Checked 64-bit temporaries are used only while
 scaling products and calibration constants; the driver adds no 64-bit metric

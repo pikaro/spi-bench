@@ -17,6 +17,7 @@ def run_render(
     fps: int | None = None,
     mode: str | None = None,
     include_scratch: bool = False,
+    profile: str | None = None,
     root: str | pathlib.Path | None = None,
 ) -> pathlib.Path:
     root_path = pathlib.Path(root) if root is not None else repo_root()
@@ -38,6 +39,8 @@ def run_render(
         command += ["--mode", mode]
     if include_scratch:
         command += ["--include-scratch"]
+    if profile is not None:
+        command[1:1] = ["--profile", profile]
 
     subprocess.run(command, check=True)
     return output_path

@@ -1,21 +1,26 @@
 #pragma once
 
 #include "LedTopology/Interfaces/Types.hpp"
-#include "StaticConfig/LedDisplay.hpp"
 #include <cstddef>
 #include <cstdint>
 
 namespace Totem::LedTopology::detail {
 
 struct Umbrella {
-    static constexpr size_t stripCount = LedDisplayConfig::stripCount;
-    static constexpr size_t segmentsPerStrip =
-        LedDisplayConfig::segmentsPerStrip;
-    static constexpr size_t ledsPerSegment = LedDisplayConfig::ledsPerSegment;
-    static constexpr size_t ledsPerStrip = LedDisplayConfig::ledsPerStrip;
-    static constexpr size_t spokeCount = LedDisplayConfig::spokeCount;
-    static constexpr size_t ringCount = LedDisplayConfig::ringCount;
-    static constexpr size_t totalPixelCount = LedDisplayConfig::totalPixelCount;
+    static constexpr size_t stripCount = 4;
+    static constexpr size_t segmentsPerStrip = 4;
+    static constexpr size_t ledsPerSegment = 46;
+    static constexpr size_t ledsPerStrip = segmentsPerStrip * ledsPerSegment;
+    static constexpr size_t spokeCount = stripCount * segmentsPerStrip;
+    static constexpr size_t ringCount = ledsPerSegment;
+    static constexpr size_t totalPixelCount = stripCount * ledsPerStrip;
+
+    // Approximate geometry of the legacy WS2812B installation.
+    static constexpr uint16_t centerGapDiameterMm = 300;
+    static constexpr uint16_t radialStripLengthMm = 300;
+    static constexpr uint16_t innerRadiusMm = centerGapDiameterMm / 2U;
+    static constexpr uint16_t outerRadiusMm =
+        innerRadiusMm + radialStripLengthMm;
 
     [[nodiscard]] static constexpr PhysicalPixelIndex
     physicalFor(uint8_t spoke, uint8_t radial) {

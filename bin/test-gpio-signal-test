@@ -1,0 +1,18 @@
+#!/bin/bash
+
+set -euo pipefail
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+cd "$REPO_ROOT"
+
+mkdir -p build/host-tests
+"${CXX:-c++}" \
+    -std=c++23 \
+    -Wall \
+    -Wextra \
+    -Werror \
+    -Iinclude \
+    test/gpio_signal_test_logic.cpp \
+    -o build/host-tests/gpio_signal_test_logic
+
+build/host-tests/gpio_signal_test_logic

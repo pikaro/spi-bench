@@ -88,7 +88,7 @@ class AnimationEngine {
     };
 
     static_assert(sizeof(AnimationUpdateCommand) <=
-                      QueuedAnimationCommand::payloadBytes);
+                  QueuedAnimationCommand::payloadBytes);
     static_assert(sizeof(AnimationStopCommand) <=
                   QueuedAnimationCommand::payloadBytes);
     static_assert(sizeof(AnimationSetHueOffsetCommand) <=
@@ -425,8 +425,7 @@ class AnimationEngine {
         case QueuedAnimationCommandType::SetBrightness:
             return _setBrightness(queued.as<AnimationSetBrightnessCommand>());
         case QueuedAnimationCommandType::SetLayerActive:
-            return _setLayerActive(
-                queued.as<AnimationSetLayerActiveCommand>());
+            return _setLayerActive(queued.as<AnimationSetLayerActiveCommand>());
         case QueuedAnimationCommandType::SetLayerOpacity:
             return _setLayerOpacity(
                 queued.as<AnimationSetLayerOpacityCommand>());
@@ -493,6 +492,7 @@ class AnimationEngine {
             slotIndex = reservedSlotIndex;
         }
 
+        _layers.prepareForPlay(cmd.layer);
         auto &slot = _animations[slotIndex];
         slot.active = true;
         slot.requestId = cmd.requestId == 0 ? _nextRequestId() : cmd.requestId;
@@ -561,12 +561,12 @@ class AnimationEngine {
 
     ReturnCode _setHueOffset(const AnimationSetHueOffsetCommand &cmd) {
         _hueOffset.store(cmd.offset, std::memory_order_relaxed);
-        _log_i("Set LED hue offset raw=%u",
-               static_cast<unsigned>(cmd.offset));
+        _log_i("Set LED hue offset raw=%u", static_cast<unsigned>(cmd.offset));
         return OK();
     }
 
-    ReturnCode _setRotationOffset(const AnimationSetRotationOffsetCommand &cmd) {
+    ReturnCode
+    _setRotationOffset(const AnimationSetRotationOffsetCommand &cmd) {
         const auto offset = Angle<uint8_t>::fromRaw(cmd.offset);
         _rotationOffset.store(offset.value, std::memory_order_relaxed);
         _rebuildLogicalToLocalMap(offset);
@@ -803,7 +803,7 @@ class AnimationEngine {
                 Config::spokeCount);
             for (uint8_t radial = 0; radial < Config::ringCount; ++radial) {
                 const auto physical =
-                    LedTopology::Umbrella::physicalFor(rotatedSpoke, radial);
+                    LedTopology::Surface::physicalFor(rotatedSpoke, radial);
                 auto local = Primitives::Canvas::invalidLocalPixel;
                 if constexpr (Config::ledGroupCount > 1) {
                     if (LedTopology::OwnedPixels::owns(physical)) {
@@ -848,7 +848,8 @@ class AnimationEngine {
     bool _pubSubInputSubscribed = false;
     mutable ::platform::Spinlock _inputLock = ::platform::create_spinlock();
 
-    STANDARD_QUEUE(_commandQueue, QueuedAnimationCommand, Config::commandQueueSize)
+    STANDARD_QUEUE(_commandQueue, QueuedAnimationCommand,
+                   Config::commandQueueSize)
 };
 
 } // namespace Totem::LedDisplay::detail

@@ -13,6 +13,10 @@ using detail::DefaultTcpConnection;
 using detail::DefaultTcpListener;
 using detail::DefaultUdpSocket;
 
-namespace Commands = detail;
+namespace Commands {
+
+using detail::registerCommands;
+
+} // namespace Commands
 
 } // namespace Totem::Network
